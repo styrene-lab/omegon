@@ -754,6 +754,10 @@ impl ConversationState {
         }
     }
 
+    pub fn replay_messages(&self) -> &[AgentMessage] {
+        &self.canonical
+    }
+
     pub fn set_slim_mode(&mut self, slim: bool) {
         self.slim_mode = slim;
     }

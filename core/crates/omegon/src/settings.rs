@@ -1855,12 +1855,127 @@ fn global_active_profile_path() -> Option<std::path::PathBuf> {
         .or_else(|| dirs::config_dir().map(|d| d.join("omegon/active-profile.json")))
 }
 
+fn read_active_profile_selection(
+    path: &std::path::Path,
+    registry: &ProfileRegistry,
+) -> Option<ActiveProfileSelection> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let selection = serde_json::from_str::<ActiveProfileSelection>(&content).ok()?;
+    registry.resolve_explicit(&selection)?;
+    Some(selection)
+}
+
+pub fn parse_scoped_profile_selection(value: &str) -> Option<ActiveProfileSelection> {
+    let (scope, id) = value.split_once(':')?;
+    if id.trim().is_empty() || !matches!(scope, "project" | "user" | "built-in") {
+        return None;
+    }
+    Some(ActiveProfileSelection {
+        id: id.to_string(),
+        scope: Some(scope.to_string()),
+    })
+}
+
+pub fn active_profile_selection(cwd: &std::path::Path) -> ActiveProfileSelection {
+    let registry = ProfileRegistry::discover(cwd);
+    if let Some(path) = project_active_profile_path_from_registry(&registry)
+        && let Some(selection) = read_active_profile_selection(&path, &registry)
+    {
+        return selection;
+    }
+
+    if let Some(entry) = registry.entries.iter().find(|entry| {
+        entry.scope == ProfileRegistryScope::Project
+            && entry.source_kind == ProfileRegistrySourceKind::LegacySingleton
+    }) {
+        return ActiveProfileSelection {
+            id: entry.id.clone(),
+            scope: Some(entry.scope.as_str().to_string()),
+        };
+    }
+
+    if let Some(path) = global_active_profile_path()
+        && let Some(selection) = read_active_profile_selection(&path, &registry)
+    {
+        return selection;
+    }
+
+    for (scope, kind) in [
+        (
+            ProfileRegistryScope::User,
+            ProfileRegistrySourceKind::LegacySingleton,
+        ),
+        (
+            ProfileRegistryScope::BuiltIn,
+            ProfileRegistrySourceKind::BuiltInDefault,
+        ),
+    ] {
+        if let Some(entry) = registry
+            .entries
+            .iter()
+            .find(|entry| entry.scope == scope && entry.source_kind == kind)
+        {
+            return ActiveProfileSelection {
+                id: entry.id.clone(),
+                scope: Some(entry.scope.as_str().to_string()),
+            };
+        }
+    }
+
+    ActiveProfileSelection {
+        id: "built-in-default".into(),
+        scope: Some("built-in".into()),
+    }
+}
+
+pub fn copy_profile(
+    cwd: &std::path::Path,
+    source: &ActiveProfileSelection,
+    target_scope: ProfileRegistryScope,
+    target_id: &str,
+) -> anyhow::Result<std::path::PathBuf> {
+    if target_scope == ProfileRegistryScope::BuiltIn {
+        anyhow::bail!("built-in profiles are read-only");
+    }
+    let target_id = target_id.trim();
+    if target_id.is_empty()
+        || target_id.contains('/')
+        || target_id.contains('\\')
+        || target_id == "."
+        || target_id == ".."
+    {
+        anyhow::bail!("profile id must be a non-empty file-safe name");
+    }
+    let registry = ProfileRegistry::discover(cwd);
+    let entry = registry
+        .find_explicit(source)
+        .ok_or_else(|| anyhow::anyhow!("profile `{}` was not found", source.id))?;
+    let dir = match target_scope {
+        ProfileRegistryScope::Project => project_profiles_dir(cwd),
+        ProfileRegistryScope::User => global_profiles_dir()
+            .ok_or_else(|| anyhow::anyhow!("user profile directory is unavailable"))?,
+        ProfileRegistryScope::BuiltIn => unreachable!(),
+    };
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("{target_id}.json"));
+    if path.exists() {
+        anyhow::bail!("profile `{target_id}` already exists");
+    }
+    let mut profile = entry.profile.clone();
+    profile.name = Some(target_id.to_string());
+    crate::filelock::atomic_write_locked(
+        &path,
+        (serde_json::to_string_pretty(&profile)? + "\n").as_bytes(),
+    )?;
+    Ok(path)
+}
+
 pub fn save_project_active_profile_selection(
     cwd: &std::path::Path,
     selection: &ActiveProfileSelection,
 ) -> anyhow::Result<std::path::PathBuf> {
     let registry = ProfileRegistry::discover(cwd);
-    if registry.find_selected(selection).is_none() {
+    if registry.resolve_explicit(selection).is_none() {
         let scope = selection.scope.as_deref().unwrap_or("any scope");
         anyhow::bail!("profile `{}` was not found in {}", selection.id, scope);
     }
@@ -1869,7 +1984,10 @@ pub fn save_project_active_profile_selection(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&path, serde_json::to_string_pretty(selection)? + "\n")?;
+    crate::filelock::atomic_write_locked(
+        &path,
+        (serde_json::to_string_pretty(selection)? + "\n").as_bytes(),
+    )?;
     Ok(path)
 }
 
@@ -1921,6 +2039,26 @@ impl ProfileRegistry {
         });
         registry.compute_shadows();
         registry
+    }
+
+    pub fn find_explicit(
+        &self,
+        selection: &ActiveProfileSelection,
+    ) -> Option<&ProfileRegistryEntry> {
+        self.find_selected(selection)
+    }
+
+    /// Resolve one explicit registry selection without mutating active-profile state.
+    pub fn resolve_explicit(&self, selection: &ActiveProfileSelection) -> Option<LoadedProfile> {
+        let entry = self.find_selected(selection)?;
+        let mut profile = entry.profile.clone();
+        if profile.compact_label().is_none() {
+            profile.name = Some(entry.id.clone());
+        }
+        Some(LoadedProfile {
+            profile,
+            source: entry.source(),
+        })
     }
 
     pub fn resolve_active(&self) -> LoadedProfile {
@@ -2355,6 +2493,56 @@ fn custom_posture_dirs(cwd: &std::path::Path) -> Vec<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copy_profile_creates_editable_project_entry_without_selecting_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let source = ActiveProfileSelection {
+            id: "built-in-default".into(),
+            scope: Some("built-in".into()),
+        };
+
+        let path = copy_profile(tmp.path(), &source, ProfileRegistryScope::Project, "review")
+            .expect("copy built-in profile");
+
+        assert!(path.ends_with(".omegon/profiles/review.json"));
+        let copied: Profile = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(copied.name.as_deref(), Some("review"));
+        assert!(!tmp.path().join(".omegon/active-profile.json").exists());
+        assert!(
+            copy_profile(
+                tmp.path(),
+                &source,
+                ProfileRegistryScope::Project,
+                "../escape"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn resolve_explicit_profile_does_not_change_active_selection() {
+        let tmp = tempfile::tempdir().unwrap();
+        let profile_dir = tmp.path().join(".omegon/profiles");
+        std::fs::create_dir_all(&profile_dir).unwrap();
+        std::fs::write(
+            profile_dir.join("review.json"),
+            r#"{"name":"review","thinkingLevel":"high"}"#,
+        )
+        .unwrap();
+
+        let registry = ProfileRegistry::discover(tmp.path());
+        let loaded = registry
+            .resolve_explicit(&ActiveProfileSelection {
+                id: "review".into(),
+                scope: Some("project".into()),
+            })
+            .expect("explicit profile");
+
+        assert_eq!(loaded.profile.compact_label(), Some("review"));
+        assert!(!tmp.path().join(".omegon/active-profile.json").exists());
+    }
 
     #[test]
     fn posture_default_is_architect() {

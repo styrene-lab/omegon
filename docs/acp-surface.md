@@ -81,6 +81,10 @@ The ACP model selector is registry-driven via `ModelRegistry::global()`, with lo
 
 ACP startup treats the launch `--model` as a fallback when no profile model exists, not as an unconditional override. This prevents editor launch config from clobbering the user's last model choice.
 
+`_runtime/status` now also exposes `acp.turn.phase` (`idle`, `running`, `cancelling`, or `failed`) and a redacted `acp.turn.last_error`. Reconnecting clients should query this state rather than infer whether a turn is still active from stream timing.
+
+ACP does not currently advertise `load_session`: persisted transcript hydration and replay are not implemented yet, so clients cannot mistake the shallow internal attach path for full resume support.
+
 ### Tool/UI behavior
 
 Running tool cards are expandable through the same detail surface as completed cards. Ctrl+O/toggle-pin prefers:
@@ -134,29 +138,17 @@ Recommended client behavior:
 
 ## Known remaining gaps
 
-### P0: line and symbol slicing
+### Completed: line and symbol slicing
 
-Zed can encode selections and symbols through URI fragments:
+Zed selection and symbol URI fragments (`#L10`, `#L10:20`, and `#L10-L20`) are resolved to bounded line ranges before prompt injection.
 
-- `file:///path#L10`
-- `file:///path#L10:20`
-- `file:///path#L10-L20`
-- `zed:///agent/selection?path=/path#L10:20`
-- `zed:///agent/symbol/name?path=/path&symbol=name#L10:20`
+### Completed: directory mentions
 
-Omegon currently reads the full file once the path is resolved. Correct behavior is to slice bounded line ranges for selections, and use the symbol range as the primary injected content for symbol mentions.
+Resolved directory resources produce a bounded listing rooted in the session workspace, excluding common generated and metadata directories.
 
-### P0: directory mentions
+### Completed: host read fallback clarity
 
-A directory mention with no file label should not vanish. If a `file:///path/` or `zed:///agent/directory?path=...` resource resolves to a directory, Omegon should inject a bounded directory listing/tree instead of file contents.
-
-### P0: host read fallback clarity
-
-Host delegated file reads can fail even when local reads would succeed. The current path fallback is useful, but the canonical policy should be explicit:
-
-- use host reads for client-owned virtual resources or when local path access is unavailable;
-- use local fallback for local files when host read fails;
-- preserve exact path diagnostics in errors.
+When the host advertises `fs.readTextFile`, Omegon treats host permission denials and ordinary host read failures as authoritative. A direct local fallback is permitted only when the host method is unavailable at runtime and the target is an existing regular file; fallback use and its reason are reported in tool details.
 
 ### P1: virtual client resources
 
@@ -168,17 +160,17 @@ Virtual resources (`zed:///agent/diagnostics`, git diff, terminal selection, pas
 
 No silent fallback to guesses.
 
-### P1: session load/resume
+### Completed: session load capability honesty
 
-Omegon advertises session load support, but `load_session` is still shallow. Either implement transcript hydration/replay or narrow advertised capability so external clients do not infer full resume semantics.
+Omegon does not advertise session load support while `load_session` remains shallow. Transcript hydration and replay remain future work, but external clients no longer infer full resume semantics.
 
-### P1: model availability annotation
+### Completed: model availability annotation
 
-The model dropdown is registry-driven but not auth-aware. Future hardening should use provider status to mark or order available models so clients do not present unavailable cloud providers as equally ready.
+The registry-driven model dropdown filters providers through configured or usable unexpired credentials. An active model that becomes unavailable remains visible as `(current, unavailable)` rather than disappearing.
 
-### P1: non-text tool outputs
+### P1: non-text prompt and tool outputs
 
-Tool outputs are currently forwarded to ACP as text blocks. Rich tool outputs (image/resource/blob) need a structured `WorkerEvent` path so ACP clients can render them natively.
+Incoming image, audio, and blob prompt blocks are currently reduced to metadata markers; their payloads do not enter the model context. Tool outputs are likewise forwarded to ACP as text blocks. Native multimodal prompt ingestion and rich tool outputs need structured worker-event and provider-message paths before clients can rely on them.
 
 ## Client contract for Flynt and future ACP clients
 

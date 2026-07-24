@@ -17,6 +17,8 @@ use anyhow::Context;
 use crate::acp_worker::{self, WorkerEvent, WorkerHandle, WorkerRequest};
 use crate::host_context::{self, HostCapabilities, HostContext, HostProxySender};
 
+#[path = "acp/extension_rpc.rs"]
+mod extension_rpc;
 #[path = "acp/labels.rs"]
 mod labels;
 #[path = "acp/model_options.rs"]
@@ -43,36 +45,69 @@ type PendingResponseTx =
     futures::channel::oneshot::Sender<agent_client_protocol::Result<serde_json::Value>>;
 type PendingResponses = Rc<RefCell<std::collections::BTreeMap<String, PendingResponseTx>>>;
 
-fn acp_available_commands() -> Vec<AvailableCommand> {
-    let mut commands = Vec::new();
-    for definition in crate::command_registry::builtin_command_definitions()
+fn acp_build_identity() -> String {
+    format!(
+        "{}+git.{}",
+        env!("CARGO_PKG_VERSION"),
+        env!("OMEGON_GIT_SHA").replace("-dirty", ".dirty")
+    )
+}
+
+fn acp_build_metadata() -> serde_json::Value {
+    serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "commit": env!("OMEGON_GIT_SHA"),
+        "buildDate": env!("OMEGON_BUILD_DATE")
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AcpCommandRoute {
+    WorkerControl(&'static str),
+    Local,
+}
+
+struct AcpCommandBinding {
+    definition: omegon_traits::CommandDefinition,
+    advertised_name: String,
+    route: AcpCommandRoute,
+}
+
+fn acp_command_bindings() -> Vec<AcpCommandBinding> {
+    crate::command_registry::builtin_command_definitions()
         .into_iter()
         .filter(|definition| definition.availability.acp)
-    {
-        // Preserve ACP's already-advertised slash names while sourcing the
-        // underlying command metadata from the shared registry. The local handler
-        // accepts both these ACP names and the canonical TUI registry names.
-        let name = match definition.name.as_str() {
-            "think" => "thinking".to_string(),
-            "auth" => "login".to_string(),
-            _ => definition.name,
-        };
-        commands.push(AvailableCommand::new(name, definition.description));
+        .map(|definition| {
+            let (advertised_name, route) = match definition.name.as_str() {
+                "version" => ("version", AcpCommandRoute::WorkerControl("version")),
+                "status" => ("status", AcpCommandRoute::WorkerControl("status")),
+                "stats" => ("stats", AcpCommandRoute::WorkerControl("stats")),
+                "think" => ("thinking", AcpCommandRoute::Local),
+                "auth" => ("login", AcpCommandRoute::Local),
+                _ => (definition.name.as_str(), AcpCommandRoute::Local),
+            };
+            AcpCommandBinding {
+                advertised_name: advertised_name.to_string(),
+                definition,
+                route,
+            }
+        })
+        .collect()
+}
 
-        // ACP exposes posture as a client/workbench mode control, not a TUI
-        // slash command. Keep it next to thinking, matching the historical
-        // advertised command ordering.
-        if commands
-            .last()
-            .is_some_and(|command| command.name == "thinking")
-        {
-            commands.push(AvailableCommand::new(
-                "posture",
-                "Show or set behavioral posture",
-            ));
-        }
-    }
-    commands
+fn acp_command_binding(name: &str) -> Option<AcpCommandBinding> {
+    acp_command_bindings()
+        .into_iter()
+        .find(|binding| binding.advertised_name == name)
+}
+
+fn acp_available_commands() -> Vec<AvailableCommand> {
+    acp_command_bindings()
+        .into_iter()
+        .map(|binding| {
+            AvailableCommand::new(binding.advertised_name, binding.definition.description)
+        })
+        .collect()
 }
 
 pub(crate) type SharedAcpClientConnection = Rc<RefCell<Option<AcpClientConnection>>>;
@@ -506,20 +541,22 @@ pub(crate) fn plan_entries_from_snapshot_json(
 fn merge_plan_entries(
     plan_state: &mut Vec<acp_worker::PlanEntryData>,
     entries: Vec<acp_worker::PlanEntryData>,
+    disposition: acp_worker::PlanUpdateDisposition,
 ) {
-    if entries.is_empty() {
-        plan_state.clear();
-    } else if entries.len() > 1 || plan_state.is_empty() {
-        *plan_state = entries;
-    } else {
-        for update in entries {
-            if let Some(existing) = plan_state
-                .iter_mut()
-                .find(|entry| entry.content == update.content)
-            {
-                existing.status = update.status;
-            } else {
-                plan_state.push(update);
+    match disposition {
+        acp_worker::PlanUpdateDisposition::Retain => {}
+        acp_worker::PlanUpdateDisposition::Clear => plan_state.clear(),
+        acp_worker::PlanUpdateDisposition::Replace => *plan_state = entries,
+        acp_worker::PlanUpdateDisposition::Merge => {
+            for update in entries {
+                if let Some(existing) = plan_state
+                    .iter_mut()
+                    .find(|entry| entry.content == update.content)
+                {
+                    existing.status = update.status;
+                } else {
+                    plan_state.push(update);
+                }
             }
         }
     }
@@ -548,36 +585,41 @@ fn acp_plan_entries(entries: &[acp_worker::PlanEntryData]) -> Vec<PlanEntry> {
         .collect()
 }
 
+fn is_plan_tool(name: &str) -> bool {
+    name == crate::tool_registry::core::PLAN
+}
+
+fn complete_plan_entries(
+    plan_state: &[acp_worker::PlanEntryData],
+) -> Vec<acp_worker::PlanEntryData> {
+    plan_state
+        .iter()
+        .cloned()
+        .map(|mut entry| {
+            if entry.status != acp_worker::PlanEntryState::Failed {
+                entry.status = acp_worker::PlanEntryState::Completed;
+            }
+            entry
+        })
+        .collect()
+}
+
 fn acp_status_message_text(msg: &str) -> Option<String> {
     let trimmed = msg.trim();
     if trimmed.is_empty() {
         return None;
     }
 
-    if trimmed.contains("Plan mode:") || trimmed.starts_with("Plan ") {
-        let mode = trimmed
-            .lines()
-            .find_map(|line| line.trim().strip_prefix("Plan mode:"))
-            .map(str::trim)
-            .unwrap_or("");
-
-        let text = if trimmed.starts_with("Plan set") && mode == "planning" {
-            "Planning mode — edits blocked until approval.".to_string()
-        } else if trimmed.starts_with("Plan approved") || mode == "approved" {
-            "Plan approved — execution may proceed.".to_string()
-        } else if trimmed.starts_with("Plan executing") || mode == "executing" {
-            "Plan executing.".to_string()
-        } else if trimmed.starts_with("Plan cleared") || mode == "off" {
-            "Plan cleared.".to_string()
-        } else if trimmed.starts_with("Plan item skipped") {
-            "Plan item skipped.".to_string()
-        } else if trimmed.starts_with("Plan progress") || mode == "complete" {
-            "Plan progress updated.".to_string()
-        } else {
-            "Plan updated.".to_string()
-        };
-
-        return Some(text);
+    let lowercase = trimmed.to_ascii_lowercase();
+    if lowercase.starts_with("plan ")
+        || lowercase.starts_with("planning mode")
+        || lowercase.starts_with("planning complete")
+        || lowercase.contains("plan mode:")
+    {
+        // ACP clients receive the complete plan through the native
+        // SessionUpdate::Plan projection. Do not duplicate internal plan gate
+        // receipts in the assistant transcript.
+        return None;
     }
 
     Some(trimmed.to_string())
@@ -587,17 +629,64 @@ fn acp_status_is_provider_telemetry(msg: &str) -> bool {
     msg.contains("— retrying") || msg.contains("transient upstream failures")
 }
 
+fn validate_active_session(
+    active_session_id: &Option<SessionId>,
+    requested_session_id: &SessionId,
+) -> Result<()> {
+    if active_session_id.as_ref() == Some(requested_session_id) {
+        Ok(())
+    } else {
+        tracing::warn!(
+            requested_session_id = %requested_session_id.0,
+            active_session_id = active_session_id
+                .as_ref()
+                .map(|id| id.0.as_ref())
+                .unwrap_or("<none>"),
+            "rejected ACP request for non-active session"
+        );
+        Err(Error::invalid_params())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum AcpTurnPhase {
+    #[default]
+    Idle,
+    Running,
+    Cancelling,
+    Failed,
+}
+
+impl AcpTurnPhase {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Running => "running",
+            Self::Cancelling => "cancelling",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct AcpTurnState {
+    phase: AcpTurnPhase,
+    last_error: Option<String>,
+}
+
 pub struct OmegonAcpAgent {
     model: String,
+    transport: &'static str,
     worker: RefCell<Option<WorkerHandle>>,
     conn: SharedAcpClientConnection,
     session_id: RefCell<Option<SessionId>>,
     session_cwd: RefCell<Option<std::path::PathBuf>>,
+    turn_state: RefCell<AcpTurnState>,
     secrets: RefCell<Option<std::sync::Arc<omegon_secrets::SecretsManager>>>,
     host_caps: RefCell<HostCapabilities>,
     extension_metadata: Rc<RefCell<std::collections::BTreeMap<String, serde_json::Value>>>,
     extension_rpc_handles:
-        Rc<RefCell<std::collections::BTreeMap<String, crate::extensions::ExtensionPollingHandle>>>,
+        Rc<RefCell<std::collections::BTreeMap<String, extension_rpc::ExtensionRpcHandle>>>,
     session_task_bindings: RefCell<Vec<crate::conversation::SessionTaskBinding>>,
     surface_updates_enabled: RefCell<bool>,
     dangerously_bypass_permissions: bool,
@@ -616,6 +705,15 @@ impl OmegonAcpAgent {
         )
     }
 
+    pub(crate) fn new_for_websocket(model: &str, dangerously_bypass_permissions: bool) -> Self {
+        Self::new_with_transport(
+            model,
+            Default::default(),
+            dangerously_bypass_permissions,
+            "websocket",
+        )
+    }
+
     pub fn new_with_extension_metadata(
         model: &str,
         extension_metadata: std::collections::BTreeMap<String, serde_json::Value>,
@@ -628,12 +726,28 @@ impl OmegonAcpAgent {
         extension_metadata: std::collections::BTreeMap<String, serde_json::Value>,
         dangerously_bypass_permissions: bool,
     ) -> Self {
+        Self::new_with_transport(
+            model,
+            extension_metadata,
+            dangerously_bypass_permissions,
+            "stdio",
+        )
+    }
+
+    fn new_with_transport(
+        model: &str,
+        extension_metadata: std::collections::BTreeMap<String, serde_json::Value>,
+        dangerously_bypass_permissions: bool,
+        transport: &'static str,
+    ) -> Self {
         Self {
             model: model.to_string(),
+            transport,
             worker: RefCell::new(None),
             conn: Rc::new(RefCell::new(None)),
             session_id: RefCell::new(None),
             session_cwd: RefCell::new(None),
+            turn_state: RefCell::new(AcpTurnState::default()),
             secrets: RefCell::new(None),
             host_caps: RefCell::new(HostCapabilities::default()),
             extension_metadata: Rc::new(RefCell::new(extension_metadata)),
@@ -673,7 +787,9 @@ impl OmegonAcpAgent {
         &self,
         current_model: &str,
         current_thinking: &str,
-        current_posture: &str,
+        current_context_class: &str,
+        current_profile: &str,
+        cwd: &std::path::Path,
     ) -> Vec<SessionConfigOption> {
         let mut model_options: Vec<SessionConfigSelectOption> = Vec::new();
 
@@ -759,15 +875,46 @@ impl OmegonAcpAgent {
         .map(|(id, name)| SessionConfigSelectOption::new(*id, *name))
         .collect();
 
-        let posture_options: Vec<SessionConfigSelectOption> = [
-            ("fabricator", "Fabricator — balanced coding"),
-            ("architect", "Architect — orchestrator"),
-            ("explorator", "Explorator — lean, read-heavy"),
-            ("devastator", "Devastator — maximum force"),
-        ]
-        .iter()
-        .map(|(id, name)| SessionConfigSelectOption::new(*id, *name))
-        .collect();
+        let context_options: Vec<SessionConfigSelectOption> = crate::settings::ContextClass::all()
+            .iter()
+            .map(|class| {
+                SessionConfigSelectOption::new(class.short().to_ascii_lowercase(), class.label())
+            })
+            .collect();
+
+        let registry = crate::settings::ProfileRegistry::discover(cwd);
+        let active_profile = crate::settings::active_profile_selection(cwd);
+        let active_profile_value = format!(
+            "{}:{}",
+            active_profile.scope.as_deref().unwrap_or("built-in"),
+            active_profile.id
+        );
+        let mut profile_options: Vec<SessionConfigSelectOption> = registry
+            .entries
+            .iter()
+            .map(|entry| {
+                let scope = entry.scope.as_str();
+                SessionConfigSelectOption::new(
+                    format!("{scope}:{}", entry.id),
+                    format!(
+                        "{} — {scope}",
+                        entry.profile.compact_label().unwrap_or(&entry.id)
+                    ),
+                )
+            })
+            .collect();
+        if !profile_options
+            .iter()
+            .any(|option| option.value.0.as_ref() == active_profile_value)
+        {
+            profile_options.insert(
+                0,
+                SessionConfigSelectOption::new(
+                    active_profile_value.clone(),
+                    format!("{current_profile} — current"),
+                ),
+            );
+        }
 
         vec![
             SessionConfigOption::new(
@@ -777,7 +924,9 @@ impl OmegonAcpAgent {
                     current_model.to_string(),
                     model_options,
                 )),
-            ),
+            )
+            .description("Language model used for subsequent turns")
+            .category(SessionConfigOptionCategory::Model),
             SessionConfigOption::new(
                 "thinking",
                 "Thinking Level",
@@ -785,15 +934,29 @@ impl OmegonAcpAgent {
                     current_thinking.to_string(),
                     thinking_options,
                 )),
-            ),
+            )
+            .description("Reasoning effort for subsequent turns")
+            .category(SessionConfigOptionCategory::ThoughtLevel),
             SessionConfigOption::new(
-                "posture",
-                "Posture",
+                "profile",
+                "Profile",
                 SessionConfigKind::Select(SessionConfigSelect::new(
-                    current_posture.to_string(),
-                    posture_options,
+                    active_profile_value,
+                    profile_options,
                 )),
-            ),
+            )
+            .description("Apply a named Omegon profile to this project session")
+            .category(SessionConfigOptionCategory::Other("_omegon_profile".into())),
+            SessionConfigOption::new(
+                "context_class",
+                "Context Window",
+                SessionConfigKind::Select(SessionConfigSelect::new(
+                    current_context_class.to_string(),
+                    context_options,
+                )),
+            )
+            .description("Requested context-window class for subsequent turns")
+            .category(SessionConfigOptionCategory::Other("_omegon_context".into())),
         ]
     }
 
@@ -813,6 +976,7 @@ impl OmegonAcpAgent {
                     caps,
                     proxy: HostProxySender::new(proxy_tx),
                     session_id: session_id_str.clone(),
+                    cwd: cwd.to_path_buf(),
                 };
                 // Spawn the ACP-thread pump that services proxy requests.
                 let sid = self
@@ -878,7 +1042,8 @@ impl OmegonAcpAgent {
                             }
                         }
                         Ok(WorkerEvent::ExtensionHandles(handles)) => {
-                            *extension_rpc_handles.borrow_mut() = handles;
+                            *extension_rpc_handles.borrow_mut() =
+                                extension_rpc::erase_extension_rpc_handles(handles);
                         }
                         Ok(_) => {}
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -916,7 +1081,7 @@ impl OmegonAcpAgent {
     /// Read the worker's current settings — model/thinking/posture as actually
     /// applied. Falls back to the bootstrap defaults if the worker isn't up yet
     /// or the lock is poisoned.
-    fn current_settings(&self) -> (String, String, String) {
+    fn current_settings(&self) -> (String, String, String, String, String) {
         let settings_arc = self.worker.borrow().as_ref().map(|w| w.settings.clone());
         if let Some(s) = settings_arc
             && let Ok(g) = s.lock()
@@ -925,16 +1090,27 @@ impl OmegonAcpAgent {
                 g.model.clone(),
                 g.thinking.as_str().to_string(),
                 g.posture.effective.as_str().to_string(),
+                g.effective_requested_class().short().to_ascii_lowercase(),
+                g.profile_name
+                    .clone()
+                    .unwrap_or_else(|| "built-in-default".into()),
             );
         }
-        (self.model.clone(), "minimal".into(), "fabricator".into())
+        (
+            self.model.clone(),
+            "minimal".into(),
+            "fabricator".into(),
+            "standard".into(),
+            "built-in-default".into(),
+        )
     }
 
     fn runtime_status_json(&self) -> serde_json::Value {
-        let (model, thinking, posture) = self.current_settings();
+        let (model, thinking, posture, context_class, profile) = self.current_settings();
         let cwd = std::env::current_dir().ok();
         let session_cwd = self.session_cwd.borrow().clone().or_else(|| cwd.clone());
         let session_id = self.session_id.borrow().as_ref().map(|id| id.to_string());
+        let turn_state = self.turn_state.borrow().clone();
         let binary = std::env::current_exe().ok();
         serde_json::json!({
             "runtime": {
@@ -947,17 +1123,22 @@ impl OmegonAcpAgent {
             },
             "acp": {
                 "protocol_version": 1,
-                "transport": "stdio",
+                "transport": self.transport,
                 "session_id": session_id,
                 "session_cwd": session_cwd.as_ref().map(|p| p.display().to_string()),
-                "connected": self.conn.borrow().is_some()
+                "connected": self.conn.borrow().is_some(),
+                "turn": {
+                    "phase": turn_state.phase.as_str(),
+                    "last_error": turn_state.last_error
+                }
             },
             "agent": {
                 "id": "default",
-                "profile": serde_json::Value::Null,
+                "profile": profile,
                 "model": model,
                 "thinking": thinking,
-                "posture": posture
+                "posture": posture,
+                "context_class": context_class
             },
             "memory": {
                 "scope": "project",
@@ -967,7 +1148,7 @@ impl OmegonAcpAgent {
     }
 
     fn provider_status_json(&self) -> serde_json::Value {
-        let (model, _thinking, _posture) = self.current_settings();
+        let (model, _thinking, _posture, _context_class, _profile) = self.current_settings();
         let active_provider_id = crate::providers::infer_provider_id(&model);
         let providers: Vec<serde_json::Value> = crate::auth::PROVIDERS
             .iter()
@@ -1134,16 +1315,21 @@ impl OmegonAcpAgent {
         *self.surface_updates_enabled.borrow_mut() = surface_updates_enabled;
 
         let mut response = InitializeResponse::new(args.protocol_version);
-        response.agent_info =
-            Some(Implementation::new("omegon", env!("CARGO_PKG_VERSION")).title("Omegon Agent"));
+        let mut build_meta = serde_json::Map::new();
+        build_meta.insert("omegon/build".into(), acp_build_metadata());
+        response.agent_info = Some(
+            Implementation::new("omegon", acp_build_identity())
+                .title(format!("Omegon {}", acp_build_identity()))
+                .meta(build_meta),
+        );
         response.agent_capabilities = AgentCapabilities::default()
-            .load_session(true)
             .prompt_capabilities(PromptCapabilities::new().embedded_context(true))
             .session_capabilities(
                 SessionCapabilities::new()
                     .list(SessionListCapabilities::new())
                     .close(SessionCloseCapabilities::new()),
-            );
+            )
+            .load_session(true);
         response.auth_methods = vec![AuthMethod::Agent(
             AuthMethodAgent::new("omegon-auth", "Omegon Authentication")
                 .description("Run `omegon auth login` in a terminal or set API keys."),
@@ -1162,7 +1348,7 @@ impl OmegonAcpAgent {
     }
 
     async fn new_session(&self, args: NewSessionRequest) -> Result<NewSessionResponse> {
-        let cwd = args.cwd;
+        let cwd = args.cwd.clone();
         *self.session_cwd.borrow_mut() = Some(cwd.clone());
 
         // Create session ID *before* ensure_worker so the proxy pump
@@ -1205,9 +1391,15 @@ impl OmegonAcpAgent {
         // Read the *worker's* current settings, not self.model — the worker may
         // have already received SetModel/SetThinking/SetPosture before this
         // session started, and we need to advertise what's actually running.
-        let (current_model, current_thinking, current_posture) = self.current_settings();
-        response.config_options =
-            Some(self.build_config_options(&current_model, &current_thinking, &current_posture));
+        let (current_model, current_thinking, _current_posture, current_context, current_profile) =
+            self.current_settings();
+        response.config_options = Some(self.build_config_options(
+            &current_model,
+            &current_thinking,
+            &current_context,
+            &current_profile,
+            &cwd,
+        ));
 
         // Send available commands after response (via spawned task)
         let conn = self.conn.clone();
@@ -1231,9 +1423,13 @@ impl OmegonAcpAgent {
 
     async fn prompt(&self, args: PromptRequest) -> Result<PromptResponse> {
         let sid = args.session_id.clone();
+        validate_active_session(&self.session_id.borrow(), &sid)?;
 
-        // Ensure worker exists
-        let cwd = std::env::current_dir().unwrap_or_default();
+        let cwd = self
+            .session_cwd
+            .borrow()
+            .clone()
+            .ok_or_else(Error::invalid_params)?;
         self.ensure_worker(&cwd);
 
         // Extract user text and referenced context. ACP requires agents to
@@ -1244,7 +1440,7 @@ impl OmegonAcpAgent {
 
         // Handle slash commands locally (no worker round-trip)
         if user_text.starts_with('/') {
-            let response_text = self.handle_slash_command(&user_text);
+            let response_text = self.handle_slash_command(&user_text).await;
             let conn = self.conn.clone();
             let notify_sid = sid.clone();
             tokio::task::spawn_local(async move {
@@ -1265,6 +1461,10 @@ impl OmegonAcpAgent {
 
         // Send prompt to worker and stream events back
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        *self.turn_state.borrow_mut() = AcpTurnState {
+            phase: AcpTurnPhase::Running,
+            last_error: None,
+        };
 
         self.send_to_worker(WorkerRequest::Prompt {
             text: user_text,
@@ -1299,8 +1499,10 @@ impl OmegonAcpAgent {
                     }
                 };
                 let mut plan_state: Vec<acp_worker::PlanEntryData> = Vec::new();
+                let mut last_acp_plan_entries: Option<Vec<PlanEntry>> = None;
                 let mut surface_adapter =
                     AcpConversationSurfaceAdapter::with_turn_id(stream_sid.to_string());
+                let mut native_plan_tool_ids = std::collections::BTreeSet::new();
                 loop {
                     match event_rx.recv().await {
                         Ok(WorkerEvent::TextChunk(text)) => {
@@ -1344,6 +1546,10 @@ impl OmegonAcpAgent {
                             }
                         }
                         Ok(WorkerEvent::ToolStart { id, name, args }) => {
+                            if is_plan_tool(&name) {
+                                native_plan_tool_ids.insert(id);
+                                continue;
+                            }
                             let (surface_args_summary, surface_detail_args) =
                                 acp_surface_tool_args(&name, args.as_ref());
                             shadow_surface_update(
@@ -1406,6 +1612,9 @@ impl OmegonAcpAgent {
                             success,
                             details,
                         }) => {
+                            if native_plan_tool_ids.remove(&id) {
+                                continue;
+                            }
                             let surface_result = acp_surface_tool_result(&details);
                             shadow_surface_update(
                                 conn.borrow().as_ref(),
@@ -1467,20 +1676,36 @@ impl OmegonAcpAgent {
                                 .await;
                             }
                         }
-                        Ok(WorkerEvent::PlanUpdate { entries }) => {
-                            if let Some(c) = conn.borrow().as_ref() {
-                                // Merge into running plan state.
-                                // DecompositionStarted sends the full initial set;
-                                // subsequent updates send single-entry patches.
-                                // We maintain the full plan and re-emit it.
-                                merge_plan_entries(&mut plan_state, entries);
-                                let plan_entries = acp_plan_entries(&plan_state);
-                                let _ = send_session_update(
-                                    c,
-                                    stream_sid.clone(),
-                                    SessionUpdate::Plan(Plan::new(plan_entries)),
-                                )
-                                .await;
+                        Ok(WorkerEvent::PlanUpdate {
+                            entries,
+                            disposition,
+                        }) => {
+                            // ACP plans are complete replacement snapshots. A
+                            // completed plan remains visible for the rest of the
+                            // turn; only an explicit clear sends an empty snapshot.
+                            merge_plan_entries(&mut plan_state, entries, disposition);
+                            if disposition == acp_worker::PlanUpdateDisposition::Retain {
+                                plan_state = complete_plan_entries(&plan_state);
+                            }
+                            let plan_entries = acp_plan_entries(&plan_state);
+                            let should_send = match &last_acp_plan_entries {
+                                None => !plan_entries.is_empty(),
+                                Some(previous) => previous != &plan_entries,
+                            };
+                            if should_send {
+                                if let Some(c) = conn.borrow().as_ref() {
+                                    let _ = send_session_update(
+                                        c,
+                                        stream_sid.clone(),
+                                        SessionUpdate::Plan(Plan::new(plan_entries.clone())),
+                                    )
+                                    .await;
+                                }
+                                last_acp_plan_entries = if plan_entries.is_empty() {
+                                    None
+                                } else {
+                                    Some(plan_entries)
+                                };
                             }
                         }
                         Ok(WorkerEvent::StreamIdle {
@@ -1607,8 +1832,27 @@ impl OmegonAcpAgent {
 
         // Wait for the worker to finish AND the event forwarder to flush
         // all notifications to Zed before signaling end-of-turn.
-        let worker_resp = response_rx.await.map_err(|_| Error::internal_error())?;
+        let worker_resp = match response_rx.await {
+            Ok(response) => response,
+            Err(_) => {
+                *self.turn_state.borrow_mut() = AcpTurnState {
+                    phase: AcpTurnPhase::Failed,
+                    last_error: Some("ACP worker dropped the prompt response".into()),
+                };
+                return Err(Error::internal_error());
+            }
+        };
         let _ = done_rx.await;
+
+        let next_turn_state = if let Some(error) = &worker_resp.error {
+            AcpTurnState {
+                phase: AcpTurnPhase::Failed,
+                last_error: Some(self.redact(error)),
+            }
+        } else {
+            AcpTurnState::default()
+        };
+        *self.turn_state.borrow_mut() = next_turn_state;
 
         // Send error after all chunks have been delivered
         if let Some(error) = &worker_resp.error {
@@ -1643,6 +1887,9 @@ impl OmegonAcpAgent {
             && active != &args.session_id
         {
             return Err(Error::invalid_params());
+        }
+        if self.turn_state.borrow().phase == AcpTurnPhase::Running {
+            self.turn_state.borrow_mut().phase = AcpTurnPhase::Cancelling;
         }
         self.send_to_worker(WorkerRequest::Cancel).await;
         Ok(())
@@ -1695,51 +1942,68 @@ impl OmegonAcpAgent {
             _ => return Err(Error::invalid_params()),
         };
 
-        // Use ack so we read shared_settings AFTER the worker has applied the
-        // mutation. Without this the response would race the worker thread
-        // and report the previous value.
-        let (req, ack_rx) = match config_id.as_str() {
+        // Use acknowledgements so the complete config update is built only
+        // after the worker has applied the requested mutation.
+        let result = match config_id.as_str() {
             "model" => {
                 let (tx, rx) = tokio::sync::oneshot::channel();
-                (
-                    WorkerRequest::SetModel {
-                        value: value.clone(),
-                        ack: Some(tx),
-                    },
-                    rx,
-                )
+                self.send_to_worker_ack(WorkerRequest::SetModel {
+                    value: value.clone(),
+                    ack: Some(tx),
+                })
+                .await;
+                rx.await.map_err(|_| Error::internal_error())?
             }
             "thinking" => {
                 let (tx, rx) = tokio::sync::oneshot::channel();
-                (
-                    WorkerRequest::SetThinking {
-                        value: value.clone(),
-                        ack: Some(tx),
-                    },
-                    rx,
-                )
+                self.send_to_worker_ack(WorkerRequest::SetThinking {
+                    value: value.clone(),
+                    ack: Some(tx),
+                })
+                .await;
+                rx.await.map_err(|_| Error::internal_error())?
             }
-            "posture" => {
+            "context_class" => {
                 let (tx, rx) = tokio::sync::oneshot::channel();
-                (
-                    WorkerRequest::SetPosture {
-                        value: value.clone(),
-                        ack: Some(tx),
-                    },
-                    rx,
-                )
+                self.send_to_worker_ack(WorkerRequest::SetContextClass {
+                    value: value.clone(),
+                    ack: tx,
+                })
+                .await;
+                rx.await.map_err(|_| Error::internal_error())?
+            }
+            "profile" => {
+                let (scope, id) = value
+                    .split_once(':')
+                    .map_or((None, value.as_str()), |(scope, id)| (Some(scope), id));
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                self.send_to_worker_ack(WorkerRequest::ApplyProfile {
+                    id: id.to_string(),
+                    scope: scope.map(str::to_string),
+                    ack: tx,
+                })
+                .await;
+                rx.await.map_err(|_| Error::internal_error())?
             }
             _ => return Err(Error::invalid_params()),
         };
-        self.send_to_worker_ack(req).await;
-        let _ = ack_rx.await;
+        result.map_err(|message| Error::new(i32::from(ErrorCode::InvalidParams), message))?;
 
         // Read back from the worker's settings — send_to_worker awaits the
         // mutation, so this captures the actually-applied state (which may
         // differ from `value` if the worker rejected/normalised the input).
-        let (current_model, current_thinking, current_posture) = self.current_settings();
-        let options =
-            self.build_config_options(&current_model, &current_thinking, &current_posture);
+        let (current_model, current_thinking, _current_posture, current_context, current_profile) =
+            self.current_settings();
+        let options = self.build_config_options(
+            &current_model,
+            &current_thinking,
+            &current_context,
+            &current_profile,
+            self.session_cwd
+                .borrow()
+                .as_deref()
+                .unwrap_or_else(|| std::path::Path::new(".")),
+        );
 
         // Also push a ConfigOptionUpdate notification so clients that don't
         // inspect the response value (e.g. flynt-app's set_config which
@@ -1764,11 +2028,61 @@ impl OmegonAcpAgent {
     }
 
     async fn load_session(&self, args: LoadSessionRequest) -> Result<LoadSessionResponse> {
-        // Ensure worker is ready for this cwd
+        let session_id = args.session_id.to_string();
+        let entry = crate::session::list_sessions(&args.cwd)
+            .into_iter()
+            .find(|entry| entry.meta.session_id == session_id)
+            .ok_or_else(|| {
+                Error::new(
+                    i32::from(ErrorCode::InvalidParams),
+                    format!(
+                        "session `{session_id}` was not found for {}",
+                        args.cwd.display()
+                    ),
+                )
+            })?;
+
+        let path = entry.path;
         self.ensure_worker(&args.cwd);
 
+        let (ack, loaded) = tokio::sync::oneshot::channel();
+        self.send_to_worker_ack(WorkerRequest::LoadSession {
+            path,
+            resume_id: session_id,
+            ack,
+        })
+        .await;
+        let replay = loaded
+            .await
+            .map_err(|_| Error::internal_error())?
+            .map_err(|message| Error::new(i32::from(ErrorCode::InternalError), message))?;
+
+        // ACP load-session requires the agent to replay the restored transcript
+        // through session/update notifications before returning. Historical tool
+        // activity is intentionally absent from this projection so replay cannot
+        // fabricate live execution state.
+        if let Some(connection) = self.conn.borrow().clone() {
+            for message in replay {
+                let content = ContentChunk::new(ContentBlock::Text(TextContent::new(message.text)));
+                let update = match message.role {
+                    acp_worker::AcpReplayRole::User => SessionUpdate::UserMessageChunk(content),
+                    acp_worker::AcpReplayRole::Agent => SessionUpdate::AgentMessageChunk(content),
+                };
+                send_session_update(&connection, args.session_id.clone(), update).await?;
+            }
+        }
+
+        // Publish the new active identity only after worker restoration and
+        // transcript replay both succeed. A malformed session or failed client
+        // notification must not leave transport state pointing at partial content.
+        *self.session_cwd.borrow_mut() = Some(args.cwd.clone());
+        *self.session_id.borrow_mut() = Some(args.session_id.clone());
+
+        let (model, thinking, _posture, context, profile) = self.current_settings();
         let mut response = LoadSessionResponse::new();
         response.modes = Some(Self::modes());
+        response.config_options =
+            Some(self.build_config_options(&model, &thinking, &context, &profile, &args.cwd));
         Ok(response)
     }
 
@@ -1790,11 +2104,14 @@ impl OmegonAcpAgent {
         Ok(ListSessionsResponse::new(sessions))
     }
 
-    async fn close_session(&self, _args: CloseSessionRequest) -> Result<CloseSessionResponse> {
+    async fn close_session(&self, args: CloseSessionRequest) -> Result<CloseSessionResponse> {
+        validate_active_session(&self.session_id.borrow(), &args.session_id)?;
         self.send_to_worker(WorkerRequest::Cancel).await;
         self.send_to_worker(WorkerRequest::Shutdown).await;
         *self.worker.borrow_mut() = None;
         *self.session_id.borrow_mut() = None;
+        *self.session_cwd.borrow_mut() = None;
+        *self.turn_state.borrow_mut() = AcpTurnState::default();
         tracing::info!("ACP session closed");
         Ok(CloseSessionResponse::new())
     }
@@ -2776,23 +3093,17 @@ impl OmegonAcpAgent {
                 let rpc_method = params["method"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("invalid_request: missing 'method' field"))?;
-                if rpc_method.trim().is_empty() {
-                    anyhow::bail!("invalid_request: 'method' field must not be empty");
-                }
                 let rpc_params = params
                     .get("params")
                     .cloned()
                     .unwrap_or_else(|| serde_json::json!({}));
-                let handle = self.extension_rpc_handles.borrow().get(extension).cloned();
-                let Some(handle) = handle else {
-                    anyhow::bail!(
-                        "extension_not_loaded: extension '{extension}' is not loaded or is not callable"
-                    );
-                };
-                handle
-                    .rpc_call(rpc_method, rpc_params)
-                    .await
-                    .map_err(|err| anyhow::anyhow!("method_failed: {err}"))
+                extension_rpc::call_extension_rpc(
+                    &self.extension_rpc_handles,
+                    extension,
+                    rpc_method,
+                    rpc_params,
+                )
+                .await
             }
 
             "extensions/get" => {
@@ -3914,6 +4225,8 @@ impl OmegonAcpAgent {
             | "control/max_turns"
             | "control/persona_list"
             | "control/persona_switch"
+            | "control/profile_open"
+            | "control/profile_copy"
             | "control/profile_view"
             | "control/profile_capture"
             | "control/profile_apply"
@@ -3992,81 +4305,144 @@ impl OmegonAcpAgent {
         }
     }
 
-    fn request_worker_control(&self, command: &str) -> String {
+    async fn request_worker_control(&self, command: &str) -> String {
         let worker_tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
         let Some(worker_tx) = worker_tx else {
             return "ACP worker is not initialized".into();
         };
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        let runtime = tokio::runtime::Handle::current();
-        if runtime
-            .block_on(worker_tx.send(WorkerRequest::ControlRequest {
+        if worker_tx
+            .send(WorkerRequest::ControlRequest {
                 command: command.to_string(),
                 response_tx,
-            }))
+            })
+            .await
             .is_err()
         {
             return "ACP worker is not accepting requests".into();
         }
-        match runtime.block_on(tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            response_rx,
-        )) {
+        match tokio::time::timeout(std::time::Duration::from_secs(5), response_rx).await {
             Ok(Ok(response)) => response.text,
             Ok(Err(_)) => "ACP worker dropped control response".into(),
             Err(_) => "ACP control request timed out".into(),
         }
     }
 
-    fn handle_slash_command(&self, input: &str) -> String {
+    async fn request_worker_setting(
+        &self,
+        request: impl FnOnce(tokio::sync::oneshot::Sender<Result<(), String>>) -> WorkerRequest,
+        success: String,
+    ) -> String {
+        let worker_tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
+        let Some(worker_tx) = worker_tx else {
+            return "ACP worker is not initialized".into();
+        };
+        let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+        if worker_tx.send(request(ack_tx)).await.is_err() {
+            return "ACP worker is not accepting requests".into();
+        }
+        match tokio::time::timeout(std::time::Duration::from_secs(5), ack_rx).await {
+            Ok(Ok(Ok(()))) => success,
+            Ok(Ok(Err(error))) => error,
+            Ok(Err(_)) => "ACP worker dropped setting response".into(),
+            Err(_) => "ACP setting request timed out".into(),
+        }
+    }
+
+    async fn execute_worker_control_command(
+        &self,
+        request: crate::control_runtime::ControlRequest,
+    ) -> Option<String> {
+        let tx = self.worker.borrow().as_ref()?.request_tx.clone();
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        tx.send(WorkerRequest::CanonicalControlRequest {
+            request,
+            response_tx,
+        })
+        .await
+        .ok()?;
+        response_rx.await.ok().map(|response| response.text)
+    }
+
+    async fn handle_slash_command(&self, input: &str) -> String {
         let trimmed = input.trim();
         let (cmd, args) = trimmed
             .split_once(char::is_whitespace)
             .unwrap_or((trimmed, ""));
 
+        let advertised_name = cmd.strip_prefix('/').unwrap_or(cmd);
+
+        if let Some(command) = crate::tui::canonical_slash_command(advertised_name, args) {
+            if let Some(request) = crate::control_runtime::control_request_from_slash(&command) {
+                if let Some(output) = self.execute_worker_control_command(request).await {
+                    return output;
+                }
+                return "ACP worker is not initialized".into();
+            }
+
+            if matches!(command, crate::tui::CanonicalSlashCommand::SkillsReload) {
+                return "Skill reload requires restarting this ACP session. Zed's native Skills settings are owned by Zed's built-in agent and do not reflect ACP agent skills.".into();
+            }
+
+            if matches!(
+                command,
+                crate::tui::CanonicalSlashCommand::SkillCreate(_)
+                    | crate::tui::CanonicalSlashCommand::SkillImport { .. }
+            ) {
+                return "Skill creation and import require an agent turn because they validate and write files. Describe the skill or import path in a normal prompt.".into();
+            }
+        }
+
+        if let Some(binding) = acp_command_binding(advertised_name)
+            && let AcpCommandRoute::WorkerControl(worker_command) = binding.route
+        {
+            let command = if args.is_empty() {
+                worker_command.to_string()
+            } else {
+                format!("{worker_command} {args}")
+            };
+            return self.request_worker_control(&command).await;
+        }
+
+        let worker_command = match cmd {
+            "/profile" => Some(if args.is_empty() {
+                "profile_view".to_string()
+            } else {
+                format!("profile_{args}")
+            }),
+            _ => None,
+        };
+        if let Some(command) = worker_command {
+            return self.request_worker_control(&command).await;
+        }
+
         match cmd {
-            "/model" if !args.is_empty() => {
-                let rt = tokio::runtime::Handle::current();
-                let tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
-                if let Some(tx) = tx {
-                    let _ = rt.block_on(tx.send(WorkerRequest::SetModel {
-                        value: args.trim().to_string(),
-                        ack: None,
-                    }));
-                }
-                format!("Model set to: {}", args.trim())
-            }
+            "/model" if !args.is_empty() => self.request_worker_setting(
+                |ack| WorkerRequest::SetModel {
+                    value: args.trim().to_string(),
+                    ack: Some(ack),
+                },
+                format!("Model set to: {}", args.trim()),
+            ).await,
             "/model" => "Current model from CLI args. Use the model dropdown or /model <provider:model> to switch.".into(),
-            "/thinking" | "/think" if !args.is_empty() => {
-                let tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
-                if let Some(tx) = tx {
-                    let _ = tokio::runtime::Handle::current().block_on(tx.send(
-                        WorkerRequest::SetThinking {
-                            value: args.trim().to_string(),
-                            ack: None,
-                        },
-                    ));
-                }
-                format!("Thinking set to: {}", args.trim())
-            }
+            "/thinking" | "/think" if !args.is_empty() => self.request_worker_setting(
+                |ack| WorkerRequest::SetThinking {
+                    value: args.trim().to_string(),
+                    ack: Some(ack),
+                },
+                format!("Thinking set to: {}", args.trim()),
+            ).await,
             "/thinking" | "/think" => "Use the thinking dropdown or /think <off|minimal|low|medium|high>".into(),
-            "/posture" if !args.is_empty() => {
-                let tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
-                if let Some(tx) = tx {
-                    let _ = tokio::runtime::Handle::current().block_on(tx.send(
-                        WorkerRequest::SetPosture {
-                            value: args.trim().to_string(),
-                            ack: None,
-                        },
-                    ));
-                }
-                format!("Posture set to: {}", args.trim())
-            }
+            "/posture" if !args.is_empty() => self.request_worker_setting(
+                |ack| WorkerRequest::SetPosture {
+                    value: args.trim().to_string(),
+                    ack: Some(ack),
+                },
+                format!("Posture set to: {}", args.trim()),
+            ).await,
             "/posture" => "Use the posture dropdown or /posture <fabricator|architect|explorator|devastator>".into(),
             "/compact" => "Context compaction happens automatically. The model manages its own context window.".into(),
             "/clear" => "Start a new thread via the + button to clear the conversation.".into(),
-            "/status" => self.request_worker_control("status"),
-            "/version" => format!("omegon {}", env!("CARGO_PKG_VERSION")),
             "/secrets" => {
                 // Read recipes file for a diagnostic view — no values exposed
                 let secrets_path = dirs::home_dir()
@@ -4362,25 +4738,97 @@ mod extension_metadata_tests {
         assert!(names.contains(&"model".to_string()), "{names:?}");
         assert!(names.contains(&"thinking".to_string()), "{names:?}");
         assert!(names.contains(&"login".to_string()), "{names:?}");
-        assert!(names.contains(&"posture".to_string()), "{names:?}");
+        assert!(names.contains(&"version".to_string()), "{names:?}");
+        assert!(names.contains(&"stats".to_string()), "{names:?}");
+        assert!(names.contains(&"profile".to_string()), "{names:?}");
         assert!(!names.contains(&"think".to_string()), "{names:?}");
         assert!(!names.contains(&"auth".to_string()), "{names:?}");
 
         let definitions = crate::command_registry::builtin_command_definitions();
-        for (advertised, registry_name) in [("thinking", "think"), ("login", "auth")] {
+        for binding in acp_command_bindings() {
             let definition = definitions
                 .iter()
-                .find(|definition| definition.name == registry_name)
-                .expect("ACP aliased command should come from shared registry");
+                .find(|definition| definition.name == binding.definition.name)
+                .expect("ACP binding should come from shared registry");
             assert!(definition.availability.acp, "{definition:?}");
-            assert!(names.contains(&advertised.to_string()), "{names:?}");
+            assert!(
+                names.contains(&binding.advertised_name.to_string()),
+                "{names:?}"
+            );
         }
+
+        let worker_routes: Vec<&str> = acp_command_bindings()
+            .iter()
+            .filter_map(|binding| match binding.route {
+                AcpCommandRoute::WorkerControl(command) => Some(command),
+                AcpCommandRoute::Local => None,
+            })
+            .collect();
+        assert_eq!(worker_routes, vec!["version", "stats", "status"]);
     }
 
-    #[test]
-    fn acp_help_preserves_advertised_command_names() {
+    #[tokio::test]
+    async fn acp_version_uses_worker_build_identity() {
         let agent = OmegonAcpAgent::new("test-model");
-        let text = agent.handle_slash_command("/help");
+        let text = agent.handle_slash_command("/version").await;
+
+        assert_eq!(text, "ACP worker is not initialized");
+        assert_ne!(text, format!("omegon {}", env!("CARGO_PKG_VERSION")));
+        assert_eq!(
+            agent.handle_slash_command("/status").await,
+            "ACP worker is not initialized"
+        );
+        assert_eq!(
+            agent.handle_slash_command("/stats").await,
+            "ACP worker is not initialized"
+        );
+        assert_eq!(
+            agent.handle_slash_command("/profile").await,
+            "ACP worker is not initialized"
+        );
+        assert_eq!(
+            agent
+                .handle_slash_command("/profile open built-in:built-in-default")
+                .await,
+            "ACP worker is not initialized"
+        );
+    }
+
+    #[tokio::test]
+    async fn acp_canonical_profile_and_skill_commands_require_the_authoritative_worker() {
+        let agent = OmegonAcpAgent::new("test-model");
+
+        for command in [
+            "/profile view",
+            "/profile use built-in-default built-in",
+            "/skills list",
+            "/skills install rust",
+        ] {
+            assert_eq!(
+                agent.handle_slash_command(command).await,
+                "ACP worker is not initialized",
+                "{command} must not execute against transport-local settings"
+            );
+        }
+
+        assert!(
+            agent
+                .handle_slash_command("/skills reload")
+                .await
+                .contains("restart")
+        );
+        assert!(
+            agent
+                .handle_slash_command("/skills create --project")
+                .await
+                .contains("agent turn")
+        );
+    }
+
+    #[tokio::test]
+    async fn acp_help_preserves_advertised_command_names() {
+        let agent = OmegonAcpAgent::new("test-model");
+        let text = agent.handle_slash_command("/help").await;
 
         let command_line = text.lines().next().expect("help should include commands");
         let commands: Vec<&str> = command_line
@@ -4391,7 +4839,6 @@ mod extension_metadata_tests {
 
         assert!(commands.contains(&"/thinking"), "{text}");
         assert!(commands.contains(&"/login"), "{text}");
-        assert!(commands.contains(&"/posture"), "{text}");
         assert!(!commands.contains(&"/think"), "{text}");
         assert!(!commands.contains(&"/auth"), "{text}");
     }
@@ -5900,10 +6347,7 @@ Progress: 0/4
 
 1. ◐ Inventory docs";
 
-        assert_eq!(
-            acp_status_message_text(raw).as_deref(),
-            Some("Planning mode — edits blocked until approval.")
-        );
+        assert_eq!(acp_status_message_text(raw), None);
     }
 
     #[test]
@@ -5913,19 +6357,23 @@ Progress: 0/4
                 "Plan approved
 Plan mode: approved
 Progress: 0/2"
-            )
-            .as_deref(),
-            Some("Plan approved — execution may proceed.")
+            ),
+            None
         );
         assert_eq!(
             acp_status_message_text(
                 "Plan progress
 Plan mode: executing
 Progress: 1/2"
-            )
-            .as_deref(),
-            Some("Plan executing.")
+            ),
+            None
         );
+    }
+
+    #[test]
+    fn plan_tool_is_identified_for_native_only_acp_projection() {
+        assert!(is_plan_tool("plan"));
+        assert!(!is_plan_tool("bash"));
     }
 
     #[test]
@@ -5935,6 +6383,23 @@ Progress: 1/2"
             Some("Request aborted")
         );
         assert_eq!(acp_status_message_text("   "), None);
+    }
+
+    #[test]
+    fn acp_slash_command_dispatch_is_async_and_never_blocks_the_runtime() {
+        let source = include_str!("acp.rs");
+        let dispatch = source
+            .split("async fn request_worker_control")
+            .nth(1)
+            .expect("async worker control dispatcher");
+        let dispatch = dispatch
+            .split("async fn handle_slash_command")
+            .next()
+            .expect("dispatcher boundary");
+
+        assert!(!dispatch.contains("block_on"));
+        assert!(!dispatch.contains("Runtime::new"));
+        assert!(source.contains("async fn handle_slash_command(&self"));
     }
 
     #[test]
@@ -6103,7 +6568,11 @@ Progress: 1/2"
                 status: PlanEntryState::Pending,
             },
         ];
-        merge_plan_entries(&mut plan_state, entries);
+        merge_plan_entries(
+            &mut plan_state,
+            entries,
+            crate::acp_worker::PlanUpdateDisposition::Replace,
+        );
         assert_eq!(plan_state.len(), 3);
 
         // Single entry update merges
@@ -6111,7 +6580,11 @@ Progress: 1/2"
             content: "B".into(),
             status: PlanEntryState::Completed,
         }];
-        merge_plan_entries(&mut plan_state, update);
+        merge_plan_entries(
+            &mut plan_state,
+            update,
+            crate::acp_worker::PlanUpdateDisposition::Merge,
+        );
         assert_eq!(plan_state[0].status, PlanEntryState::Pending);
         assert_eq!(plan_state[1].status, PlanEntryState::Completed);
         assert_eq!(plan_state[2].status, PlanEntryState::Pending);
@@ -6168,6 +6641,202 @@ Progress: 1/2"
         );
     }
 
+    #[tokio::test]
+    async fn initialize_advertises_replaying_session_loading() {
+        let agent = OmegonAcpAgent::new("test-model");
+        let response = agent
+            .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
+            .await
+            .expect("initialize");
+
+        assert!(response.agent_capabilities.load_session);
+        let info = response.agent_info.expect("agent info");
+        assert_eq!(info.version, acp_build_identity());
+        let expected_title = format!("Omegon {}", acp_build_identity());
+        assert_eq!(info.title.as_deref(), Some(expected_title.as_str()));
+        let meta = info.meta.expect("agent metadata");
+        assert_eq!(meta["omegon/build"]["commit"], env!("OMEGON_GIT_SHA"));
+    }
+
+    #[test]
+    fn config_options_expose_profile_context_and_semantic_categories() {
+        let cwd = tempfile::tempdir().unwrap();
+        let agent = OmegonAcpAgent::new("test-model");
+        let options = agent.build_config_options(
+            "test-model",
+            "minimal",
+            "standard",
+            "built-in-default",
+            cwd.path(),
+        );
+
+        let by_id = |id: &str| {
+            options
+                .iter()
+                .find(|option| option.id.0.as_ref() == id)
+                .expect("config option")
+        };
+        assert_eq!(
+            by_id("model").category,
+            Some(SessionConfigOptionCategory::Model)
+        );
+        assert_eq!(
+            by_id("thinking").category,
+            Some(SessionConfigOptionCategory::ThoughtLevel)
+        );
+        let profile = by_id("profile");
+        assert_eq!(
+            profile.category,
+            Some(SessionConfigOptionCategory::Other("_omegon_profile".into()))
+        );
+        let SessionConfigKind::Select(profile_select) = &profile.kind else {
+            panic!("profile should be a select option");
+        };
+        let selection = crate::settings::active_profile_selection(cwd.path());
+        let expected_profile = format!(
+            "{}:{}",
+            selection.scope.as_deref().unwrap_or("project"),
+            selection.id
+        );
+        assert_eq!(profile_select.current_value.0.as_ref(), expected_profile);
+        let SessionConfigSelectOptions::Ungrouped(profile_options) = &profile_select.options else {
+            panic!("profile options should be ungrouped")
+        };
+        assert!(
+            profile_options.iter().any(|option| {
+                option.value.0.as_ref() == profile_select.current_value.0.as_ref()
+            })
+        );
+        assert_eq!(
+            by_id("context_class").category,
+            Some(SessionConfigOptionCategory::Other("_omegon_context".into()))
+        );
+        assert!(
+            options
+                .iter()
+                .all(|option| option.id.0.as_ref() != "posture")
+        );
+    }
+
+    #[test]
+    fn runtime_status_reports_turn_phase_and_last_error() {
+        let agent = OmegonAcpAgent::new("test-model");
+        *agent.turn_state.borrow_mut() = AcpTurnState {
+            phase: AcpTurnPhase::Failed,
+            last_error: Some("provider unavailable".into()),
+        };
+
+        let status = agent.runtime_status_json();
+        assert_eq!(status["acp"]["turn"]["phase"], "failed");
+        assert_eq!(status["acp"]["turn"]["last_error"], "provider unavailable");
+    }
+
+    #[test]
+    fn websocket_agent_reports_websocket_transport() {
+        let agent = OmegonAcpAgent::new_for_websocket("test-model", false);
+        assert_eq!(agent.transport, "websocket");
+    }
+
+    #[tokio::test]
+    async fn prompt_rejects_non_active_session_before_worker_start() {
+        let agent = OmegonAcpAgent::new("test-model");
+        *agent.session_id.borrow_mut() = Some(SessionId::new("session-a"));
+        *agent.session_cwd.borrow_mut() = Some(std::env::current_dir().unwrap());
+
+        let result = agent
+            .prompt(PromptRequest::new(
+                SessionId::new("session-b"),
+                vec![ContentBlock::Text(TextContent::new("hello"))],
+            ))
+            .await;
+
+        assert!(result.is_err());
+        assert!(agent.worker.borrow().is_none());
+    }
+
+    #[tokio::test]
+    async fn close_rejects_non_active_session_without_clearing_state() {
+        let agent = OmegonAcpAgent::new("test-model");
+        *agent.session_id.borrow_mut() = Some(SessionId::new("session-a"));
+        *agent.session_cwd.borrow_mut() = Some(std::env::current_dir().unwrap());
+
+        let result = agent
+            .close_session(CloseSessionRequest::new(SessionId::new("session-b")))
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(
+            agent.session_id.borrow().as_ref(),
+            Some(&SessionId::new("session-a"))
+        );
+        assert!(agent.session_cwd.borrow().is_some());
+    }
+
+    #[test]
+    fn host_context_preserves_session_cwd_for_terminal_delegation() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let cwd = std::path::PathBuf::from("/tmp/omegon-acp-session");
+        let context = HostContext {
+            caps: std::sync::Arc::new(HostCapabilities::default()),
+            proxy: HostProxySender::new(tx),
+            session_id: "session-a".into(),
+            cwd: cwd.clone(),
+        };
+
+        assert_eq!(context.cwd, cwd);
+    }
+
+    #[test]
+    fn completed_plan_projection_marks_remaining_items_complete() {
+        use crate::acp_worker::{PlanEntryData, PlanEntryState};
+
+        let completed = complete_plan_entries(&[
+            PlanEntryData {
+                content: "Already done".into(),
+                status: PlanEntryState::Completed,
+            },
+            PlanEntryData {
+                content: "Final summary".into(),
+                status: PlanEntryState::InProgress,
+            },
+            PlanEntryData {
+                content: "Failed item".into(),
+                status: PlanEntryState::Failed,
+            },
+        ]);
+
+        assert_eq!(completed[0].status, PlanEntryState::Completed);
+        assert_eq!(completed[1].status, PlanEntryState::Completed);
+        assert_eq!(completed[2].status, PlanEntryState::Failed);
+    }
+
+    #[test]
+    fn completed_plan_projection_retains_final_snapshot() {
+        use crate::acp_worker::{PlanEntryData, PlanEntryState, PlanUpdateDisposition};
+
+        let mut plan_state = vec![PlanEntryData {
+            content: "Finished".into(),
+            status: PlanEntryState::Completed,
+        }];
+        merge_plan_entries(&mut plan_state, Vec::new(), PlanUpdateDisposition::Retain);
+
+        assert_eq!(plan_state.len(), 1);
+        assert_eq!(plan_state[0].status, PlanEntryState::Completed);
+    }
+
+    #[test]
+    fn explicit_plan_clear_removes_snapshot() {
+        use crate::acp_worker::{PlanEntryData, PlanEntryState, PlanUpdateDisposition};
+
+        let mut plan_state = vec![PlanEntryData {
+            content: "Finished".into(),
+            status: PlanEntryState::Completed,
+        }];
+        merge_plan_entries(&mut plan_state, Vec::new(), PlanUpdateDisposition::Clear);
+
+        assert!(plan_state.is_empty());
+    }
+
     #[test]
     fn plan_merge_single_entry_initializes_empty() {
         use crate::acp_worker::{PlanEntryData, PlanEntryState};
@@ -6179,7 +6848,11 @@ Progress: 1/2"
             content: "Solo".into(),
             status: PlanEntryState::Pending,
         }];
-        merge_plan_entries(&mut plan_state, entries);
+        merge_plan_entries(
+            &mut plan_state,
+            entries,
+            crate::acp_worker::PlanUpdateDisposition::Replace,
+        );
         assert_eq!(plan_state.len(), 1);
         assert_eq!(plan_state[0].content, "Solo");
     }
@@ -6210,7 +6883,11 @@ Progress: 1/2"
                 status: PlanEntryState::Pending,
             },
         ];
-        merge_plan_entries(&mut plan_state, new_entries);
+        merge_plan_entries(
+            &mut plan_state,
+            new_entries,
+            crate::acp_worker::PlanUpdateDisposition::Replace,
+        );
         assert_eq!(plan_state.len(), 2);
         assert_eq!(plan_state[0].content, "New X");
     }

@@ -13,7 +13,6 @@ visibility = "private"
 
 [data]
 open_questions = []
-parent = "core-distribution"
 +++
 
 # Rust versioning system — semver, changelog, --version, release workflow

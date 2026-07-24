@@ -26,7 +26,7 @@ The Rust Omegon binary now owns the `omegon` command. The TS interactive harness
 ### Decision: Rename npm package to `omegon-pi`, deprecate `omegon`
 
 **Status:** decided
-**Rationale:** Rust binary owns `omegon` command and name going forward. TS harness is the interactive pi-based TUI layer. `omegon-pi` communicates the relationship clearly. Old `omegon` npm versions get a deprecation message pointing to install.sh for the Rust version or `npm i -g omegon-pi` for the TS harness.
+**Rationale:** Rust binary owns the `omegon` command and product identity. The former TypeScript harness used a distinct name during migration so it could not collide with the native binary.
 
 ## Open Questions
 
@@ -40,7 +40,6 @@ The Rust Omegon binary now owns the `omegon` command. The TS interactive harness
 - `.github/workflows/publish.yml` (modified) — Update npm view/deprecate/install references from omegon to omegon-pi, add deprecation step for old omegon package
 - `extensions/bootstrap/index.ts` (modified) — Update PKG constant and all npm install/view/list references to omegon-pi
 - `extensions/version-check.ts` (modified) — Update REPO_NAME if used for npm checks
-- `README.md` (modified) — Update install instructions to npm i -g omegon-pi
 - `bin/omegon.mjs` (modified) — Rename to bin/omegon-pi.mjs or keep as-is if bin mapping handles it
 
 ### Constraints

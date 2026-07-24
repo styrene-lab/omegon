@@ -821,7 +821,7 @@ publish:
     SIGN_STATUS=$(python3 scripts/release_status.py --binary "$BINARY")
     echo "  Signing: $SIGN_STATUS"
 
-    # ── 2. Push to origin (triggers CI: release, npm, site) ──
+    # ── 2. Push to origin (triggers CI: release and site) ──
     echo ""
     echo "Pushing to origin..."
     BRANCH=$(git branch --show-current)
