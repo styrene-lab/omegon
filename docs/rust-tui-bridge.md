@@ -79,12 +79,11 @@ The Rust binary is the *default executor* for all agent work. Interactive mode s
 - Cleave children always use the Rust binary (already done ✅)
 - The Rust binary can run standalone sessions with `omegon-agent --prompt` (already done ✅)
 - Session persistence, compaction, lifecycle awareness are all Rust-native (done this session ✅)
-- The npm package distributes both TS and Rust (core-distribution, implementing)
 
 **The actual process inversion happens in Phase 2** when we build a native TUI (ratatui/Dioxus) that replaces pi's InteractiveMode entirely. At that point the Rust binary truly becomes the only process.
 
 **What remains for 1.0.0:**
-1. Core binary distribution (platform packages in npm) — the `core-distribution` node
+1. Core binary distribution through GitHub Releases and Homebrew
 2. Version alignment between omegon npm and omegon-core Cargo
 3. Integration: make the TS interactive mode use Rust memory/lifecycle when available
 

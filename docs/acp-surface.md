@@ -146,13 +146,9 @@ Zed selection and symbol URI fragments (`#L10`, `#L10:20`, and `#L10-L20`) are r
 
 Resolved directory resources produce a bounded listing rooted in the session workspace, excluding common generated and metadata directories.
 
-### P0: host read fallback clarity
+### Completed: host read fallback clarity
 
-Host delegated file reads can fail even when local reads would succeed. The current path fallback is useful, but the canonical policy should be explicit:
-
-- use host reads for client-owned virtual resources or when local path access is unavailable;
-- use local fallback for local files when host read fails;
-- preserve exact path diagnostics in errors.
+When the host advertises `fs.readTextFile`, Omegon treats host permission denials and ordinary host read failures as authoritative. A direct local fallback is permitted only when the host method is unavailable at runtime and the target is an existing regular file; fallback use and its reason are reported in tool details.
 
 ### P1: virtual client resources
 
@@ -172,9 +168,9 @@ Omegon does not advertise session load support while `load_session` remains shal
 
 The registry-driven model dropdown filters providers through configured or usable unexpired credentials. An active model that becomes unavailable remains visible as `(current, unavailable)` rather than disappearing.
 
-### P1: non-text tool outputs
+### P1: non-text prompt and tool outputs
 
-Tool outputs are currently forwarded to ACP as text blocks. Rich tool outputs (image/resource/blob) need a structured `WorkerEvent` path so ACP clients can render them natively.
+Incoming image, audio, and blob prompt blocks are currently reduced to metadata markers; their payloads do not enter the model context. Tool outputs are likewise forwarded to ACP as text blocks. Native multimodal prompt ingestion and rich tool outputs need structured worker-event and provider-message paths before clients can rely on them.
 
 ## Client contract for Flynt and future ACP clients
 

@@ -109,3 +109,4 @@ drawings/*.svg
 
 # Local per-project Omegon profile state
 **/.omegon/profile.json
+**/.omegon/active-profile.json

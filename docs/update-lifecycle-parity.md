@@ -38,7 +38,7 @@ superseded_by = "rust-agent-loop"
 
 ### Installed-mode update already uses a restart boundary
 
-Installed-mode `/update` runs `npm install -g omegon@latest`, clears the jiti cache, and explicitly tells the operator to restart pi. It does not attempt in-process reload. This means the restart boundary is already acknowledged as the safe contract for package replacement in installed mode; the asymmetry exists mainly in dev mode where `/update` still tries to continue the current process after rebuilding and dependency churn.
+The former installed-mode updater explicitly stopped at a restart boundary rather than attempting in-process reload after replacing runtime files. That remains the relevant safety contract: package mutation and process restart are separate operations.
 
 ### Current live binary target can be verified after link/install
 

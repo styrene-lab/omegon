@@ -538,7 +538,7 @@ pub fn control_request_from_slash(
 /// Shared handler for stateless control requests that need at most
 /// shared_settings, secrets, cwd, and dashboard handles — no TUI or
 /// runtime state. Called by both `execute_control` and `execute_daemon_control`.
-async fn try_stateless_control(
+pub(crate) async fn execute_stateless_control(
     request: &ControlRequest,
     shared_settings: &settings::SharedSettings,
     secrets: &Arc<omegon_secrets::SecretsManager>,
@@ -661,7 +661,7 @@ pub async fn execute_control(
     request: ControlRequest,
 ) -> SlashCommandResponse {
     // Try stateless handlers first (shared with daemon mode).
-    if let Some(resp) = try_stateless_control(
+    if let Some(resp) = execute_stateless_control(
         &request,
         ctx.shared_settings,
         &ctx.agent.secrets,
@@ -978,7 +978,7 @@ pub async fn execute_daemon_control(
     );
     // Try stateless handlers first (shared with TUI mode).
     let resp = if let Some(resp) =
-        try_stateless_control(&request, shared_settings, secrets, cwd, handles).await
+        execute_stateless_control(&request, shared_settings, secrets, cwd, handles).await
     {
         resp
     } else {

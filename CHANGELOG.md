@@ -18,9 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
-- Added ten shared golden JSON fixtures for the Auspex managed-delegation contract, with typed Omegon serialization and Auspex deserialization coverage for lifecycle observations, dispatch policy, raw results, cancellation states, and rejection envelopes.
-- Added an authenticated Auspex managed-delegation boundary over Omegon's live delegate runtime, with versioned dispatch/get/result/cancel envelopes, exact task IDs, effective policy reporting, bounded cancellation reasons and result payloads, and runtime-owned execution rather than summary scraping.
-- Added `scripts/terminal_test_workload.py`, a deterministic long-running mixed-output workload with heartbeats, bursts, signal handling, natural completion, and interactive `status`, `burst`, `fail`, and `quit` commands for exercising managed terminal sessions and the process viewer.
+- Clarified the ACP/editor ownership boundary: Zed's native Skills settings page belongs to Zed's built-in agent and is not populated by ACP agents; Omegon `/skills` remains the supported skill inventory and execution surface in Omegon ACP threads.
 - Added design artifacts for authoritative extension tool provenance across conversation surfaces, and captured the remaining operator-visible terminal-session questions alongside the new managed process viewer.
 - Connected completed `terminal` conversation cards to the managed-process viewer: select a retained terminal result and press Enter to open its canonical live session instead of inspecting a stale text dump.
 - Expanded the managed-process viewer with previous/next session switching and a confirmed stop action while keeping terminal input disabled.
@@ -29,6 +27,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Completed ACP `loadSession` by replaying restored user/assistant transcript chunks to the editor after worker hydration and before publishing the active session identity; historical tool activity remains omitted rather than being misrepresented as live execution.
+- Made ACP session loading transactional at the transport boundary: the active session ID and working directory are published only after worker restoration succeeds, and worker resume IDs are revalidated before they can reach persistence.
+- Advertised the scope-aware `/profile` command to ACP clients and routed canonical profile/skill commands exclusively through the authoritative worker runtime, avoiding transport-local settings drift; unsupported skill reload/create/import operations now return explicit editor guidance.
+- Routed ACP read-only commands as typed canonical control requests to the owning worker, preserving authoritative session settings without reparsing slash text, spawning duplicate state, or requiring SecretsManager initialization for commands that do not use secrets.
+- Routed ACP skill commands through the shared stateless control runtime used by native surfaces instead of maintaining an ACP-only execution path.
+- Fixed ACP slash commands such as `/version` aborting the editor agent process by blocking the active Tokio runtime; command and setting round-trips now await worker responses asynchronously.
+- Made ACP slash-command setting mutations wait for worker acknowledgement and report validation/persistence failures instead of claiming success after fire-and-forget sends; empty model values are now rejected.
+- Centralized ACP session-setting mutations behind shared canonical handlers for model, thinking, posture, context class, and profile application, including uniform validation and persistence errors.
+- Bound ACP command advertisement and execution to one explicit adapter table, with exhaustive registry coverage and authoritative worker routes for version, status, and stats.
+- Advertised exact ACP build identity through standard `agentInfo.version` and title (`<semver>+git.<sha>[.dirty]`), attached structured build metadata, and added a portable `/version` command so IDE operators can immediately detect stale agent subprocesses.
+- Marked all remaining non-failed ACP plan entries complete when the internal plan archives at successful turn completion, preventing editor clients from retaining a final in-progress spinner after the answer has finished.
+- Audited ACP-advertised slash commands against the shared registry: `/status`, `/stats`, `/version`, and profile operations now route to authoritative worker state, while the TUI-only `/profile` menu is no longer falsely advertised as an ACP command.
+- Fixed `/version` in ACP editor clients to use the worker's complete build identity—including commit, build date, and executable path—instead of returning only the package version.
+- Preserved the final completed ACP plan snapshot for Zed instead of clearing it when the internal plan archives, while explicit plan clears still remove the native plan UI; internal planning-gate receipts are no longer duplicated in the assistant transcript.
+- Restricted ACP host-read fallback to genuine capability-unavailable failures, preserving host permission denials and ordinary read errors as authoritative while reporting fallback provenance in tool details.
+- Added ACP profile open/copy workflows: editable project/user profiles return editor-openable file links, built-in profiles explain their immutable status, and copies use atomic writes without overwriting existing profiles.
+- Fixed ACP Profile selectors to use the authoritative scope-qualified active selection and guarantee that `currentValue` is present in the advertised inventory, preventing Zed/VS Code from rendering the active profile as `Unknown`.
+- Completed the portable ACP profile workflow with authoritative scope-qualified selection, editor-openable project/user profile paths, immutable built-in diagnostics, and copy-to-project/user commands.
+- Suppressed ACP plan pseudo-tool rows and redundant `Plan progress updated.` transcript text so native plan updates are the sole checklist presentation in editor clients.
+- Corrected ACP plan snapshot delivery to suppress initial/repeated empty projections and duplicate snapshots, while retaining a single empty replacement when an existing plan is explicitly cleared.
+- Preserved the negotiated ACP session working directory when delegating terminal commands to the editor host.
 - Made `/editor zed` parse comments and trailing commas in Zed's JSONC settings, write atomically, and fail closed on malformed or incompatible existing settings instead of replacing them with a new empty document.
 - Exposed portable ACP Profile and Context Window selectors with semantic categories/descriptions, full aggregate refresh after profile application, and slash-command fallbacks; posture now uses the first-class ACP mode selector instead of a duplicate settings dropdown.
 - Added explicit ACP turn lifecycle telemetry (`idle`, `running`, `cancelling`, or `failed`) and redacted last-error reporting to `_runtime/status`, giving reconnecting clients an authoritative view of in-flight work.
@@ -38,8 +57,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
-- Replaced the selected conversation row's width-shifting glyph rail with a stable full-row background highlight, and changed completed terminal rows from the stale `dbl-click copy` hint to `dbl-click process`.
-- Routed double-clicks on retained `terminal` result cards using the current `Started terminal 'name' (session-id)` output to the canonical managed-process viewer instead of the generic conversation-segment plaintext copy action.
+- Retired the obsolete npm wrapper distribution, including its platform-package scaffolding and stale npm packaging documentation; supported installs remain GitHub Releases, the install script, and Homebrew.
 - Hardened extension detail navigation after adversarial review: keyed primary actions now respond to Space, Escape returns from an extension detail page to the extension inventory, and missing detail targets produce visible feedback instead of silently doing nothing.
 - Reworked the extension runtime menu interaction model: Space now toggles enabled/disabled state in place, Enter opens an extension-specific management page, and update/remove actions live on that detail page instead of the collection browser.
 - Reworked extension create, install, and search entry points as explicit inline menu-input actions that execute without closing into the global editor; installed extension rows now perform enable/disable on Enter and expose confirmed update/remove actions that refresh the inventory instead of defaulting to a plain-text inspect dump.

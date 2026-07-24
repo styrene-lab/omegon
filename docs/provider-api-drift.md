@@ -13,7 +13,6 @@ visibility = "private"
 
 [data]
 open_questions = []
-parent = "core-distribution"
 +++
 
 # Provider API drift detection — daily live verification against reviewed expectations

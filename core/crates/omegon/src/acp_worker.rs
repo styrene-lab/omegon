@@ -32,6 +32,12 @@ pub enum WorkerRequest {
         text: String,
         response_tx: oneshot::Sender<WorkerResponse>,
     },
+    /// Replace the worker conversation with a persisted Omegon session.
+    LoadSession {
+        path: PathBuf,
+        resume_id: String,
+        ack: oneshot::Sender<Result<Vec<AcpReplayMessage>, String>>,
+    },
     /// Cancel the current prompt.
     Cancel,
     /// Change the model. `ack` (when provided) fires after shared_settings is
@@ -39,17 +45,17 @@ pub enum WorkerRequest {
     /// channel.
     SetModel {
         value: String,
-        ack: Option<oneshot::Sender<()>>,
+        ack: Option<oneshot::Sender<Result<(), String>>>,
     },
     /// Change thinking level.
     SetThinking {
         value: String,
-        ack: Option<oneshot::Sender<()>>,
+        ack: Option<oneshot::Sender<Result<(), String>>>,
     },
     /// Change posture.
     SetPosture {
         value: String,
-        ack: Option<oneshot::Sender<()>>,
+        ack: Option<oneshot::Sender<Result<(), String>>>,
     },
     /// Change the requested context class.
     SetContextClass {
@@ -68,6 +74,12 @@ pub enum WorkerRequest {
         command: String,
         response_tx: oneshot::Sender<WorkerResponse>,
     },
+    /// Execute a normalized control request directly, avoiding reparsing when
+    /// the ACP transport has already resolved the canonical command.
+    CanonicalControlRequest {
+        request: crate::control_runtime::ControlRequest,
+        response_tx: oneshot::Sender<WorkerResponse>,
+    },
     /// Connect MCP servers forwarded by the ACP client.
     ConnectMcpServers {
         servers: Vec<(String, crate::plugins::mcp::McpServerConfig)>,
@@ -81,6 +93,14 @@ pub struct WorkerResponse {
     pub text: String,
     pub error: Option<String>,
     pub cancelled: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlanUpdateDisposition {
+    Replace,
+    Merge,
+    Retain,
+    Clear,
 }
 
 /// Event streamed from the worker during prompt execution.
@@ -112,6 +132,7 @@ pub enum WorkerEvent {
     /// Execution plan update (decomposition children, phased work).
     PlanUpdate {
         entries: Vec<PlanEntryData>,
+        disposition: PlanUpdateDisposition,
     },
     /// Session title derived from the first prompt or active skill.
     SessionTitle(String),
@@ -151,6 +172,43 @@ pub enum WorkerEvent {
         reason: String,
     },
     TurnComplete,
+}
+
+pub struct AcpReplayMessage {
+    pub role: AcpReplayRole,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AcpReplayRole {
+    User,
+    Agent,
+}
+
+pub fn project_replay_messages(
+    conversation: &crate::conversation::ConversationState,
+) -> Vec<AcpReplayMessage> {
+    conversation
+        .replay_messages()
+        .iter()
+        .filter_map(|message| match message {
+            crate::conversation::AgentMessage::User { text, .. } => Some(AcpReplayMessage {
+                role: AcpReplayRole::User,
+                text: text.clone(),
+            }),
+            crate::conversation::AgentMessage::Assistant(message, _)
+                if !message.text.is_empty() =>
+            {
+                Some(AcpReplayMessage {
+                    role: AcpReplayRole::Agent,
+                    text: message.text.clone(),
+                })
+            }
+            // Tool activity is intentionally omitted. Replaying historical tool
+            // calls as live ACP updates would fabricate execution state.
+            _ => None,
+        })
+        .collect()
 }
 
 /// Handle to communicate with the worker thread.
@@ -277,6 +335,7 @@ async fn worker_loop(
     let extension_metadata = agent_setup.extension_metadata.clone();
     let extension_rpc_handles = agent_setup.extension_rpc_handles.clone();
     let mut cancel = CancellationToken::new();
+    let mut resume_id: Option<String> = None;
 
     let _ = secrets_tx.send(secrets.clone());
     if !extension_metadata.is_empty() {
@@ -378,7 +437,10 @@ async fn worker_loop(
                                         status: PlanEntryState::Pending,
                                     })
                                     .collect();
-                                Some(WorkerEvent::PlanUpdate { entries })
+                                Some(WorkerEvent::PlanUpdate {
+                                    entries,
+                                    disposition: PlanUpdateDisposition::Replace,
+                                })
                             }
                             omegon_traits::AgentEvent::DecompositionChildCompleted {
                                 label,
@@ -397,6 +459,7 @@ async fn worker_loop(
                                         content: label,
                                         status,
                                     }],
+                                    disposition: PlanUpdateDisposition::Merge,
                                 })
                             }
                             omegon_traits::AgentEvent::DecompositionCompleted { .. } => {
@@ -406,7 +469,19 @@ async fn worker_loop(
                             }
                             omegon_traits::AgentEvent::PlanUpdated { projection } => {
                                 let entries = crate::acp::plan_entries_from_projection(&projection);
-                                Some(WorkerEvent::PlanUpdate { entries })
+                                let disposition = if entries.is_empty()
+                                    && projection.completed_session.is_some()
+                                {
+                                    PlanUpdateDisposition::Retain
+                                } else if entries.is_empty() {
+                                    PlanUpdateDisposition::Clear
+                                } else {
+                                    PlanUpdateDisposition::Replace
+                                };
+                                Some(WorkerEvent::PlanUpdate {
+                                    entries,
+                                    disposition,
+                                })
                             }
                             omegon_traits::AgentEvent::SystemNotification { message } => {
                                 Some(WorkerEvent::StatusUpdate(message))
@@ -536,8 +611,8 @@ async fn worker_loop(
                     }
                 };
 
-                // Save session
-                let _ = crate::session::save_session(&conversation, &cwd, None);
+                // Save session, preserving the canonical ID after a load.
+                let _ = crate::session::save_session(&conversation, &cwd, resume_id.as_deref());
 
                 let _ = response_tx.send(WorkerResponse {
                     text: response_text,
@@ -549,6 +624,27 @@ async fn worker_loop(
                 }
             }
 
+            WorkerRequest::LoadSession {
+                path,
+                resume_id: requested_id,
+                ack,
+            } => {
+                let result = if !crate::session::is_canonical_session_id(&requested_id) {
+                    Err(format!("invalid session id `{requested_id}`"))
+                } else {
+                    crate::conversation::ConversationState::load_session(&path)
+                        .map(|loaded| {
+                            let replay = project_replay_messages(&loaded);
+                            conversation = loaded;
+                            resume_id = Some(requested_id);
+                            first_prompt = false;
+                            replay
+                        })
+                        .map_err(|error| format!("could not load session: {error}"))
+                };
+                let _ = ack.send(result);
+            }
+
             WorkerRequest::Cancel => {
                 cancel.cancel();
                 let _ = event_tx.send(WorkerEvent::TurnCancelled {
@@ -557,87 +653,50 @@ async fn worker_loop(
             }
 
             WorkerRequest::SetModel { value, ack } => {
-                if let Ok(mut s) = shared_settings.lock() {
-                    s.set_model(&value);
-                    let mut profile = crate::settings::Profile::load(&cwd);
-                    profile.capture_from(&s);
-                    let _ = profile.save(&cwd);
-                }
+                let result =
+                    crate::session_settings_commands::set_model(&shared_settings, &cwd, &value);
                 if let Some(tx) = ack {
-                    let _ = tx.send(());
+                    let _ = tx.send(result);
+                } else if let Err(error) = result {
+                    tracing::warn!(%error, "failed to persist ACP model setting");
                 }
             }
 
             WorkerRequest::SetThinking { value, ack } => {
-                if let Some(l) = crate::settings::ThinkingLevel::parse(&value)
-                    && let Ok(mut s) = shared_settings.lock()
-                {
-                    s.thinking = l;
-                    let mut profile = crate::settings::Profile::load(&cwd);
-                    profile.capture_from(&s);
-                    let _ = profile.save(&cwd);
-                }
+                let result =
+                    crate::session_settings_commands::set_thinking(&shared_settings, &cwd, &value);
                 if let Some(tx) = ack {
-                    let _ = tx.send(());
+                    let _ = tx.send(result);
+                } else if let Err(error) = result {
+                    tracing::warn!(%error, "failed to persist ACP thinking setting");
                 }
             }
 
             WorkerRequest::SetPosture { value, ack } => {
-                let posture = match value.as_str() {
-                    "fabricator" => Some(crate::settings::PosturePreset::Fabricator),
-                    "architect" => Some(crate::settings::PosturePreset::Architect),
-                    "explorator" => Some(crate::settings::PosturePreset::Explorator),
-                    "devastator" => Some(crate::settings::PosturePreset::Devastator),
-                    _ => None,
-                };
-                if let Some(p) = posture
-                    && let Ok(mut s) = shared_settings.lock()
-                {
-                    s.set_posture(p);
-                    let mut profile = crate::settings::Profile::load(&cwd);
-                    profile.capture_from(&s);
-                    let _ = profile.save(&cwd);
-                }
+                let result =
+                    crate::session_settings_commands::set_posture(&shared_settings, &cwd, &value);
                 if let Some(tx) = ack {
-                    let _ = tx.send(());
+                    let _ = tx.send(result);
+                } else if let Err(error) = result {
+                    tracing::warn!(%error, "failed to persist ACP posture setting");
                 }
             }
 
             WorkerRequest::SetContextClass { value, ack } => {
-                let result = crate::settings::ContextClass::parse(&value)
-                    .ok_or_else(|| format!("unknown context class `{value}`"))
-                    .and_then(|context_class| {
-                        let mut settings = shared_settings
-                            .lock()
-                            .map_err(|_| "settings lock poisoned".to_string())?;
-                        settings.set_requested_context_class(context_class);
-                        let mut profile = crate::settings::Profile::load(&cwd);
-                        profile.capture_from(&settings);
-                        profile
-                            .save(&cwd)
-                            .map_err(|error| format!("could not persist context class: {error}"))?;
-                        Ok(())
-                    });
+                let result = crate::session_settings_commands::set_context_class(
+                    &shared_settings,
+                    &cwd,
+                    &value,
+                );
                 let _ = ack.send(result);
             }
 
             WorkerRequest::ApplyProfile { id, scope, ack } => {
-                let result = (|| {
-                    let selection = crate::settings::ActiveProfileSelection { id, scope };
-                    let registry = crate::settings::ProfileRegistry::discover(&cwd);
-                    let loaded = registry
-                        .resolve_explicit(&selection)
-                        .ok_or_else(|| format!("profile `{}` was not found", selection.id))?;
-                    crate::settings::save_project_active_profile_selection(&cwd, &selection)
-                        .map_err(|error| format!("could not select profile: {error}"))?;
-                    let mut settings = shared_settings
-                        .lock()
-                        .map_err(|_| "settings lock poisoned".to_string())?;
-                    loaded.profile.apply_to_with_posture(&mut settings, &cwd);
-                    settings.provider_connected =
-                        crate::auth::provider_connected_for_model(&settings.model);
-                    Ok(())
-                })();
+                let result = crate::session_settings_commands::apply_profile(
+                    &shared_settings,
+                    &cwd,
+                    crate::settings::ActiveProfileSelection { id, scope },
+                );
                 let _ = ack.send(result);
             }
 
@@ -681,6 +740,28 @@ async fn worker_loop(
                         Err(e) => text = format!("Persona switch failed: {e}"),
                     }
                 }
+                let _ = response_tx.send(WorkerResponse {
+                    text,
+                    error: None,
+                    cancelled: false,
+                });
+            }
+
+            WorkerRequest::CanonicalControlRequest {
+                request,
+                response_tx,
+            } => {
+                let handles = crate::tui::dashboard::DashboardHandles::default();
+                let text = crate::control_runtime::execute_stateless_control(
+                    &request,
+                    &shared_settings,
+                    &secrets,
+                    &cwd,
+                    &handles,
+                )
+                .await
+                .and_then(|response| response.output)
+                .unwrap_or_else(|| "Unsupported ACP control request".into());
                 let _ = response_tx.send(WorkerResponse {
                     text,
                     error: None,
@@ -749,6 +830,15 @@ async fn handle_control_request(
     let args = parts.get(1).unwrap_or(&"").trim();
 
     match cmd {
+        "version" => format!(
+            "Omegon {}\nBuild {}\nBuilt {}\nBinary {}",
+            env!("CARGO_PKG_VERSION"),
+            env!("OMEGON_GIT_SHA"),
+            env!("OMEGON_BUILD_DATE"),
+            std::env::current_exe()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|_| "unknown".into())
+        ),
         "status" => {
             let settings = shared_settings
                 .lock()
@@ -861,6 +951,64 @@ async fn handle_control_request(
             } else {
                 // Handled async in the worker loop — return marker
                 format!("__async_persona_switch:{args}")
+            }
+        }
+
+        "profile_open" => {
+            let selection = if args.trim().is_empty() {
+                crate::settings::active_profile_selection(cwd)
+            } else {
+                let Some(selection) = crate::settings::parse_scoped_profile_selection(args.trim())
+                else {
+                    return "Usage: profile_open [project|user|built-in:<id>]".into();
+                };
+                selection
+            };
+            let registry = crate::settings::ProfileRegistry::discover(cwd);
+            let Some(entry) = registry.find_explicit(&selection) else {
+                return format!("Profile `{}` was not found.", selection.id);
+            };
+            let Some(path) = entry.path.as_ref() else {
+                return format!(
+                    "Profile `built-in:{}` is read-only and has no file. Copy it first with `/profile copy built-in:{} project:<new-id>`.",
+                    entry.id, entry.id
+                );
+            };
+            format!(
+                "Profile `{}` is at [`{}`](file://{}). Open that path in the editor to modify it; changes apply after re-selecting the profile.",
+                selection.id,
+                path.display(),
+                path.display()
+            )
+        }
+
+        "profile_copy" => {
+            let mut parts = args.split_whitespace();
+            let source = parts
+                .next()
+                .and_then(crate::settings::parse_scoped_profile_selection);
+            let target = parts
+                .next()
+                .and_then(crate::settings::parse_scoped_profile_selection);
+            if parts.next().is_some() || source.is_none() || target.is_none() {
+                return "Usage: profile_copy <scope:id> <project|user:new-id>".into();
+            }
+            let source = source.expect("checked");
+            let target = target.expect("checked");
+            let scope = match target.scope.as_deref() {
+                Some("project") => crate::settings::ProfileRegistryScope::Project,
+                Some("user") => crate::settings::ProfileRegistryScope::User,
+                _ => return "Target scope must be `project` or `user`.".into(),
+            };
+            match crate::settings::copy_profile(cwd, &source, scope, &target.id) {
+                Ok(path) => format!(
+                    "Copied profile to [`{}`](file://{}). Select `{}:{}` from the Profile menu after editing.",
+                    path.display(),
+                    path.display(),
+                    target.scope.as_deref().unwrap_or("project"),
+                    target.id
+                ),
+                Err(error) => format!("failed to copy profile: {error}"),
             }
         }
 
