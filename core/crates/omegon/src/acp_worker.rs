@@ -36,7 +36,7 @@ pub enum WorkerRequest {
     LoadSession {
         path: PathBuf,
         resume_id: String,
-        ack: oneshot::Sender<Result<(), String>>,
+        ack: oneshot::Sender<Result<Vec<AcpReplayMessage>, String>>,
     },
     /// Cancel the current prompt.
     Cancel,
@@ -172,6 +172,43 @@ pub enum WorkerEvent {
         reason: String,
     },
     TurnComplete,
+}
+
+pub struct AcpReplayMessage {
+    pub role: AcpReplayRole,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AcpReplayRole {
+    User,
+    Agent,
+}
+
+pub fn project_replay_messages(
+    conversation: &crate::conversation::ConversationState,
+) -> Vec<AcpReplayMessage> {
+    conversation
+        .replay_messages()
+        .iter()
+        .filter_map(|message| match message {
+            crate::conversation::AgentMessage::User { text, .. } => Some(AcpReplayMessage {
+                role: AcpReplayRole::User,
+                text: text.clone(),
+            }),
+            crate::conversation::AgentMessage::Assistant(message, _)
+                if !message.text.is_empty() =>
+            {
+                Some(AcpReplayMessage {
+                    role: AcpReplayRole::Agent,
+                    text: message.text.clone(),
+                })
+            }
+            // Tool activity is intentionally omitted. Replaying historical tool
+            // calls as live ACP updates would fabricate execution state.
+            _ => None,
+        })
+        .collect()
 }
 
 /// Handle to communicate with the worker thread.
@@ -597,9 +634,11 @@ async fn worker_loop(
                 } else {
                     crate::conversation::ConversationState::load_session(&path)
                         .map(|loaded| {
+                            let replay = project_replay_messages(&loaded);
                             conversation = loaded;
                             resume_id = Some(requested_id);
                             first_prompt = false;
+                            replay
                         })
                         .map_err(|error| format!("could not load session: {error}"))
                 };

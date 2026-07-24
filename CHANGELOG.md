@@ -25,7 +25,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
-- Withheld ACP `loadSession` advertisement because restoring Omegon's internal model history without replaying transcript updates leaves editor threads blank; persisted session loading remains internal until the protocol-visible replay contract is implemented.
+- Completed ACP `loadSession` by replaying restored user/assistant transcript chunks to the editor after worker hydration and before publishing the active session identity; historical tool activity remains omitted rather than being misrepresented as live execution.
 - Made ACP session loading transactional at the transport boundary: the active session ID and working directory are published only after worker restoration succeeds, and worker resume IDs are revalidated before they can reach persistence.
 - Advertised the scope-aware `/profile` command to ACP clients and routed canonical profile/skill commands exclusively through the authoritative worker runtime, avoiding transport-local settings drift; unsupported skill reload/create/import operations now return explicit editor guidance.
 - Routed ACP read-only commands as typed canonical control requests to the owning worker, preserving authoritative session settings without reparsing slash text, spawning duplicate state, or requiring SecretsManager initialization for commands that do not use secrets.

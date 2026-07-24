@@ -2052,14 +2052,29 @@ impl OmegonAcpAgent {
             ack,
         })
         .await;
-        loaded
+        let replay = loaded
             .await
             .map_err(|_| Error::internal_error())?
             .map_err(|message| Error::new(i32::from(ErrorCode::InternalError), message))?;
 
-        // Publish the new active identity only after worker restoration succeeds.
-        // A malformed session must not leave transport state pointing at content
-        // the worker failed to load.
+        // ACP load-session requires the agent to replay the restored transcript
+        // through session/update notifications before returning. Historical tool
+        // activity is intentionally absent from this projection so replay cannot
+        // fabricate live execution state.
+        if let Some(connection) = self.conn.borrow().clone() {
+            for message in replay {
+                let content = ContentChunk::new(ContentBlock::Text(TextContent::new(message.text)));
+                let update = match message.role {
+                    acp_worker::AcpReplayRole::User => SessionUpdate::UserMessageChunk(content),
+                    acp_worker::AcpReplayRole::Agent => SessionUpdate::AgentMessageChunk(content),
+                };
+                send_session_update(&connection, args.session_id.clone(), update).await?;
+            }
+        }
+
+        // Publish the new active identity only after worker restoration and
+        // transcript replay both succeed. A malformed session or failed client
+        // notification must not leave transport state pointing at partial content.
         *self.session_cwd.borrow_mut() = Some(args.cwd.clone());
         *self.session_id.borrow_mut() = Some(args.session_id.clone());
 
