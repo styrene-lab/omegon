@@ -133,6 +133,7 @@ mod tui;
 mod ui_runtime;
 pub mod util;
 mod web;
+mod managed_agent_supervisor;
 mod workflow;
 
 pub mod nex;
@@ -2922,6 +2923,9 @@ async fn run_embedded_command(
                             },
                         );
                     }
+                    Some(tui::TuiCommand::ManagedDelegateControl { method, respond_to, .. }) => {
+                        let _ = respond_to.send(serde_json::json!({"type": format!("{method}_result"), "accepted": false, "error": "managed delegation requires the interactive runtime"}));
+                    }
                     Some(tui::TuiCommand::ExecuteControl { request, respond_to }) => {
                         tracing::info!(request = ?request, "daemon: IPC control request");
                         let response = control_runtime::execute_daemon_control(
@@ -4561,6 +4565,27 @@ fn build_tui_secret_readiness_snapshot(
                 break;
             }
 
+            tui::TuiCommand::ManagedDelegateControl { method, payload, respond_to } => {
+                let reply = match crate::managed_agent_supervisor::parse_operation(&method, &payload) {
+                    Ok((envelope, operation)) => match operation {
+                        crate::managed_agent_supervisor::SupervisorOperation::GetObservation { task_id } => {
+                            match agent.dashboard_handles.delegate_tasks.as_ref().and_then(|store| store.task_observation(&task_id)) {
+                                Some(observation) => crate::managed_agent_supervisor::observation_response(&envelope, observation),
+                                None => crate::managed_agent_supervisor::error_response(&method, &envelope, "unknown_task"),
+                            }
+                        }
+                        crate::managed_agent_supervisor::SupervisorOperation::Execute { tool, args } => {
+                            match runtime_state.bus.execute_tool(tool, "auspex-supervisor", args, tokio_util::sync::CancellationToken::new()).await {
+                                Ok(result) => crate::managed_agent_supervisor::response(&method, &envelope, result).unwrap_or_else(|error| crate::managed_agent_supervisor::error_response(&method, &envelope, &error)),
+                                Err(error) => crate::managed_agent_supervisor::error_response(&method, &envelope, &error.to_string()),
+                            }
+                        }
+                    },
+                    Err(error) => serde_json::json!({"type": format!("{method}_result"), "accepted": false, "error": error}),
+                };
+                let _ = respond_to.send(reply);
+            }
+
             tui::TuiCommand::ExecuteControl { request, respond_to } => {
                 let mut ctx = control_runtime::ControlContext {
                     runtime_state: &mut runtime_state,
@@ -5394,6 +5419,12 @@ fn build_tui_secret_readiness_snapshot(
                                     },
                                     web::WebCommand::ExecuteControl { request, respond_to } => {
                                         if cmd_tx_clone.send(tui::TuiCommand::ExecuteControl { request, respond_to }).await.is_err() {
+                                            break;
+                                        }
+                                        continue;
+                                    }
+                                    web::WebCommand::ManagedDelegateControl { method, payload, respond_to } => {
+                                        if cmd_tx_clone.send(tui::TuiCommand::ManagedDelegateControl { method, payload, respond_to }).await.is_err() {
                                             break;
                                         }
                                         continue;

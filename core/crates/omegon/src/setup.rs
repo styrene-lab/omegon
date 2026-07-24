@@ -767,6 +767,7 @@ impl AgentSetup {
         }
 
         let delegate_handle = delegate_feature.progress_handle();
+        let delegate_tasks = delegate_feature.result_store_handle();
         let delegate_event_slot = delegate_feature.event_sender_slot();
         bus.register(Box::new(delegate_feature));
 
@@ -1479,6 +1480,7 @@ impl AgentSetup {
                 lifecycle: Some(lifecycle_handle),
                 cleave: Some(cleave_handle),
                 delegate: Some(delegate_handle),
+                delegate_tasks: Some(delegate_tasks),
                 session: std::sync::Arc::new(std::sync::Mutex::new(
                     crate::tui::dashboard::SharedSessionStats::default(),
                 )),

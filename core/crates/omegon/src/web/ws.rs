@@ -182,6 +182,20 @@ async fn handle_client_command(
     let caller_role = websocket_caller_role(cmd, state);
 
     match cmd_type {
+        "delegate_dispatch" | "delegate_get" | "delegate_result" | "delegate_cancel" => {
+            let classified = crate::control_actions::classify_web_method(cmd_type);
+            if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                let _ = snapshot_tx.send(json!({"type": format!("{cmd_type}_result"), "accepted": false, "error": "insufficient_role"})).await;
+                return;
+            }
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let payload = cmd.clone();
+            let sent = command_tx.send(WebCommand::ManagedDelegateControl {
+                method: cmd_type.to_string(), payload, respond_to: reply_tx,
+            }).await.is_ok();
+            let reply = if sent { reply_rx.await.unwrap_or_else(|_| json!({"type": format!("{cmd_type}_result"), "accepted": false, "error": "runtime_disconnected"})) } else { json!({"type": format!("{cmd_type}_result"), "accepted": false, "error": "runtime_unavailable"}) };
+            let _ = snapshot_tx.send(reply).await;
+        }
         "user_prompt" => {
             let classified = crate::control_actions::classify_web_method("user_prompt");
             if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {

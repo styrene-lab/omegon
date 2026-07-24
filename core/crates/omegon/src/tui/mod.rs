@@ -306,6 +306,12 @@ pub enum TuiCommand {
         request: crate::control_runtime::ControlRequest,
         respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
     },
+    /// Execute an authenticated Auspex supervisor request against the live delegate feature.
+    ManagedDelegateControl {
+        method: String,
+        payload: serde_json::Value,
+        respond_to: tokio::sync::oneshot::Sender<serde_json::Value>,
+    },
     /// Execute canonical slash semantics from a non-TUI caller.
     RunSlashCommand {
         name: String,
@@ -10023,13 +10029,24 @@ warning: {warning}"
             return None;
         }
         let result = detail_result.as_deref()?;
-        let marker = "Terminal session '";
-        let after = result
-            .find(marker)
-            .map(|index| &result[index + marker.len()..])?;
+        let after = ["Started terminal '", "Terminal session '"]
+            .into_iter()
+            .find_map(|marker| {
+                result
+                    .find(marker)
+                    .map(|index| &result[index + marker.len()..])
+            })?;
         let (_, after_name) = after.split_once("' (")?;
         let (id, _) = after_name.split_once(')')?;
         crate::tools::terminal::execution_session_snapshot_by_id(id).map(|snapshot| snapshot.id)
+    }
+
+    fn open_selected_terminal_process_viewer(&mut self) -> bool {
+        let Some(session_id) = self.selected_terminal_session_id() else {
+            return false;
+        };
+        self.open_process_viewer(&session_id);
+        true
     }
 
     fn open_process_viewer(&mut self, session: &str) {
@@ -14206,7 +14223,9 @@ pub async fn run_tui(
                                         },
                                     );
                                     if is_double {
-                                        if app.conversation.toggle_image_attachments_at(idx) > 0 {
+                                        if app.open_selected_terminal_process_viewer()
+                                            || app.conversation.toggle_image_attachments_at(idx) > 0
+                                        {
                                             app.effects.pulse_conversation_action();
                                         } else if app
                                             .conversation

@@ -45,6 +45,7 @@ pub struct DashboardHandles {
     pub lifecycle: Option<LifecycleReadHandle>,
     pub cleave: Option<Arc<Mutex<CleaveProgress>>>,
     pub delegate: Option<Arc<Mutex<crate::features::delegate::DelegateProgress>>>,
+    pub delegate_tasks: Option<Arc<crate::features::delegate::DelegateResultStore>>,
     pub session: Arc<Mutex<SharedSessionStats>>,
     pub harness: Option<Arc<Mutex<HarnessStatus>>>,
     pub runtime_lifecycle: Arc<Mutex<Option<omegon_traits::RuntimeLifecycleSnapshot>>>,

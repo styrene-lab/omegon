@@ -221,6 +221,7 @@ impl ConvState {
                     segment.capabilities().detail_openable,
                     segment.capabilities().copyable,
                     is_collapsed_expandable_tool_card(segment),
+                    is_terminal_tool_card(segment),
                 )
                 .content_area(segment_area);
                 let available_height = viewport.bottom().saturating_sub(render_y);
@@ -456,6 +457,7 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                     segment.capabilities().detail_openable,
                     segment.capabilities().copyable,
                     is_collapsed_expandable_tool_card(segment),
+                    is_terminal_tool_card(segment),
                 )
                 .render(seg_area, buf, self.theme, |content_area, buf| {
                     segment.render_in_context(content_area, buf, &render_ctx);
@@ -498,6 +500,7 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                     segment.capabilities().detail_openable,
                     segment.capabilities().copyable,
                     is_collapsed_expandable_tool_card(segment),
+                    is_terminal_tool_card(segment),
                 )
                 .render(
                     temp_area,
@@ -593,6 +596,7 @@ fn measured_segment_height(
         segment.capabilities().detail_openable,
         segment.capabilities().copyable,
         is_collapsed_expandable_tool_card(segment),
+        is_terminal_tool_card(segment),
     );
     let content_width = frame.content_area(Rect::new(0, 0, width, 1)).width;
     let estimated = segment.height_in_context(content_width, ctx);
@@ -660,6 +664,13 @@ fn render_assistant_copy_affordance(
     Some(Rect::new(x, area.y, label_width, 1))
 }
 
+fn is_terminal_tool_card(segment: &Segment) -> bool {
+    matches!(
+        &segment.content,
+        super::segments::SegmentContent::ToolCard { name, complete: true, .. } if name == "terminal"
+    )
+}
+
 fn is_collapsed_expandable_tool_card(segment: &Segment) -> bool {
     matches!(
         &segment.content,
@@ -677,6 +688,7 @@ struct SelectedSegmentFrame {
     detail_openable: bool,
     copyable: bool,
     collapsed_expandable: bool,
+    opens_process_viewer: bool,
 }
 
 impl SelectedSegmentFrame {
@@ -685,12 +697,14 @@ impl SelectedSegmentFrame {
         detail_openable: bool,
         copyable: bool,
         collapsed_expandable: bool,
+        opens_process_viewer: bool,
     ) -> Self {
         Self {
             selected,
             detail_openable,
             copyable,
             collapsed_expandable,
+            opens_process_viewer,
         }
     }
 
@@ -709,16 +723,7 @@ impl SelectedSegmentFrame {
     }
 
     fn content_area(&self, area: Rect) -> Rect {
-        if self.selected && area.width > 1 {
-            Rect {
-                x: area.x.saturating_add(1),
-                y: area.y,
-                width: area.width.saturating_sub(1),
-                height: area.height,
-            }
-        } else {
-            area
-        }
+        area
     }
 
     fn render_chrome(&self, area: Rect, buf: &mut Buffer, theme: &dyn Theme) {
@@ -726,18 +731,14 @@ impl SelectedSegmentFrame {
             return;
         }
 
-        let style = Style::default()
-            .fg(theme.accent_bright())
-            .bg(theme.surface_bg())
-            .add_modifier(Modifier::BOLD);
-        for (row, y) in (area.top()..area.bottom()).enumerate() {
-            let marker = match (self.detail_openable, row == 0) {
-                (true, true) => '◆',
-                _ => '│',
-            };
-            if let Some(cell) = buf.cell_mut((area.x, y)) {
-                cell.set_char(marker);
-                cell.set_style(style);
+        // Selection must not alter row geometry: changing the content origin made
+        // one-line tool rows jump sideways and left a stray marker glyph. A quiet
+        // full-row surface tint is both more obvious and spatially stable.
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                if let Some(cell) = buf.cell_mut((x, y)) {
+                    cell.set_bg(theme.card_bg());
+                }
             }
         }
         self.render_hint(area, buf, theme);
@@ -747,7 +748,9 @@ impl SelectedSegmentFrame {
         if area.width < 24 || area.height == 0 {
             return;
         }
-        let label = if self.collapsed_expandable {
+        let label = if self.opens_process_viewer {
+            " dbl-click process "
+        } else if self.collapsed_expandable {
             " dbl-click expand "
         } else if self.copyable {
             " dbl-click copy "
@@ -865,6 +868,45 @@ mod tests {
                 .all(|cell| cell.fg != Alpharius.warning()),
             "detached navigation hint must not consume the attention color"
         );
+    }
+
+    #[test]
+    fn selected_terminal_row_uses_stable_highlight_and_process_hint() {
+        let segment = Segment {
+            meta: Default::default(),
+            content: SegmentContent::ToolCard {
+                id: "terminal-test".into(),
+                name: "terminal".into(),
+                provenance: Default::default(),
+                args_summary: Some("start".into()),
+                detail_args: Some("start".into()),
+                result_summary: Some("Started terminal 'test' (id) PID 1".into()),
+                detail_result: Some("Started terminal 'test' (id) PID 1".into()),
+                is_error: false,
+                complete: true,
+                expanded: false,
+                live_partial: None,
+                started_at: None,
+            },
+        };
+        let segments = vec![segment];
+        let widget = ConversationWidget::new(&segments, &Alpharius)
+            .with_mode(SegmentRenderMode::Slim)
+            .with_selected_segment(Some(0));
+        let area = Rect::new(0, 0, 80, 3);
+        let mut buf = Buffer::empty(area);
+        let mut state = ConvState::new();
+        widget.render(area, &mut buf, &mut state);
+
+        let rendered = buffer_text(&buf, area);
+        assert!(rendered.contains("dbl-click process"), "got {rendered}");
+        assert!(!rendered.contains("dbl-click copy"), "got {rendered}");
+        assert!(!rendered.contains('◆'), "got {rendered}");
+        assert!(!rendered.contains('│'), "got {rendered}");
+        let selected_row = (0..area.height)
+            .find(|&y| (0..area.width).any(|x| buf[(x, y)].symbol() != " "))
+            .expect("selected row");
+        assert_eq!(buf[(area.x, selected_row)].bg, Alpharius.card_bg());
     }
 
     #[test]
@@ -1377,7 +1419,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_segment_height_uses_gutter_content_width() {
+    fn selected_segment_height_keeps_content_width_stable() {
         let segments = vec![Segment {
             meta: Default::default(),
             content: SegmentContent::AssistantText {
@@ -1393,7 +1435,7 @@ mod tests {
         assert_eq!(state.heights, vec![1]);
 
         state.ensure_heights_with_scroll_state(&segments, 9, &ctx, false, Some(0));
-        assert_eq!(state.heights, vec![2]);
+        assert_eq!(state.heights, vec![1]);
     }
 
     #[test]
@@ -1417,13 +1459,14 @@ mod tests {
 
         let rendered = buffer_text(&buf, area);
         assert!(
-            rendered.lines().any(|line| line.starts_with("◆inspect me")),
-            "selection frame should wrap plain prose instead of replacing the first character: {rendered}"
+            rendered.lines().any(|line| line.starts_with("inspect me")),
+            "selection highlight should preserve plain prose without adding a gutter: {rendered}"
         );
+        assert!(!rendered.contains('◆'), "{rendered}");
     }
 
     #[test]
-    fn selected_image_area_respects_selection_gutter() {
+    fn selected_image_area_keeps_geometry_stable() {
         let segments = vec![Segment::image("/tmp/example.png".into(), "example")];
         let viewport = Rect::new(10, 0, 20, 14);
         let mut state = ConvState::new();
@@ -1438,8 +1481,8 @@ mod tests {
         state.ensure_heights_with_scroll_state(&segments, viewport.width, &ctx, false, Some(0));
         let selected = state.visible_image_areas(&segments, viewport);
         assert_eq!(selected.len(), 1);
-        assert_eq!(selected[0].1.x, 12);
-        assert_eq!(selected[0].1.width, 17);
+        assert_eq!(selected[0].1.x, 11);
+        assert_eq!(selected[0].1.width, 18);
     }
 
     #[test]
@@ -1459,14 +1502,9 @@ mod tests {
             rendered.contains("dbl-click copy"),
             "selected copyable segment should advertise double-click copy: {rendered}"
         );
-        assert!(
-            rendered.lines().any(|line| line.starts_with('◆')),
-            "detail-openable selection should mark the segment start: {rendered}"
-        );
-        assert!(
-            rendered.contains("││ inspect me"),
-            "selection rail should not replace the first content character: {rendered}"
-        );
+        assert!(!rendered.contains('◆'), "{rendered}");
+        assert!(!rendered.contains("││ inspect me"), "{rendered}");
+        assert!(rendered.contains("│ inspect me"), "{rendered}");
     }
 
     #[test]
@@ -1482,11 +1520,10 @@ mod tests {
 
         let rendered = buffer_text(&buf, area);
         assert!(!rendered.contains("dbl-click copy"), "{rendered}");
+        assert!(!rendered.contains('◆'), "{rendered}");
         assert!(
-            rendered
-                .lines()
-                .any(|line| line.starts_with("│ ") || line.starts_with("│─")),
-            "selected non-openable segment should still show focus without replacing content: {rendered}"
+            (0..area.height).any(|y| buf[(area.x, y)].bg == Alpharius.card_bg()),
+            "selected non-openable segment should use a background highlight: {rendered}"
         );
     }
 
