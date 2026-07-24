@@ -2966,6 +2966,58 @@ fn conversation_segment_at_returns_clicked_segment() {
 }
 
 #[test]
+fn projected_conversation_hit_test_returns_canonical_segment() {
+    let mut cv = ConversationView::new();
+    cv.push_user("first");
+    cv.push_tool_start(
+        "t1",
+        "terminal",
+        Some("start session"),
+        Some("start session"),
+    );
+    cv.push_tool_end(
+        "t1",
+        false,
+        Some("Started terminal 'session' (00000000-0000-0000-0000-000000000001) PID 1"),
+    );
+    cv.append_streaming("later assistant summary");
+    cv.finalize_message();
+
+    // Slim projection can omit or synthesize canonical rows. Reproduce the
+    // essential mismatch: projected row 1 is canonical terminal segment 1,
+    // while a later canonical segment still exists.
+    let projected = vec![cv.segments()[0].clone(), cv.segments()[1].clone()];
+    let canonical_indices = vec![0, 1];
+    let t = crate::tui::theme::Alpharius;
+    let area = Rect::new(0, 0, 100, 12);
+    let mut buf = Buffer::empty(area);
+    {
+        let (_, state) = cv.segments_and_state();
+        let widget = crate::tui::conv_widget::ConversationWidget::new(&projected, &t)
+            .with_mode(crate::tui::segments::SegmentRenderMode::Slim);
+        widget.render(area, &mut buf, state);
+    }
+
+    let terminal_row = (area.y..area.bottom())
+        .find(|&row| {
+            (area.x..area.right())
+                .map(|column| buf[(column, row)].symbol())
+                .collect::<String>()
+                .contains("terminal")
+        })
+        .expect("rendered terminal row");
+    assert_eq!(
+        cv.projected_segment_at(area, terminal_row, &canonical_indices),
+        Some(1)
+    );
+    assert_eq!(
+        cv.segment_at(area, terminal_row),
+        None,
+        "canonical hit-test must reject a projected height cache instead of selecting the wrong row"
+    );
+}
+
+#[test]
 fn toggle_pin_prefers_selected_tool_card() {
     let mut cv = ConversationView::new();
     cv.push_tool_start("t1", "bash", Some("echo one"), Some("echo one"));
@@ -5650,6 +5702,24 @@ fn selected_terminal_result_resolves_retained_process_session() {
         Some(id.as_str())
     );
     assert!(app.open_selected_terminal_process_viewer());
+    assert_eq!(
+        app.process_viewer
+            .as_ref()
+            .map(|viewer| viewer.session_id.as_str()),
+        Some(id.as_str())
+    );
+
+    app.process_viewer = None;
+    app.conversation
+        .push_tool_start("terminal-list-card", "terminal", Some("list"), None);
+    app.conversation
+        .push_tool_end("terminal-list-card", false, Some("No terminal sessions."));
+    let list_idx = app.conversation.segments().len() - 1;
+    app.conversation.select_segment(list_idx);
+    assert!(
+        app.open_selected_terminal_process_viewer(),
+        "a terminal card without an embedded id should open the retained running session"
+    );
     assert_eq!(
         app.process_viewer
             .as_ref()

@@ -98,6 +98,7 @@ mod extension_registry;
 mod github_copilot;
 mod lifecycle;
 mod r#loop;
+mod managed_agent_supervisor;
 mod model_registry;
 mod mqtt_bridge;
 mod ollama;
@@ -133,7 +134,6 @@ mod tui;
 mod ui_runtime;
 pub mod util;
 mod web;
-mod managed_agent_supervisor;
 mod workflow;
 
 pub mod nex;
@@ -203,7 +203,9 @@ struct Cli {
     #[arg(long)]
     prompt_file: Option<PathBuf>,
 
-    /// Maximum turns before forced stop (0 = no limit)
+    /// Maximum turns before forced stop (0 = no limit).
+    /// Interactive sessions translate the implicit default to unlimited;
+    /// bounded/headless modes retain the 50-turn default unless overridden.
     #[arg(long, default_value = "50")]
     max_turns: u32,
 
@@ -3956,7 +3958,11 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         cli_posture: resolve_cli_posture(cli).as_deref(),
         slim: cli_prefers_slim_mode(cli),
         full: cli.full,
-        max_turns: cli.max_turns,
+        max_turns: if cli.max_turns == 50 {
+            0
+        } else {
+            cli.max_turns
+        },
         apply_profile_posture: true,
     });
 

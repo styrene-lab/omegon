@@ -192,7 +192,10 @@ impl DelegateResultStore {
         tasks.get(task_id).cloned()
     }
 
-    pub fn task_observation(&self, task_id: &str) -> Option<crate::managed_agent_supervisor::DelegateObservation> {
+    pub fn task_observation(
+        &self,
+        task_id: &str,
+    ) -> Option<crate::managed_agent_supervisor::DelegateObservation> {
         self.get_task(task_id).map(Into::into)
     }
 
@@ -1227,7 +1230,10 @@ If blocked, say the blocker plainly.\n",
                 .await
             {
                 Ok(result) => {
-                    if matches!(store.get_task(&task_id).map(|task| task.status), Some(DelegateTaskStatus::Cancelled { .. })) {
+                    if matches!(
+                        store.get_task(&task_id).map(|task| task.status),
+                        Some(DelegateTaskStatus::Cancelled { .. })
+                    ) {
                         store.confirm_task_cancelled(&task_id);
                     } else {
                         store.update_task_status(
@@ -1264,7 +1270,10 @@ If blocked, say the blocker plainly.\n",
                     {
                         *count += 1;
                     }
-                    if matches!(store.get_task(&task_id).map(|task| task.status), Some(DelegateTaskStatus::Cancelled { .. })) {
+                    if matches!(
+                        store.get_task(&task_id).map(|task| task.status),
+                        Some(DelegateTaskStatus::Cancelled { .. })
+                    ) {
                         store.confirm_task_cancelled(&task_id);
                     } else {
                         store.update_task_status(

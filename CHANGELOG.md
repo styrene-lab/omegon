@@ -25,8 +25,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added a read-only managed-process viewer in the TUI, opened with `/processes [session-id-or-name]`, with lifecycle/provenance metadata, retained output, scrolling, and follow mode over the shared execution-session projection.
 - Added the first renderer-neutral managed-execution session projection over background PTY sessions, exposing lifecycle, provenance, retained output, transcript metadata, and interaction capabilities for future process-viewer surfaces.
 
+### Changed
+
+- Made interactive harness sessions unlimited by default (`--max-turns 0`), while preserving explicit positive turn caps for bounded automation and operator overrides.
+
 ### Fixed
 
+- Reserved a response-only turn when tool execution reaches the hard turn limit, preventing a final tool result from leaving the operator at `turn supervisor completed` without an assistant conclusion.
 - Stopped successful Workbench plan reconciliation from triggering generic progress-pressure and redundant closure-narration turns, so end-of-turn plan cleanup produces one operator-facing completion instead of repeated acknowledgements.
 - Completed ACP `loadSession` by replaying restored user/assistant transcript chunks to the editor after worker hydration and before publishing the active session identity; historical tool activity remains omitted rather than being misrepresented as live execution.
 - Made ACP session loading transactional at the transport boundary: the active session ID and working directory are published only after worker restoration succeeds, and worker resume IDs are revalidated before they can reach persistence.

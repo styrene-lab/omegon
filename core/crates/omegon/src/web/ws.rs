@@ -190,10 +190,19 @@ async fn handle_client_command(
             }
             let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
             let payload = cmd.clone();
-            let sent = command_tx.send(WebCommand::ManagedDelegateControl {
-                method: cmd_type.to_string(), payload, respond_to: reply_tx,
-            }).await.is_ok();
-            let reply = if sent { reply_rx.await.unwrap_or_else(|_| json!({"type": format!("{cmd_type}_result"), "accepted": false, "error": "runtime_disconnected"})) } else { json!({"type": format!("{cmd_type}_result"), "accepted": false, "error": "runtime_unavailable"}) };
+            let sent = command_tx
+                .send(WebCommand::ManagedDelegateControl {
+                    method: cmd_type.to_string(),
+                    payload,
+                    respond_to: reply_tx,
+                })
+                .await
+                .is_ok();
+            let reply = if sent {
+                reply_rx.await.unwrap_or_else(|_| json!({"type": format!("{cmd_type}_result"), "accepted": false, "error": "runtime_disconnected"}))
+            } else {
+                json!({"type": format!("{cmd_type}_result"), "accepted": false, "error": "runtime_unavailable"})
+            };
             let _ = snapshot_tx.send(reply).await;
         }
         "user_prompt" => {
