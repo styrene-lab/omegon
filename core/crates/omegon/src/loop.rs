@@ -1417,6 +1417,23 @@ pub async fn run(
             let _ = events.send(AgentEvent::PlanUpdated { projection });
         }
 
+        // A plan mutation performed in response to the end-of-turn
+        // reconciliation nudge is bookkeeping, not a new unit of operator
+        // work. Once it closes the visible plan, do not send the model through
+        // another continuation turn merely to narrate that the plan was
+        // cleared. The PlanUpdated projection and plan tool result already
+        // carry the authoritative outcome; another model turn produces the
+        // duplicated closure prose seen in the conversation surface.
+        let reconciled_visible_plan = conversation.intent.plan_reconciliation_nudges > 0
+            && dispatch_calls.iter().any(|call| {
+                call.name == crate::tool_registry::core::PLAN
+                    && matches!(
+                        call.arguments.get("action").and_then(|value| value.as_str()),
+                        Some("advance" | "complete" | "skip" | "clear")
+                    )
+            })
+            && plan_open_items(&conversation.intent).is_empty();
+
         let dominant_phase = classify_turn_phase(&tool_catalog, dispatch_calls, &results);
         let drift_kind =
             classify_drift_kind(&tool_catalog, turn, conversation, dispatch_calls, &results);
@@ -1468,13 +1485,15 @@ pub async fn run(
             }};
         }
 
-        if is_first_turn_orientation_churn(
-            turn,
-            config,
-            conversation,
-            &tool_catalog,
-            dispatch_calls,
-        ) {
+        if !reconciled_visible_plan
+            && is_first_turn_orientation_churn(
+                turn,
+                config,
+                conversation,
+                &tool_catalog,
+                dispatch_calls,
+            )
+        {
             tracing::info!("First-turn orientation churn — injecting execution-bias nudge");
             let msg = match behavior {
                 BehavioralTier::Constrained => {
@@ -1761,6 +1780,13 @@ pub async fn run(
             stats_tool_calls: conversation.intent.stats.tool_calls,
             streaks: controller.streaks(),
         })));
+
+        if reconciled_visible_plan {
+            tracing::info!(
+                "Visible plan reconciled — ending without a redundant closure narration turn"
+            );
+            break;
+        }
     }
 
     let elapsed = session_start.elapsed();
@@ -8889,6 +8915,14 @@ This is the right first slice."#;
         assert_eq!(selection.evict_count(), 1);
         assert!(selection.payload().contains("very old context"));
         assert!(selection.reason().is_none());
+    }
+
+    #[test]
+    fn plan_reconciliation_suppresses_post_reconciliation_progress_nudges() {
+        let source = include_str!("loop.rs");
+        assert!(source.contains("if !reconciled_visible_plan\n            && is_first_turn_orientation_churn"));
+        assert!(source.contains("if reconciled_visible_plan {\n            tracing::info!("));
+        assert!(source.contains("ending without a redundant closure narration turn"));
     }
 
     #[test]

@@ -27,6 +27,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Stopped successful Workbench plan reconciliation from triggering generic progress-pressure and redundant closure-narration turns, so end-of-turn plan cleanup produces one operator-facing completion instead of repeated acknowledgements.
 - Completed ACP `loadSession` by replaying restored user/assistant transcript chunks to the editor after worker hydration and before publishing the active session identity; historical tool activity remains omitted rather than being misrepresented as live execution.
 - Made ACP session loading transactional at the transport boundary: the active session ID and working directory are published only after worker restoration succeeds, and worker resume IDs are revalidated before they can reach persistence.
 - Advertised the scope-aware `/profile` command to ACP clients and routed canonical profile/skill commands exclusively through the authoritative worker runtime, avoiding transport-local settings drift; unsupported skill reload/create/import operations now return explicit editor guidance.
