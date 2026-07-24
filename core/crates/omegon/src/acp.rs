@@ -1329,7 +1329,7 @@ impl OmegonAcpAgent {
                     .list(SessionListCapabilities::new())
                     .close(SessionCloseCapabilities::new()),
             )
-            .load_session(false);
+            .load_session(true);
         response.auth_methods = vec![AuthMethod::Agent(
             AuthMethodAgent::new("omegon-auth", "Omegon Authentication")
                 .description("Run `omegon auth login` in a terminal or set API keys."),
@@ -6642,14 +6642,14 @@ Progress: 1/2"
     }
 
     #[tokio::test]
-    async fn initialize_does_not_advertise_non_replaying_session_loading() {
+    async fn initialize_advertises_replaying_session_loading() {
         let agent = OmegonAcpAgent::new("test-model");
         let response = agent
             .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
             .await
             .expect("initialize");
 
-        assert!(!response.agent_capabilities.load_session);
+        assert!(response.agent_capabilities.load_session);
         let info = response.agent_info.expect("agent info");
         assert_eq!(info.version, acp_build_identity());
         let expected_title = format!("Omegon {}", acp_build_identity());
