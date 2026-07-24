@@ -19,6 +19,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Added
 
 - Clarified the ACP/editor ownership boundary: Zed's native Skills settings page belongs to Zed's built-in agent and is not populated by ACP agents; Omegon `/skills` remains the supported skill inventory and execution surface in Omegon ACP threads.
+- Added design artifacts for authoritative extension tool provenance across conversation surfaces, and captured the remaining operator-visible terminal-session questions alongside the new managed process viewer.
+- Connected completed `terminal` conversation cards to the managed-process viewer: select a retained terminal result and press Enter to open its canonical live session instead of inspecting a stale text dump.
 - Expanded the managed-process viewer with previous/next session switching and a confirmed stop action while keeping terminal input disabled.
 - Added a read-only managed-process viewer in the TUI, opened with `/processes [session-id-or-name]`, with lifecycle/provenance metadata, retained output, scrolling, and follow mode over the shared execution-session projection.
 - Added the first renderer-neutral managed-execution session projection over background PTY sessions, exposing lifecycle, provenance, retained output, transcript metadata, and interaction capabilities for future process-viewer surfaces.

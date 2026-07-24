@@ -10009,6 +10009,29 @@ warning: {warning}"
         }
     }
 
+    fn selected_terminal_session_id(&self) -> Option<String> {
+        let segment = self.conversation.selected_segment()?;
+        let crate::tui::segments::SegmentContent::ToolCard {
+            name,
+            detail_result,
+            ..
+        } = &segment.content
+        else {
+            return None;
+        };
+        if name != "terminal" {
+            return None;
+        }
+        let result = detail_result.as_deref()?;
+        let marker = "Terminal session '";
+        let after = result
+            .find(marker)
+            .map(|index| &result[index + marker.len()..])?;
+        let (_, after_name) = after.split_once("' (")?;
+        let (id, _) = after_name.split_once(')')?;
+        crate::tools::terminal::execution_session_snapshot_by_id(id).map(|snapshot| snapshot.id)
+    }
+
     fn open_process_viewer(&mut self, session: &str) {
         let requested = (!session.is_empty()).then(|| {
             crate::tools::terminal::execution_session_snapshot_by_id(session)
@@ -15309,6 +15332,16 @@ pub async fn run_tui(
                             if app.conversation.tabs.tabs.len() > 1 =>
                         {
                             app.conversation.tabs.prev_tab();
+                        }
+
+                        // Enter on a selected terminal result opens the canonical process viewer.
+                        (KeyCode::Enter, _)
+                            if app.editor.is_empty()
+                                && app.selected_terminal_session_id().is_some() =>
+                        {
+                            if let Some(session_id) = app.selected_terminal_session_id() {
+                                app.open_process_viewer(&session_id);
+                            }
                         }
 
                         // Shift+Enter or Alt+Enter: insert newline (multiline input)
