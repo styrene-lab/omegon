@@ -31,7 +31,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
-- Kept durable harness capabilities—including Workbench plans, operator waits, lifecycle and subagent orchestration, memory discipline, context compaction, managed services, mutation review, and loop control—in every actionable turn's lazy tool schema, preventing enabled tools named by active instructions from disappearing after turn one.
+- Kept the Workbench `plan` tool in every actionable turn's lazy schema so the agent can reconcile plan state after turn one without permanently injecting broader lifecycle and orchestration families.
 - Reserved a response-only turn when tool execution reaches the hard turn limit, preventing a final tool result from leaving the operator at `turn supervisor completed` without an assistant conclusion.
 - Stopped successful Workbench plan reconciliation from triggering generic progress-pressure and redundant closure-narration turns, so end-of-turn plan cleanup produces one operator-facing completion instead of repeated acknowledgements.
 - Completed ACP `loadSession` by replaying restored user/assistant transcript chunks to the editor after worker hydration and before publishing the active session identity; historical tool activity remains omitted rather than being misrepresented as live execution.
