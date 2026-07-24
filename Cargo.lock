@@ -4965,7 +4965,7 @@ dependencies = [
 
 [[package]]
 name = "omegon"
-version = "0.28.9"
+version = "0.28.0-nightly.20260724"
 dependencies = [
  "agent-client-protocol",
  "ansi-to-tui",
@@ -5062,7 +5062,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-codescan"
-version = "0.28.9"
+version = "0.28.0-nightly.20260724"
 dependencies = [
  "anyhow",
  "git2",
@@ -5103,7 +5103,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-git"
-version = "0.28.9"
+version = "0.28.0-nightly.20260724"
 dependencies = [
  "anyhow",
  "futures-util",
@@ -5116,7 +5116,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-memory"
-version = "0.28.9"
+version = "0.28.0-nightly.20260724"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5135,7 +5135,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-opsx"
-version = "0.28.9"
+version = "0.28.0-nightly.20260724"
 dependencies = [
  "libc",
  "serde",
@@ -5147,14 +5147,14 @@ dependencies = [
 
 [[package]]
 name = "omegon-rbac"
-version = "0.28.9"
+version = "0.28.0-nightly.20260724"
 dependencies = [
  "styrene-rbac",
 ]
 
 [[package]]
 name = "omegon-secrets"
-version = "0.28.9"
+version = "0.28.0-nightly.20260724"
 dependencies = [
  "aes-gcm",
  "aho-corasick",
@@ -5185,7 +5185,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-skills"
-version = "0.28.9"
+version = "0.28.0-nightly.20260724"
 dependencies = [
  "anyhow",
  "serde",
@@ -5196,7 +5196,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-traits"
-version = "0.28.9"
+version = "0.28.0-nightly.20260724"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5209,7 +5209,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-web"
-version = "0.28.9"
+version = "0.28.0-nightly.20260724"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -7767,7 +7767,7 @@ checksum = "ba09f6fc6e5b3df2306d66c2ba74b0c8901f2a39a4b18847ffc9e179db974a3f"
 
 [[package]]
 name = "styrene-work-model"
-version = "0.28.9"
+version = "0.28.0-nightly.20260724"
 dependencies = [
  "chrono",
  "serde",
@@ -7778,7 +7778,7 @@ dependencies = [
 
 [[package]]
 name = "styrene-work-runtime"
-version = "0.28.9"
+version = "0.28.0-nightly.20260724"
 dependencies = [
  "async-trait",
  "chrono",
