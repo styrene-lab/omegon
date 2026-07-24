@@ -30,8 +30,11 @@ use omegon_traits::{
 };
 use serde_json::Value;
 
-/// Core tools that are always present regardless of lazy injection.
-/// These are the coding loop essentials — the tools the model needs on every turn.
+/// Tools that are always present regardless of lazy injection.
+///
+/// This includes both coding-loop primitives and tools named by durable harness
+/// instructions. A tool advertised as required by the system prompt cannot be
+/// allowed to disappear merely because the model did not invoke it on turn 1.
 fn is_core_tool(name: &str) -> bool {
     use crate::tool_registry as reg;
     matches!(
@@ -42,10 +45,37 @@ fn is_core_tool(name: &str) -> bool {
             | reg::core::EDIT
             | reg::core::VALIDATE
             | reg::core::COMMIT
+            | reg::core::CHRONOS
+            | reg::core::SERVE
             | reg::core::TERMINAL
+            | reg::core::PLAN
+            | reg::core::WAIT_FOR_OPERATOR
+            | reg::memory::MEMORY_STORE
+            | reg::memory::MEMORY_RECALL
+            | reg::memory::MEMORY_SUPERSEDE
+            | reg::memory::MEMORY_FOCUS
+            | reg::memory::MEMORY_RELEASE
+            | reg::lifecycle::DESIGN_TREE
+            | reg::lifecycle::DESIGN_TREE_UPDATE
+            | reg::lifecycle::OPENSPEC_MANAGE
             | reg::codescan::CODEBASE_SEARCH
             | reg::context::CONTEXT_STATUS
+            | reg::context::CONTEXT_COMPACT
             | reg::context::REQUEST_CONTEXT
+            | reg::cleave::CLEAVE_ASSESS
+            | reg::cleave::CLEAVE_RUN
+            | reg::delegate::DELEGATE
+            | reg::delegate::DELEGATE_RESULT
+            | reg::delegate::DELEGATE_STATUS
+            | reg::delegate::DELEGATE_CANCEL
+            | reg::mutation::MUTATION_REVIEW
+            | reg::mutation::MUTATION_ACCEPT
+            | reg::mutation::MUTATION_REJECT
+            | reg::mutation::MUTATION_STATS
+            | reg::loop_jobs::LOOP_LIST
+            | reg::loop_jobs::LOOP_CREATE
+            | reg::loop_jobs::LOOP_STATUS
+            | reg::loop_jobs::LOOP_STOP
             | reg::manage_tools::MANAGE_TOOLS
             | reg::view::VIEW
     )
@@ -892,6 +922,65 @@ mod tests {
                 }],
                 details: json!(null),
             })
+        }
+    }
+
+    #[test]
+    fn durable_harness_tools_survive_lazy_injection_without_prior_use() {
+        use crate::tool_registry as reg;
+
+        let required = [
+            reg::core::PLAN,
+            reg::core::WAIT_FOR_OPERATOR,
+            reg::core::CHRONOS,
+            reg::core::SERVE,
+            reg::memory::MEMORY_STORE,
+            reg::memory::MEMORY_RECALL,
+            reg::memory::MEMORY_SUPERSEDE,
+            reg::memory::MEMORY_FOCUS,
+            reg::memory::MEMORY_RELEASE,
+            reg::lifecycle::DESIGN_TREE,
+            reg::lifecycle::DESIGN_TREE_UPDATE,
+            reg::lifecycle::OPENSPEC_MANAGE,
+            reg::context::CONTEXT_COMPACT,
+            reg::cleave::CLEAVE_ASSESS,
+            reg::cleave::CLEAVE_RUN,
+            reg::delegate::DELEGATE,
+            reg::delegate::DELEGATE_RESULT,
+            reg::delegate::DELEGATE_STATUS,
+            reg::delegate::DELEGATE_CANCEL,
+            reg::mutation::MUTATION_REVIEW,
+            reg::mutation::MUTATION_ACCEPT,
+            reg::mutation::MUTATION_REJECT,
+            reg::mutation::MUTATION_STATS,
+            reg::loop_jobs::LOOP_LIST,
+            reg::loop_jobs::LOOP_CREATE,
+            reg::loop_jobs::LOOP_STATUS,
+            reg::loop_jobs::LOOP_STOP,
+        ];
+
+        for name in required {
+            assert!(
+                is_core_tool(name),
+                "durable harness tool '{name}' would disappear after turn 1"
+            );
+        }
+    }
+
+    #[test]
+    fn situational_static_tools_remain_lazy() {
+        use crate::tool_registry as reg;
+
+        for name in [
+            reg::render::RENDER_DIAGRAM,
+            reg::local_inference::ASK_LOCAL_MODEL,
+            reg::skills::SKILLS_CREATE,
+            reg::secrets::SECRET_SET,
+        ] {
+            assert!(
+                !is_core_tool(name),
+                "situational tool '{name}' should not bypass lazy injection"
+            );
         }
     }
 
