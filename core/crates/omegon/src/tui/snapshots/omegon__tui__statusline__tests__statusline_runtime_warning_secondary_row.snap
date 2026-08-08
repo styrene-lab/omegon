@@ -1,0 +1,6 @@
+---
+source: core/crates/omegon/src/tui/statusline.rs
+expression: "render_session_row_at_level(&row, 120,\ncrate::surfaces::layout::UiPresentationLevel::Active,)"
+---
+working │ Detached · ↑12 · End: latest │ approval required · Search degraded · files: 15 touched · 3 changed · 12 read
+runtime · omegon · posture  · provider anthropic offline                    who operator · authz local · grade  · think

@@ -1,0 +1,5 @@
+---
+source: core/crates/omegon/src/tui/statusline.rs
+expression: "render_session_row_at_level(&presentation_fixture(), 160,\ncrate::surfaces::layout::UiPresentationLevel::Full,)"
+---
+working │ Detached · ↑12 · End: latest │ approval required · Search degraded · files: 15 touched · 3 changed · 12 read · oodA Act · @engineer  v0.29.0-dev <build>

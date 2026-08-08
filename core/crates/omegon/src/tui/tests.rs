@@ -134,6 +134,22 @@ fn render_app_to_string(app: &mut App, width: u16, height: u16) -> String {
     text
 }
 
+fn draw_published_stream(app: &mut App, width: u16, height: u16) -> String {
+    let publication = app.publish_stream_presentation();
+    let rendered = render_app_to_string(app, width, height);
+    if let Some((generation, revision)) = publication {
+        app.acknowledge_stream_presentation_draw(generation, revision);
+    }
+    rendered
+}
+
+fn nonblank_row(rendered: &str, needle: &str) -> usize {
+    rendered
+        .lines()
+        .position(|line| line.contains(needle))
+        .unwrap_or_else(|| panic!("needle {needle:?} not found in rendered buffer\n{rendered}"))
+}
+
 fn rendered_cell_styles_for_text(
     app: &mut App,
     width: u16,
@@ -299,6 +315,173 @@ fn cleave_decomposition_event_still_renders_cleave() {
 }
 
 #[test]
+fn published_short_assistant_stream_remains_adjacent_to_composer() {
+    let mut app = active_test_app();
+    app.handle_agent_event(AgentEvent::TurnStart { turn: 1 });
+    app.handle_agent_event(AgentEvent::MessageStart {
+        role: "assistant".into(),
+    });
+    app.handle_agent_event(AgentEvent::MessageChunk {
+        text: "streaming answer sentinel".into(),
+    });
+
+    let rendered = draw_published_stream(&mut app, 100, 32);
+    let content_row = nonblank_row(&rendered, "streaming answer sentinel");
+    assert!(
+        content_row >= 20,
+        "short attached stream should be bottom anchored\n{rendered}"
+    );
+}
+
+#[test]
+fn published_short_reasoning_stream_remains_adjacent_to_composer() {
+    let mut app = active_test_app();
+    app.handle_agent_event(AgentEvent::TurnStart { turn: 1 });
+    app.handle_agent_event(AgentEvent::ThinkingChunk {
+        text: "reasoning sentinel".into(),
+    });
+
+    let rendered = draw_published_stream(&mut app, 100, 32);
+    let reasoning_row = nonblank_row(&rendered, "reasoning sentinel");
+    assert!(
+        reasoning_row >= 20,
+        "short attached reasoning should be bottom anchored\n{rendered}"
+    );
+}
+
+#[test]
+fn reasoning_to_assistant_transition_preserves_order_and_tail_geometry() {
+    let mut app = active_test_app();
+    app.handle_agent_event(AgentEvent::TurnStart { turn: 1 });
+    app.handle_agent_event(AgentEvent::ThinkingChunk {
+        text: "reasoning transition sentinel".into(),
+    });
+    app.handle_agent_event(AgentEvent::MessageChunk {
+        text: "assistant transition sentinel".into(),
+    });
+
+    let rendered = draw_published_stream(&mut app, 100, 32);
+    let reasoning_row = nonblank_row(&rendered, "reasoning transition sentinel");
+    let answer_row = nonblank_row(&rendered, "assistant transition sentinel");
+    assert!(reasoning_row < answer_row, "{rendered}");
+    assert!(
+        answer_row >= 20,
+        "latest content should remain tail-adjacent\n{rendered}"
+    );
+}
+
+#[test]
+fn attached_stream_remains_tail_anchored_across_resize() {
+    let mut app = active_test_app();
+    app.handle_agent_event(AgentEvent::MessageChunk {
+        text: "resize sentinel one two three four five six seven eight nine ten".into(),
+    });
+
+    let wide = draw_published_stream(&mut app, 120, 32);
+    let narrow = render_app_to_string(&mut app, 54, 22);
+    assert!(nonblank_row(&wide, "resize sentinel") >= 20, "{wide}");
+    assert!(nonblank_row(&narrow, "resize sentinel") >= 10, "{narrow}");
+    assert_eq!(app.conversation.conv_state.scroll_offset, 0);
+    assert!(!app.conversation.conv_state.user_scrolled);
+}
+
+#[test]
+fn detached_viewport_preserves_anchor_during_stream_publication_and_can_return_to_tail() {
+    let mut app = active_test_app();
+    let initial = (1..=28)
+        .map(|line| format!("anchor line {line:02}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    app.handle_agent_event(AgentEvent::MessageChunk { text: initial });
+    let _ = draw_published_stream(&mut app, 80, 18);
+    app.conversation.scroll_up(6);
+    let detached_before = render_app_to_string(&mut app, 80, 18);
+    let anchor = detached_before
+        .lines()
+        .find(|line| line.contains("anchor line"))
+        .map(str::trim)
+        .expect("visible detached anchor")
+        .to_string();
+
+    app.handle_agent_event(AgentEvent::MessageChunk {
+        text: "\nnew revision 29\nnew revision 30".into(),
+    });
+    let detached_after = draw_published_stream(&mut app, 80, 18);
+    assert!(app.conversation.conv_state.user_scrolled);
+    assert!(
+        detached_after.contains(&anchor),
+        "anchor {anchor:?} moved\n{detached_after}"
+    );
+    assert!(detached_after.contains("Detached"), "{detached_after}");
+
+    app.conversation.conv_state.force_scroll_to_bottom();
+    let attached = render_app_to_string(&mut app, 80, 18);
+    assert!(attached.contains("new revision 30"), "{attached}");
+    assert!(!attached.contains("Detached"), "{attached}");
+}
+
+#[test]
+fn compact_interaction_surfaces_remain_visible_during_publication() {
+    let mut app = active_test_app();
+    app.handle_agent_event(AgentEvent::TurnStart { turn: 1 });
+    app.handle_agent_event(AgentEvent::MessageChunk {
+        text: "interaction surface sentinel".into(),
+    });
+
+    let rendered = draw_published_stream(&mut app, 90, 18);
+    assert!(
+        rendered.contains("interaction surface sentinel"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("active turn"),
+        "status line missing\n{rendered}"
+    );
+    assert!(
+        rendered.contains("Ask anything, or type / for commands"),
+        "composer missing\n{rendered}"
+    );
+    assert!(
+        nonblank_row(&rendered, "interaction surface sentinel") >= 8,
+        "{rendered}"
+    );
+}
+
+#[test]
+fn completion_in_same_burst_waits_for_published_draw() {
+    let mut app = active_test_app();
+    app.handle_agent_event(AgentEvent::MessageChunk {
+        text: "final burst sentinel".into(),
+    });
+    app.handle_agent_event(AgentEvent::MessageEnd);
+    assert!(!app.conversation.is_streaming());
+
+    let rendered = draw_published_stream(&mut app, 100, 24);
+    assert!(rendered.contains("final burst sentinel"), "{rendered}");
+    assert!(!app.conversation.is_streaming());
+}
+
+#[test]
+fn assistant_to_tool_transition_cannot_overtake_published_text() {
+    let mut app = active_test_app();
+    app.handle_agent_event(AgentEvent::MessageChunk {
+        text: "answer before tool sentinel".into(),
+    });
+    app.handle_agent_event(AgentEvent::ToolStart {
+        id: "ordered-tool".into(),
+        name: "read".into(),
+        provenance: omegon_traits::ToolProvenance::BuiltIn,
+        args: serde_json::json!({"path": "README.md"}),
+    });
+    assert!(app.conversation.segments().is_empty());
+
+    let first = draw_published_stream(&mut app, 100, 24);
+    assert!(first.contains("answer before tool sentinel"), "{first}");
+    let second = render_app_to_string(&mut app, 100, 24);
+    assert!(second.contains("read"), "{second}");
+}
+
+#[test]
 fn session_reset_clears_instrument_panel_tool_activity() {
     let mut app = full_test_app();
     let waiting = render_app_to_string(&mut app, 140, 18);
@@ -323,7 +506,7 @@ fn session_reset_clears_instrument_panel_tool_activity() {
     app.handle_agent_event(AgentEvent::MessageChunk {
         text: "hello".into(),
     });
-    let responding = render_app_to_string(&mut app, 140, 18);
+    let responding = draw_published_stream(&mut app, 140, 18);
     assert!(
         responding.contains("streaming answer")
             || responding.contains("transcript live")
@@ -7883,6 +8066,7 @@ fn thinking_chunk_marks_runtime_phase_as_thinking() {
     app.handle_agent_event(AgentEvent::ThinkingChunk {
         text: "deliberating".into(),
     });
+    let _ = draw_published_stream(&mut app, 100, 18);
 
     app.instrument_panel
         .update_telemetry(40.0, 200_000, "high", None, true, 0.016);
@@ -7904,6 +8088,7 @@ fn active_tool_phase_beats_runtime_thinking_in_tui() {
     app.handle_agent_event(AgentEvent::ThinkingChunk {
         text: "deliberating".into(),
     });
+    let _ = draw_published_stream(&mut app, 100, 18);
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "tool-1".into(),
         name: "bash".into(),

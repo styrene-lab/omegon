@@ -34,6 +34,7 @@ pub mod inline_render;
 mod input;
 pub mod instruments;
 pub mod layout_projection;
+mod markdown_publication;
 mod menu_effects;
 pub(crate) mod menu_surface;
 pub mod operation_lifecycle_projection;
@@ -52,6 +53,7 @@ pub mod spinner;
 pub mod splash;
 mod startup_splash;
 pub mod statusline;
+mod streaming_presentation;
 pub mod tab_bar;
 pub mod theme;
 pub mod tool_inspection;
@@ -410,6 +412,7 @@ struct MenuInput {
 struct App {
     editor: Editor,
     conversation: ConversationView,
+    stream_presentation: streaming_presentation::StreamingPresentationController,
     agent_active: bool,
     should_quit: bool,
     turn: u32,
@@ -868,6 +871,7 @@ impl App {
         Self {
             editor: Editor::new(),
             conversation: ConversationView::new(),
+            stream_presentation: streaming_presentation::StreamingPresentationController::default(),
             agent_active: false,
             should_quit: false,
             turn: 0,
@@ -5003,6 +5007,46 @@ warning: {warning}"
         }
     }
 
+    fn publish_stream_presentation(&mut self) -> Option<(u64, u64)> {
+        let publication = self.stream_presentation.publish()?;
+        for (kind, delta) in publication.deltas {
+            if delta.is_empty() {
+                continue;
+            }
+            let was_streaming = self.conversation.is_streaming();
+            match kind {
+                streaming_presentation::StreamContentKind::Assistant => {
+                    self.conversation.append_streaming(&delta);
+                    self.slim_turn_state = SlimTurnState::Responding;
+                }
+                streaming_presentation::StreamContentKind::Thinking => {
+                    self.conversation.append_thinking(&delta);
+                    self.slim_turn_state = SlimTurnState::Thinking;
+                    self.instrument_panel.note_thinking_activity();
+                }
+            }
+            if !was_streaming {
+                self.conversation.stamp_meta(self.current_meta());
+            }
+        }
+        Some((publication.generation, publication.revision))
+    }
+
+    fn acknowledge_stream_presentation_draw(&mut self, generation: u64, revision: u64) -> bool {
+        self.stream_presentation
+            .acknowledge_draw(generation, revision);
+        let mut released = false;
+        while let Some(event) = self.stream_presentation.take_drawn_event() {
+            self.handle_agent_event(event);
+            released = true;
+        }
+        debug_assert!(
+            !self.stream_presentation.has_blocked_events(),
+            "drawn deferred events must drain completely"
+        );
+        released
+    }
+
     /// Read a snapshot of current settings (for display).
     fn settings(&self) -> crate::settings::Settings {
         self.settings.lock().unwrap().clone()
@@ -7553,6 +7597,7 @@ pub async fn run_tui(
         scheduler.mark_timer_due(now);
         if scheduler.should_draw(now) {
             let urgent = scheduler.is_urgent();
+            let publication_revision = app.publish_stream_presentation();
             let draw_started = std::time::Instant::now();
             let mut callback_elapsed = Duration::ZERO;
             terminal.draw(|f| {
@@ -7560,6 +7605,11 @@ pub async fn run_tui(
                 app.draw(f);
                 callback_elapsed = callback_started.elapsed();
             })?;
+            if let Some((generation, revision)) = publication_revision
+                && app.acknowledge_stream_presentation_draw(generation, revision)
+            {
+                scheduler.mark_dirty(TuiDrawReason::BackgroundEvent);
+            }
             let draw_finished = std::time::Instant::now();
             if let Some(trace) = &mut runtime_trace {
                 let segments = app.conversation.segments().len();

@@ -156,7 +156,7 @@ impl SessionRow {
     }
 
     pub fn render(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
-        let height = Self::preferred_height(area.width).min(area.height);
+        let height = self.preferred_height_for(area.width).min(area.height);
         if height == 0 {
             return;
         }
@@ -470,14 +470,115 @@ mod tests {
     use super::*;
 
     fn render_session_row(row: &SessionRow, width: u16) -> String {
-        let backend = ratatui::backend::TestBackend::new(width, 1);
+        render_session_row_at_level(
+            row,
+            width,
+            crate::surfaces::layout::UiPresentationLevel::Active,
+        )
+    }
+
+    fn render_session_row_at_level(
+        row: &SessionRow,
+        width: u16,
+        level: crate::surfaces::layout::UiPresentationLevel,
+    ) -> String {
+        let height = if level == crate::surfaces::layout::UiPresentationLevel::Om {
+            u16::from(width >= 20)
+        } else {
+            row.preferred_height_for(width)
+        };
+        let backend = ratatui::backend::TestBackend::new(width, height);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| row.render(frame.area(), frame, &super::super::theme::Alpharius))
+            .draw(|frame| {
+                row.render_for_level(level, frame.area(), frame, &super::super::theme::Alpharius)
+            })
             .unwrap();
-        (0..width)
-            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
-            .collect()
+        let rendered = (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| terminal.backend().buffer()[(x, y)].symbol())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        normalize_snapshot_version(&rendered)
+    }
+
+    fn normalize_snapshot_version(rendered: &str) -> String {
+        let Some(version_start) = rendered.find("v0.29.0-dev") else {
+            return rendered.to_string();
+        };
+        let suffix_start = version_start + "v0.29.0-dev".len();
+        let line_end = rendered[suffix_start..]
+            .find('\n')
+            .map(|offset| suffix_start + offset)
+            .unwrap_or(rendered.len());
+        let prefix = rendered[..version_start].trim_end();
+        format!("{prefix}  v0.29.0-dev <build>{}", &rendered[line_end..])
+    }
+
+    fn presentation_fixture() -> SessionRow {
+        SessionRow {
+            provider_connected: true,
+            turn_state: Some("working".into()),
+            viewport_hint: Some("Detached · ↑12 · End: latest".into()),
+            operator_hint: Some("approval required".into()),
+            web_search_providers: vec![("brave".into(), false)],
+            session_input_tokens: 32_000,
+            session_output_tokens: 4_000,
+            cwd_basename: "omegon".into(),
+            git_branch: Some("feature/presentation".into()),
+            files_read: 12,
+            files_modified: 3,
+            phase: Some(OodaPhase::Act),
+            persona: Some("engineer".into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn compact_status_row_snapshots_surface_priority_at_constrained_width() {
+        insta::assert_snapshot!(
+            "statusline_compact_surface_priority",
+            render_session_row_at_level(
+                &presentation_fixture(),
+                96,
+                crate::surfaces::layout::UiPresentationLevel::Om,
+            )
+        );
+    }
+
+    #[test]
+    fn full_status_row_snapshots_expanded_diagnostics() {
+        insta::assert_snapshot!(
+            "statusline_full_diagnostics",
+            render_session_row_at_level(
+                &presentation_fixture(),
+                160,
+                crate::surfaces::layout::UiPresentationLevel::Full,
+            )
+        );
+    }
+
+    #[test]
+    fn runtime_warning_row_snapshots_below_primary_status() {
+        let mut row = presentation_fixture();
+        row.provider_connected = false;
+        row.runtime_brand = "omegon".into();
+        row.model_provider = "anthropic".into();
+        row.principal_id = "operator".into();
+        row.authorization = "local".into();
+        insta::assert_snapshot!(
+            "statusline_runtime_warning_secondary_row",
+            render_session_row_at_level(
+                &row,
+                120,
+                crate::surfaces::layout::UiPresentationLevel::Active,
+            )
+        );
     }
 
     #[test]

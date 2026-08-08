@@ -1,0 +1,5 @@
+---
+source: core/crates/omegon/src/tui/statusline.rs
+expression: "render_session_row_at_level(&presentation_fixture(), 96,\ncrate::surfaces::layout::UiPresentationLevel::Om,)"
+---
+ om · working · omegon:feature/presentation                          v0.29.0-dev <build>

@@ -327,10 +327,26 @@ fn push_answer_label<'a>(
 fn push_answer_body_lines<'a>(
     lines: &mut Vec<Line<'a>>,
     text: &'a str,
+    complete: bool,
     width: usize,
     theme: &dyn crate::tui::theme::Theme,
     bg: Color,
 ) {
+    let publication = super::super::markdown_publication::project(text, complete);
+    push_markdown_lines(lines, publication.committed, width, theme, bg);
+    push_provisional_lines(lines, publication.provisional, theme, bg);
+}
+
+fn push_markdown_lines<'a>(
+    lines: &mut Vec<Line<'a>>,
+    text: &'a str,
+    width: usize,
+    theme: &dyn crate::tui::theme::Theme,
+    bg: Color,
+) {
+    if text.is_empty() {
+        return;
+    }
     let text_lines: Vec<&str> = split_trimmed_trailing_empty_lines(text);
     let table_widths_per_line = compute_table_widths(&text_lines, width);
     let mut in_code_fence = false;
@@ -370,6 +386,23 @@ fn push_answer_body_lines<'a>(
                 .collect();
             lines.push(Line::from(spans));
         }
+    }
+}
+
+fn push_provisional_lines<'a>(
+    lines: &mut Vec<Line<'a>>,
+    text: &'a str,
+    theme: &dyn crate::tui::theme::Theme,
+    bg: Color,
+) {
+    if text.is_empty() {
+        return;
+    }
+    for line in split_trimmed_trailing_empty_lines(text) {
+        lines.push(Line::from(Span::styled(
+            line,
+            Style::default().fg(theme.fg()).bg(bg),
+        )));
     }
 }
 
@@ -448,6 +481,7 @@ pub fn render(
             push_answer_body_lines(
                 &mut lines,
                 props.text,
+                props.complete,
                 content_area.width as usize,
                 theme,
                 bg,

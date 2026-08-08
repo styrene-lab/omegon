@@ -102,6 +102,10 @@ impl App {
     }
 
     pub(super) fn handle_agent_event(&mut self, event: AgentEvent) {
+        let decision = self.stream_presentation.classify(event.clone());
+        if !decision.apply_now {
+            return;
+        }
         match event {
             AgentEvent::TurnStart { turn } => {
                 self.agent_active = true;
@@ -234,6 +238,9 @@ impl App {
             }
             AgentEvent::MessageStart { .. } => {
                 self.slim_turn_state = SlimTurnState::OpeningStream;
+            }
+            AgentEvent::MessageEnd => {
+                self.conversation.finalize_message();
             }
             AgentEvent::MessageChunk { text } => {
                 self.slim_turn_state = SlimTurnState::Responding;
