@@ -102,6 +102,41 @@ Known evidence so far:
 - A local par-term probe proved partial embedded-terminal evidence: `PtySession` can spawn shell/Bookokrat text children, and a direct synthetic Sixel sequence is exposed as a `TerminalGraphic` RGBA payload.
 - Half-block fallback is not equivalent to actual terminal image/graphics protocol rendering.
 
+## Inline viewport probe evidence (2026-08-11)
+
+Historical observations retained from the native-inline branch. These are not
+fresh validation of the rebased tree. See `docs/tui-presentations.md` for the
+current production contract.
+
+A standalone Ratatui probe now validates a simpler substrate split for the core
+conversation surface: completed transcript entries can be published into native
+terminal scrollback while a small `Viewport::Inline` region retains the active
+composer and compact status line.
+
+Observed in a native macOS Terminal session:
+
+- repeated user/assistant exchanges remained above the live viewport in terminal
+  history;
+- the composer and status line stayed anchored at the bottom as exchanges were
+  published;
+- the terminal retained ownership of scrollback and mouse interaction because the
+  probe never enabled the alternate screen or mouse capture;
+- no transcript reflow, drawer-induced width change, or visible frame corruption
+  appeared after repeated publication;
+- `TestBackend` coverage separately verifies insertion into scrollback while the
+  live viewport remains visible.
+
+The same binary cannot initialize inside Omegon's harness pseudo-terminal because
+Ratatui's inline viewport queries the current cursor position and that PTY does not
+answer the query. A native Terminal run initializes and renders correctly, so this
+is a harness-PTY limitation rather than evidence against the architecture.
+
+The probe is intentionally not proof that the production TUI can migrate without
+further work. Production still needs transcript publication boundaries, wrapped
+height calculation, resize behavior, overlays, inline artifacts, and explicit
+compatibility checks in Ghostty, Kitty, and SSH. It does establish that the core
+conversation does not need a right-side drawer or a full-screen-owned transcript.
+
 ## Evaluation dimensions
 
 ### Architecture
