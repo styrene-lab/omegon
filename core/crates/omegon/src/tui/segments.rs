@@ -145,7 +145,7 @@ pub(crate) fn strip_terminal_control(input: &str) -> String {
             }
             continue;
         }
-        if ch.is_control() && ch != '\t' {
+        if ch.is_control() && ch != '\t' && ch != '\n' {
             continue;
         }
         out.push(ch);
@@ -158,9 +158,9 @@ mod terminal_control_tests {
     use super::*;
 
     #[test]
-    fn strip_terminal_control_removes_csi_and_osc() {
-        let input = "pre\x1b[31mred\x1b[0m mid\x1b]0;title\x07 post";
-        assert_eq!(strip_terminal_control(input), "prered mid post");
+    fn strip_terminal_control_removes_csi_and_osc_without_collapsing_lines() {
+        let input = "pre\x1b[31mred\x1b[0m mid\x1b]0;title\x07 post\n\nnext line";
+        assert_eq!(strip_terminal_control(input), "prered mid post\n\nnext line");
     }
 
     #[test]
