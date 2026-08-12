@@ -854,15 +854,25 @@ impl App {
     }
 
     pub fn new(settings: crate::settings::SharedSettings) -> Self {
-        let (model_id, model_provider, presentation_level, base_terminal) = {
+        let (
+            model_id,
+            model_provider,
+            presentation_level,
+            base_terminal,
+            theme_preference,
+            glyph_preference,
+        ) = {
             let s = settings.lock().unwrap();
             (
                 s.model.clone(),
                 s.provider().to_string(),
                 s.ui_presentation,
                 s.ui_terminal,
+                s.tui_theme,
+                s.glyph_preference,
             )
         };
+        glyphs::set_preference(glyph_preference);
         Self {
             editor: Editor::new(),
             conversation: ConversationView::new(),
@@ -896,7 +906,7 @@ impl App {
             instrument_panel: InstrumentPanel::default(),
             ui_presentation: UiPresentationPolicy::named(presentation_level),
             ui_surfaces: UiPresentationPolicy::named(presentation_level).surfaces,
-            theme: theme::default_theme(),
+            theme: theme::theme_by_preference(theme_preference),
             settings,
             cancel: std::sync::Arc::new(std::sync::Mutex::new(None)),
             last_ctrl_c: None,
@@ -1494,10 +1504,33 @@ impl App {
 
     fn settings_projection(&self) -> crate::surfaces::settings::SettingsSurfaceProjection {
         let settings = self.settings();
-        crate::surfaces::settings::SettingsSurfaceProjection::from_settings_with_profile(
+        let resolution = glyphs::glyph_resolution(settings.glyph_preference);
+        let loaded = crate::settings::Profile::load_with_source(self.cwd());
+        let drift = crate::surfaces::profile::ProfileDriftProjection::from_profile_and_settings(
+            &loaded.profile,
+            loaded.source,
             &settings,
-            self.cwd(),
-        )
+        );
+        crate::surfaces::settings::SettingsSurfaceProjection::
+            from_settings_with_profile_drift_and_capability(
+                &settings,
+                Some(&drift),
+                crate::surfaces::settings::GlyphCapabilityProjectionInput {
+                    detected: resolution.detected.profile.as_str().into(),
+                    effective: resolution.effective.as_str().into(),
+                    confidence: format!("{:?}", resolution.detected.confidence)
+                        .to_ascii_lowercase(),
+                    evidence: resolution
+                        .detected
+                        .signals
+                        .iter()
+                        .map(|signal| (*signal).to_string())
+                        .collect(),
+                    nerd_font_support_unconfirmed: resolution
+                        .nerd_font_support_unconfirmed(),
+                    remediation_url: glyphs::nerd_font_install_help_url().into(),
+                },
+            )
     }
 
     fn open_menu_projection(&mut self, projection: crate::surfaces::menu::MenuProjection) {
@@ -3984,8 +4017,8 @@ impl App {
     }
 
     fn settings_menu_projection(&self) -> crate::surfaces::menu::MenuProjection {
-        let settings = self.settings_projection();
         let settings_snapshot = self.settings();
+        let settings = self.settings_projection();
         let loaded_profile = crate::settings::Profile::load_with_source(self.cwd());
         let profile_drift =
             crate::surfaces::profile::ProfileDriftProjection::from_profile_and_settings(
@@ -4502,6 +4535,15 @@ warning: {warning}"
                     ));
                 }
             }
+            SettingsRowAction::OpenNerdFontHelp => {
+                let url = glyphs::nerd_font_install_help_url();
+                let message = if open::that(url).is_ok() {
+                    format!("Opened Nerd Fonts help: {url}")
+                } else {
+                    format!("Nerd Fonts help: {url}")
+                };
+                self.show_command_toast(CommandToast::new(message, CommandSeverity::Info));
+            }
             SettingsRowAction::ProjectedEditor => self.show_command_toast(CommandToast::new(
                 format!("No editor registered for {}", row.label),
                 CommandSeverity::Warning,
@@ -4515,6 +4557,10 @@ warning: {warning}"
             "runtime.context_class" => Some(SelectorKind::ContextClass),
             "runtime.max_turns" => Some(SelectorKind::MaxTurns),
             "ui.tool_detail" => Some(SelectorKind::ToolDetail),
+            "ui.presentation" => Some(SelectorKind::UiPresentation),
+            "ui.startup_splash" => Some(SelectorKind::StartupSplash),
+            "ui.theme" => Some(SelectorKind::TuiTheme),
+            "ui.glyph_preference" => Some(SelectorKind::GlyphPreference),
             "updates.channel" => Some(SelectorKind::UpdateChannel),
             "workspace.role" => Some(SelectorKind::WorkspaceRole),
             "workspace.kind" => Some(SelectorKind::WorkspaceKind),
@@ -5133,6 +5179,36 @@ warning: {warning}"
                 let outcome = settings_menu::apply_tool_detail_selection(&value);
                 if let settings_menu::SettingApplyOutcome::ToolDetail(mode) = outcome {
                     self.update_and_persist(|s| s.tool_detail = mode);
+                }
+                Some(outcome.message())
+            }
+            SelectorKind::UiPresentation => {
+                let outcome = settings_menu::apply_ui_presentation_selection(&value);
+                if let settings_menu::SettingApplyOutcome::UiPresentation(level) = outcome {
+                    self.apply_ui_presentation(UiPresentationPolicy::named(level));
+                }
+                Some(outcome.message())
+            }
+            SelectorKind::StartupSplash => {
+                let outcome = settings_menu::apply_startup_splash_selection(&value);
+                if let settings_menu::SettingApplyOutcome::StartupSplash(mode) = outcome {
+                    self.update_and_persist(|s| s.startup_splash = mode);
+                }
+                Some(outcome.message())
+            }
+            SelectorKind::TuiTheme => {
+                let outcome = settings_menu::apply_tui_theme_selection(&value);
+                if let settings_menu::SettingApplyOutcome::TuiTheme(preference) = outcome {
+                    self.theme = theme::theme_by_preference(preference);
+                    self.update_and_persist(|s| s.tui_theme = preference);
+                }
+                Some(outcome.message())
+            }
+            SelectorKind::GlyphPreference => {
+                let outcome = settings_menu::apply_glyph_preference_selection(&value);
+                if let settings_menu::SettingApplyOutcome::GlyphPreference(preference) = outcome {
+                    glyphs::set_preference(preference);
+                    self.update_and_persist(|s| s.glyph_preference = preference);
                 }
                 Some(outcome.message())
             }

@@ -29,6 +29,10 @@ pub(crate) enum SelectorKind {
     WorkspaceKind,
     Preferences,
     ToolDetail,
+    UiPresentation,
+    StartupSplash,
+    TuiTheme,
+    GlyphPreference,
     MaxTurns,
 }
 
@@ -514,6 +518,10 @@ pub(crate) enum SettingApplyOutcome {
     Thinking(crate::settings::ThinkingLevel),
     ContextClass(crate::settings::ContextClass),
     ToolDetail(crate::settings::ToolDetail),
+    UiPresentation(crate::surfaces::layout::UiPresentationLevel),
+    StartupSplash(crate::settings::StartupSplashMode),
+    TuiTheme(crate::settings::TuiThemePreference),
+    GlyphPreference(crate::settings::GlyphPreference),
     UpdateChannel(crate::update::UpdateChannel),
     WorkspaceRole(crate::workspace::types::WorkspaceRole),
     WorkspaceKind(crate::workspace::types::WorkspaceKind),
@@ -527,6 +535,10 @@ impl SettingApplyOutcome {
             Self::Thinking(level) => format!("Thinking → {} {}", level.icon(), level.as_str()),
             Self::ContextClass(class) => format!("Context policy → {}", class.label()),
             Self::ToolDetail(mode) => format!("Tool density → {}", mode.as_str()),
+            Self::UiPresentation(level) => format!("Presentation → {}", level.name()),
+            Self::StartupSplash(mode) => format!("Startup splash → {}", mode.as_str()),
+            Self::TuiTheme(theme) => format!("Theme → {}", theme.as_str()),
+            Self::GlyphPreference(glyphs) => format!("Glyphs → {}", glyphs.as_str()),
             Self::UpdateChannel(channel) => format!(
                 "Update channel set to {}. Rechecking for updates now.",
                 channel.as_str()
@@ -579,6 +591,42 @@ pub(crate) fn apply_tool_detail_selection(value: &str) -> SettingApplyOutcome {
         .map(SettingApplyOutcome::ToolDetail)
         .unwrap_or_else(|| SettingApplyOutcome::Invalid {
             label: "density",
+            value: value.to_string(),
+        })
+}
+
+pub(crate) fn apply_ui_presentation_selection(value: &str) -> SettingApplyOutcome {
+    crate::surfaces::layout::UiPresentationLevel::parse(value)
+        .map(SettingApplyOutcome::UiPresentation)
+        .unwrap_or_else(|_| SettingApplyOutcome::Invalid {
+            label: "presentation",
+            value: value.to_string(),
+        })
+}
+
+pub(crate) fn apply_startup_splash_selection(value: &str) -> SettingApplyOutcome {
+    crate::settings::StartupSplashMode::parse(value)
+        .map(SettingApplyOutcome::StartupSplash)
+        .unwrap_or_else(|| SettingApplyOutcome::Invalid {
+            label: "startup splash",
+            value: value.to_string(),
+        })
+}
+
+pub(crate) fn apply_tui_theme_selection(value: &str) -> SettingApplyOutcome {
+    crate::settings::TuiThemePreference::parse(value)
+        .map(SettingApplyOutcome::TuiTheme)
+        .unwrap_or_else(|| SettingApplyOutcome::Invalid {
+            label: "theme",
+            value: value.to_string(),
+        })
+}
+
+pub(crate) fn apply_glyph_preference_selection(value: &str) -> SettingApplyOutcome {
+    crate::settings::GlyphPreference::parse(value)
+        .map(SettingApplyOutcome::GlyphPreference)
+        .unwrap_or_else(|| SettingApplyOutcome::Invalid {
+            label: "glyph profile",
             value: value.to_string(),
         })
 }

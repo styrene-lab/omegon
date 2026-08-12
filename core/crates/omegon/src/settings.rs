@@ -344,6 +344,68 @@ impl StartupMouseCaptureMode {
     }
 }
 
+/// Preferred named color theme for interactive TUI sessions.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TuiThemePreference {
+    #[default]
+    Terminal,
+    Alpharius,
+    Styrene,
+}
+
+impl TuiThemePreference {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Terminal => "terminal",
+            Self::Alpharius => "alpharius",
+            Self::Styrene => "styrene",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "terminal" | "default" => Some(Self::Terminal),
+            "alpharius" => Some(Self::Alpharius),
+            "styrene" => Some(Self::Styrene),
+            _ => None,
+        }
+    }
+}
+
+/// Operator intent for TUI symbols. `Auto` delegates to terminal capability
+/// detection; explicit values remain stable even when detection is uncertain.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GlyphPreference {
+    #[default]
+    Auto,
+    NerdFont,
+    Unicode,
+    Ascii,
+}
+
+impl GlyphPreference {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::NerdFont => "nerd-font",
+            Self::Unicode => "unicode",
+            Self::Ascii => "ascii",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Some(Self::Auto),
+            "nerd-font" | "nerd_font" | "nerd" => Some(Self::NerdFont),
+            "unicode" => Some(Self::Unicode),
+            "ascii" => Some(Self::Ascii),
+            _ => None,
+        }
+    }
+}
+
 /// Runtime settings that can change mid-session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -411,6 +473,14 @@ pub struct Settings {
     pub ui_detail_preference: Option<crate::surfaces::layout::UiPresentationLevel>,
     #[serde(skip)]
     pub ui_terminal_preference: Option<crate::surfaces::layout::TerminalPresentation>,
+
+    /// Named semantic color theme for the interactive TUI.
+    #[serde(default)]
+    pub tui_theme: TuiThemePreference,
+
+    /// Requested symbol profile; Auto resolves against terminal capability.
+    #[serde(default)]
+    pub glyph_preference: GlyphPreference,
 
     /// Source of the active persisted profile loaded for this runtime.
     #[serde(skip)]
@@ -769,6 +839,8 @@ impl Default for Settings {
             ui_terminal: Default::default(),
             ui_detail_preference: None,
             ui_terminal_preference: None,
+            tui_theme: TuiThemePreference::default(),
+            glyph_preference: GlyphPreference::default(),
             startup_splash: StartupSplashMode::default(),
             startup_mouse_capture: StartupMouseCaptureMode::default(),
             profile_source: ProfileSource::BuiltInDefault,
@@ -1346,6 +1418,12 @@ pub struct Profile {
     /// Explicit terminal layout preference, independent of detail.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ui_terminal: Option<crate::surfaces::layout::TerminalPresentation>,
+    /// Named semantic TUI theme.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tui_theme: Option<String>,
+    /// Requested glyph profile: "auto", "nerd-font", "unicode", or "ascii".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub glyph_preference: Option<String>,
 
     // ── Sandbox ──
     /// Sandbox isolation for delegate/cleave children.
@@ -1892,6 +1970,16 @@ impl Profile {
             settings.ui_terminal = terminal;
             settings.ui_terminal_preference = Some(terminal);
         }
+        if let Some(ref theme) = self.tui_theme
+            && let Some(theme) = TuiThemePreference::parse(theme)
+        {
+            settings.tui_theme = theme;
+        }
+        if let Some(ref glyphs) = self.glyph_preference
+            && let Some(glyphs) = GlyphPreference::parse(glyphs)
+        {
+            settings.glyph_preference = glyphs;
+        }
         if let Some(s) = self.sandbox {
             settings.sandbox = s;
         }
@@ -1972,6 +2060,10 @@ impl Profile {
             .ui_detail_preference
             .map(|value| value.name().to_string());
         self.ui_terminal = settings.ui_terminal_preference;
+        self.tui_theme = (settings.tui_theme != TuiThemePreference::default())
+            .then(|| settings.tui_theme.as_str().to_string());
+        self.glyph_preference = (settings.glyph_preference != GlyphPreference::default())
+            .then(|| settings.glyph_preference.as_str().to_string());
         if settings.sandbox {
             self.sandbox = Some(true);
         } else {
@@ -2797,6 +2889,10 @@ fn settings_surface_snapshot(
             .collect(),
         max_turns: settings.max_turns,
         tool_detail: settings.tool_detail.as_str().to_string(),
+        ui_presentation: settings.ui_presentation.name().to_string(),
+        startup_splash: settings.startup_splash.as_str().to_string(),
+        tui_theme: settings.tui_theme.as_str().to_string(),
+        glyph_preference: settings.glyph_preference.as_str().to_string(),
         trusted_directory_count: settings.trusted_directories.len(),
         sandbox: settings.sandbox,
         update_channel: settings.update_channel.clone(),
@@ -2805,6 +2901,21 @@ fn settings_surface_snapshot(
 }
 
 impl crate::surfaces::settings::SettingsSurfaceProjection {
+    pub fn from_settings_with_capability(
+        settings: &Settings,
+        glyphs: crate::surfaces::settings::GlyphCapabilityProjectionInput,
+    ) -> Self {
+        Self::from_settings_with_profile_drift_and_capability(settings, None, glyphs)
+    }
+
+    pub fn from_settings_with_profile_drift_and_capability(
+        settings: &Settings,
+        drift: Option<&crate::surfaces::profile::ProfileDriftProjection>,
+        glyphs: crate::surfaces::settings::GlyphCapabilityProjectionInput,
+    ) -> Self {
+        Self::from_snapshot_with_capability(&settings_surface_snapshot(settings), drift, glyphs)
+    }
+
     pub fn from_settings(settings: &Settings) -> Self {
         Self::from_snapshot(&settings_surface_snapshot(settings), None)
     }
@@ -2940,6 +3051,48 @@ mod tests {
             Some(StartupMouseCaptureMode::Off)
         );
         assert_eq!(StartupMouseCaptureMode::parse("sometimes"), None);
+    }
+
+    #[test]
+    fn presentation_preferences_default_parse_apply_and_persist_stably() {
+        assert_eq!(Settings::default().tui_theme, TuiThemePreference::Terminal);
+        assert_eq!(Settings::default().glyph_preference, GlyphPreference::Auto);
+        assert_eq!(
+            TuiThemePreference::parse("default"),
+            Some(TuiThemePreference::Terminal)
+        );
+        assert_eq!(
+            TuiThemePreference::parse("STYRENE"),
+            Some(TuiThemePreference::Styrene)
+        );
+        assert_eq!(TuiThemePreference::parse("unknown"), None);
+        assert_eq!(
+            GlyphPreference::parse("nerd"),
+            Some(GlyphPreference::NerdFont)
+        );
+        assert_eq!(
+            GlyphPreference::parse("ASCII"),
+            Some(GlyphPreference::Ascii)
+        );
+        assert_eq!(GlyphPreference::parse("emoji"), None);
+
+        let profile: Profile =
+            serde_json::from_str(r#"{"tuiTheme":"styrene","glyphPreference":"nerd-font"}"#)
+                .unwrap();
+        let mut settings = Settings::default();
+        profile.apply_to(&mut settings);
+        assert_eq!(settings.tui_theme, TuiThemePreference::Styrene);
+        assert_eq!(settings.glyph_preference, GlyphPreference::NerdFont);
+
+        let mut persisted = Profile::default();
+        persisted.capture_from(&settings);
+        assert_eq!(persisted.tui_theme.as_deref(), Some("styrene"));
+        assert_eq!(persisted.glyph_preference.as_deref(), Some("nerd-font"));
+
+        let defaults = Settings::default();
+        persisted.capture_from(&defaults);
+        assert_eq!(persisted.tui_theme, None);
+        assert_eq!(persisted.glyph_preference, None);
     }
 
     #[test]

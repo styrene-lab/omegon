@@ -74,6 +74,7 @@ pub(super) enum SettingsRowAction {
     ToggleSandbox,
     ToggleAutoUpdate,
     ExplainTrustedDirectories,
+    OpenNerdFontHelp,
     ProjectedEditor,
 }
 
@@ -98,6 +99,7 @@ impl SettingsRowTarget {
             Some("workspace.sandbox") => SettingsRowAction::ToggleSandbox,
             Some("updates.auto_update") => SettingsRowAction::ToggleAutoUpdate,
             Some("workspace.trusted_directories") => SettingsRowAction::ExplainTrustedDirectories,
+            Some("ui.nerd_font_help") => SettingsRowAction::OpenNerdFontHelp,
             _ => SettingsRowAction::ProjectedEditor,
         }
     }
@@ -482,6 +484,9 @@ mod tests {
         };
         assert_eq!(target.id(), Some("workspace.sandbox"));
         assert_eq!(target.action(), SettingsRowAction::ToggleSandbox);
+
+        let help = SettingsRowTarget::from_id(Some("ui.nerd_font_help".into()));
+        assert_eq!(help.action(), SettingsRowAction::OpenNerdFontHelp);
         assert_eq!(label, "Sandbox");
     }
 

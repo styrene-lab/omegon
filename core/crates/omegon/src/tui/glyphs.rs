@@ -10,6 +10,16 @@ pub enum GlyphProfile {
     NerdFont,
 }
 
+impl GlyphProfile {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ascii => "ascii",
+            Self::Unicode => "unicode",
+            Self::NerdFont => "nerd-font",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuleGlyphRole {
     Horizontal,
@@ -494,6 +504,40 @@ pub struct GlyphCapability {
     pub signals: Vec<&'static str>,
 }
 
+/// Requested, detected, and effective glyph state kept separate so an
+/// explicit operator choice is never mistaken for capability evidence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlyphResolution {
+    pub requested: crate::settings::GlyphPreference,
+    pub detected: GlyphCapability,
+    pub effective: GlyphProfile,
+}
+
+impl GlyphResolution {
+    pub fn resolve(requested: crate::settings::GlyphPreference, detected: GlyphCapability) -> Self {
+        let effective = match requested {
+            crate::settings::GlyphPreference::Auto => detected.profile,
+            crate::settings::GlyphPreference::NerdFont => GlyphProfile::NerdFont,
+            crate::settings::GlyphPreference::Unicode => GlyphProfile::Unicode,
+            crate::settings::GlyphPreference::Ascii => GlyphProfile::Ascii,
+        };
+        Self {
+            requested,
+            detected,
+            effective,
+        }
+    }
+
+    pub fn nerd_font_support_unconfirmed(&self) -> bool {
+        self.requested == crate::settings::GlyphPreference::NerdFont
+            && self.detected.profile != GlyphProfile::NerdFont
+    }
+
+    pub fn glyphs(&self) -> GlyphSet {
+        glyph_set(self.effective)
+    }
+}
+
 impl GlyphCapability {
     pub fn should_show_fallback_notice(&self) -> bool {
         self.profile != GlyphProfile::NerdFont && self.confidence == GlyphConfidence::Low
@@ -513,18 +557,54 @@ impl GlyphCapability {
     }
 }
 
+static ACTIVE_GLYPH_PROFILE: std::sync::atomic::AtomicU8 =
+    std::sync::atomic::AtomicU8::new(u8::MAX);
+
+/// Configure the process-wide semantic glyph source used by all TUI renderers.
+/// The stored value is the resolved profile, while capability evidence remains
+/// independently available through [`glyph_capability`].
+pub fn set_preference(requested: crate::settings::GlyphPreference) -> GlyphResolution {
+    let resolution = glyph_resolution(requested);
+    ACTIVE_GLYPH_PROFILE.store(
+        match resolution.effective {
+            GlyphProfile::Ascii => 0,
+            GlyphProfile::Unicode => 1,
+            GlyphProfile::NerdFont => 2,
+        },
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    resolution
+}
+
 pub fn glyphs() -> &'static GlyphSet {
-    static GLYPHS: std::sync::OnceLock<GlyphSet> = std::sync::OnceLock::new();
-    GLYPHS.get_or_init(|| glyph_capability().glyphs())
+    let profile = match ACTIVE_GLYPH_PROFILE.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => GlyphProfile::Ascii,
+        1 => GlyphProfile::Unicode,
+        2 => GlyphProfile::NerdFont,
+        _ => glyph_capability().profile,
+    };
+    match profile {
+        GlyphProfile::Ascii => &ASCII_GLYPHS,
+        GlyphProfile::Unicode => &UNICODE_GLYPHS,
+        GlyphProfile::NerdFont => &NERD_FONT_GLYPHS,
+    }
+}
+
+pub fn glyph_resolution(requested: crate::settings::GlyphPreference) -> GlyphResolution {
+    GlyphResolution::resolve(requested, glyph_capability().clone())
+}
+
+fn glyph_set(profile: GlyphProfile) -> GlyphSet {
+    match profile {
+        GlyphProfile::Ascii => ASCII_GLYPHS,
+        GlyphProfile::Unicode => UNICODE_GLYPHS,
+        GlyphProfile::NerdFont => NERD_FONT_GLYPHS,
+    }
 }
 
 impl GlyphCapability {
     pub fn glyphs(&self) -> GlyphSet {
-        match self.profile {
-            GlyphProfile::Ascii => ASCII_GLYPHS,
-            GlyphProfile::Unicode => UNICODE_GLYPHS,
-            GlyphProfile::NerdFont => NERD_FONT_GLYPHS,
-        }
+        glyph_set(self.profile)
     }
 }
 
@@ -732,6 +812,36 @@ pub fn nerd_font_install_help_url() -> &'static str {
 mod tests {
     use super::*;
     use unicode_width::UnicodeWidthStr;
+
+    #[test]
+    fn glyph_resolution_preserves_request_detection_and_effective_profile() {
+        let detected = GlyphCapability {
+            profile: GlyphProfile::Unicode,
+            confidence: GlyphConfidence::Low,
+            signals: vec!["test:no-nerd-font-evidence"],
+        };
+
+        let auto =
+            GlyphResolution::resolve(crate::settings::GlyphPreference::Auto, detected.clone());
+        assert_eq!(auto.requested, crate::settings::GlyphPreference::Auto);
+        assert_eq!(auto.detected, detected);
+        assert_eq!(auto.effective, GlyphProfile::Unicode);
+        assert!(!auto.nerd_font_support_unconfirmed());
+
+        let explicit = GlyphResolution::resolve(
+            crate::settings::GlyphPreference::NerdFont,
+            auto.detected.clone(),
+        );
+        assert_eq!(explicit.detected.profile, GlyphProfile::Unicode);
+        assert_eq!(explicit.effective, GlyphProfile::NerdFont);
+        assert!(explicit.nerd_font_support_unconfirmed());
+        assert_eq!(explicit.glyphs().profile, GlyphProfile::NerdFont);
+
+        let ascii =
+            GlyphResolution::resolve(crate::settings::GlyphPreference::Ascii, auto.detected);
+        assert_eq!(ascii.effective, GlyphProfile::Ascii);
+        assert_eq!(ascii.glyphs().profile, GlyphProfile::Ascii);
+    }
 
     #[test]
     fn structured_tool_identity_maps_to_stable_glyph_roles() {

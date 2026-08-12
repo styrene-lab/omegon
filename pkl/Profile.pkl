@@ -104,3 +104,12 @@ uiTerminal: ("inline"|"fullscreen")?
 
 /// Detail independent of terminal layout. Legacy om/lean/slim resolve to active.
 uiPresentation: ("active"|"full"|"om"|"lean"|"slim")?
+
+/// Named palettes are opt-in. Missing preserves terminal-inherited colors.
+tuiTheme: ("terminal"|"alpharius"|"styrene")?
+
+/// Requested symbols, independent of detected terminal capability.
+glyphPreference: ("auto"|"nerd-font"|"unicode"|"ascii")?
+
+/// Startup animation preference, independent of terminal capability probes.
+startupSplash: ("first-run"|"always"|"never")?
