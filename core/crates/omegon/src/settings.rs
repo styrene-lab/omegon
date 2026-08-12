@@ -2051,6 +2051,8 @@ impl Profile {
         } else {
             self.auto_update = None;
         }
+        self.startup_splash = (settings.startup_splash != StartupSplashMode::default())
+            .then(|| settings.startup_splash.as_str().to_string());
         if settings.tool_detail != ToolDetail::Detailed {
             self.tool_detail = Some(settings.tool_detail.as_str().to_string());
         } else {
@@ -3084,15 +3086,18 @@ mod tests {
         assert_eq!(settings.tui_theme, TuiThemePreference::Styrene);
         assert_eq!(settings.glyph_preference, GlyphPreference::NerdFont);
 
+        settings.startup_splash = StartupSplashMode::Never;
         let mut persisted = Profile::default();
         persisted.capture_from(&settings);
         assert_eq!(persisted.tui_theme.as_deref(), Some("styrene"));
         assert_eq!(persisted.glyph_preference.as_deref(), Some("nerd-font"));
+        assert_eq!(persisted.startup_splash.as_deref(), Some("never"));
 
         let defaults = Settings::default();
         persisted.capture_from(&defaults);
         assert_eq!(persisted.tui_theme, None);
         assert_eq!(persisted.glyph_preference, None);
+        assert_eq!(persisted.startup_splash, None);
     }
 
     #[test]
