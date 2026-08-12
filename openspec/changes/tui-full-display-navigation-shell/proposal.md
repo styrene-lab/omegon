@@ -13,8 +13,8 @@ Replace constrained conversation overlays with an exclusive full-display interac
 - Introduce an exclusive full-display interactive-surface mode for the inline TUI.
 - Make `/settings` the canonical configuration hierarchy and route task-oriented aliases to destination identities.
 - Preserve independent renderer-neutral menu projection builders.
-- Add hierarchical Back/Escape behavior and retain parent state across selectors and detail pages.
-- Move process/detail and legacy extension modal rendering behind the exclusive display boundary.
+- Add hierarchical Back/Escape behavior, one keyboard/paste/mouse dispatcher, and explicit return targets across selectors, prompts, and detail pages.
+- Move process/detail and legacy extension modal rendering behind the exclusive display boundary with no-clobber admission.
 - Add focused unit, render, snapshot, and viewport-restoration tests.
 
 ## Constraints
@@ -22,5 +22,7 @@ Replace constrained conversation overlays with an exclusive full-display interac
 - Do not special-case Extensions in rendering.
 - Do not place Ratatui geometry or key codes in semantic surface contracts.
 - Do not flatten all configuration inventories into one eager settings projection.
-- Preserve native terminal scrollback and do not republish completed exchanges during mode transitions.
+- Preserve native terminal scrollback by retaining one terminal-height inline viewport and switching composition—not terminal/viewport mode—between compact conversation and full-frame interactive surfaces.
 - Resolve aliases and settings rows through canonical destination routing, not recursive slash execution.
+- Do not advertise enabled Settings actions without a registered runtime editor or destination.
+- Queue passive notifications and extension compatibility payloads so they cannot clobber an active exclusive surface.

@@ -5,41 +5,44 @@ Dependencies: Group 2 depends on Group 1. Group 3 depends on Groups 1–2. Group
 ## 1. Navigation contracts and state machine
 <!-- specs: tui-navigation -->
 
-- [ ] 1.1 Add `surfaces::navigation` destination, breadcrumb, and transient-interaction contracts without Ratatui types.
-- [ ] 1.2 Add canonical Settings section identities and parsing for `/settings <section>` and task-oriented aliases.
-- [ ] 1.3 Add TUI `NavigationSession` stack entries that preserve destination-local `MenuState` while rebuilding live projections.
-- [ ] 1.4 Test push, pop, root close, deterministic bare Settings, alias equivalence, and local-state restoration.
+- [ ] 1.1 Add `surfaces::navigation` destination and breadcrumb contracts without Ratatui types or TUI-local selection/filter state.
+- [ ] 1.2 Add canonical Settings section identities and one parser/router for `/settings <section>`, `/config <section>`, and every retained task-oriented alias; define invalid/unavailable destination diagnostics.
+- [ ] 1.3 Add TUI `NavigationSession` stack entries that preserve destination-local `MenuState` while rebuilding live projections; restore selection by row identity and clamp safely after refresh.
+- [ ] 1.4 Add the single `InteractiveSurface` enum and return-target/pending-prompt model that replaces simultaneous top-level menu, selector, process, copy, prompt, mention-picker, and extension-modal ownership.
+- [ ] 1.5 Write failing tests for push/pop/root close, deterministic bare Settings, complete alias equivalence, invalid routes, deep-link replacement, input consumption, queued prompt return, and identity-based local-state restoration; register the test file before production implementation.
 
 ## 2. Exclusive rendering and viewport ownership
 <!-- specs: tui-navigation -->
 
-- [ ] 2.1 Introduce one top-level interactive-surface owner in `App` and route active navigation through it.
-- [ ] 2.2 Short-circuit `App::draw` so active interactive surfaces clear and own the complete frame without conversation or permanent fixtures.
-- [ ] 2.3 Refactor `render_menu_surface` to render into a supplied content area without mandatory `command_modal_area` margins.
-- [ ] 2.4 Add normal-height and constrained-height buffer/snapshot tests, including selected-row visibility and overflow indicators.
-- [ ] 2.5 Expand and restore the inline viewport on interactive-surface entry/exit without publishing transcript content; test restoration across terminal resize.
+- [ ] 2.1 Initialize native-transcript mode once with a terminal-height inline viewport and retain its viewport mode for the session; prove this preserves scrollback with a focused probe/test before wiring production composition.
+- [ ] 2.2 Compose compact conversation fixtures inside that frame and short-circuit `App::draw` so the active exclusive surface clears, styles, and owns every cell in `frame.area()`.
+- [ ] 2.3 Refactor `render_menu_surface` with an explicit full-display layout mode/content area rather than relying on a larger argument to modal `command_modal_area`.
+- [ ] 2.4 Queue passive notifications during exclusive ownership and route blocking prompts through `InteractiveSurface` with an explicit return target.
+- [ ] 2.5 Add normal-height and constrained-height buffer/snapshot tests for fixture absence, selected-row visibility, overflow indicators, and complete cell styling.
+- [ ] 2.6 Test entry/exit and later physical resize without terminal recreation, viewport-mode replacement, alternate-screen transition, transcript republication, or scrollback loss.
 
 ## 3. Canonical Settings hierarchy and deep links
 <!-- specs: tui-navigation -->
 
-- [ ] 3.1 Route `/settings`, `/config`, `/extension`, `/extensions`, `/skills`, `/model`, `/auth`, and supported settings sections through canonical destination identities.
+- [ ] 3.1 Route `/settings`, `/config`, all `/settings <section>` forms, and every retained task-oriented alias through canonical destination identities; reject unknown or unavailable sections without discarding active state.
 - [ ] 3.2 Replace Settings rows that recursively execute slash commands with explicit navigation actions.
-- [ ] 3.3 Dispatch each Settings destination to its existing independent live projection builder.
-- [ ] 3.4 Update tests to assert destination identity and breadcrumb equivalence rather than independent popup IDs.
+- [ ] 3.3 Dispatch each Settings destination to its existing independent live projection builder and mark rows without a registered editor/destination visibly unavailable.
+- [ ] 3.4 Add an explicit action capability/availability contract so Enter cannot emit unsupported mutation commands and completed editors refresh their parent projection.
+- [ ] 3.5 Update tests to assert destination identity, breadcrumb, complete alias parity, unsupported action behavior, and deep links invoked while navigation is already active.
 
 ## 4. Child interactions and non-settings surfaces
 <!-- specs: tui-navigation -->
 
-- [ ] 4.1 Preserve parent navigation state while opening and cancelling selectors or inline value editors.
-- [ ] 4.2 Implement Escape precedence for transient input, child interaction, destination pop, and root close.
-- [ ] 4.3 Move process/detail and copy/document viewers to full-display inspector destinations outside the Settings breadcrumb.
-- [ ] 4.4 Adapt legacy extension modal payloads to an exclusive compatibility page and prohibit concurrent conversation rendering.
-- [ ] 4.5 Test selector return, filtered-list detail return, blocking input ownership, and inspector classification.
+- [ ] 4.1 Preserve parent navigation state and explicit return targets while opening, confirming, and cancelling selectors, prompts, or inline value editors.
+- [ ] 4.2 Implement one keyboard/paste/mouse dispatcher and Escape precedence for transient input, pending confirmation, child interaction, destination pop, and root close; prove events cannot fall through to composer handling.
+- [ ] 4.3 Move process/session detail and copy/document viewers to full-display inspector variants outside the Settings breadcrumb.
+- [ ] 4.4 Adapt legacy extension modal and action-required payloads to bounded exclusive variants with FIFO/no-clobber admission and return-target restoration.
+- [ ] 4.5 Test selector confirm/cancel, filtered-list refresh/reorder/removal, blocking prompt ownership, document/process inspector classification, extension-event concurrency, and composer-state preservation.
 
 ## 5. Regression validation and lifecycle reconciliation
 <!-- specs: tui-navigation -->
 
-- [ ] 5.1 Run focused navigation, Settings, Extensions, selector, render, and terminal-transition tests.
+- [ ] 5.1 Run focused navigation, Settings, Extensions, selector, render, input-arbitration, extension-concurrency, and terminal-geometry tests.
 - [ ] 5.2 Run `just test-crate omegon` and `just clippy-changed`.
-- [ ] 5.3 Reconcile implementation scope and completed tasks in this file and register lifecycle progress.
-- [ ] 5.4 Verify every scenario in `specs/tui-navigation.md` against named test evidence before archive.
+- [ ] 5.3 Reconcile implementation scope and completed tasks in this file, register test evidence and lifecycle progress, and move the bound design node to `implemented` only after all scenarios pass.
+- [ ] 5.4 Produce a scenario-to-test evidence table covering every scenario in `specs/tui-navigation.md`; archive only when it has no missing or ambiguous evidence.

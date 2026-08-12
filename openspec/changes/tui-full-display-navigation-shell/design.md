@@ -14,17 +14,25 @@ The existing settings projection already identifies configuration areas, and exi
 
 The interactive owner is distinct from transient state such as toast notifications. Blocking prompts, selectors, and inline value editors are represented as child interaction scopes so input is routed to the nearest scope first.
 
+### Input arbitration
+
+Rendering geometry does not establish ownership. All keyboard, paste, and mouse events pass through one dispatcher whose state is a single exclusive-surface enum. The active variant consumes or rejects the event before conversation/composer handling can run. Passive notifications have no input path.
+
+The migration must eliminate simultaneously active top-level states rather than impose a precedence order over `active_menu`, `selector`, `process_viewer`, `command_prompt`, copy state, `at_picker`, and extension modal fields. Compatibility producers enqueue or transition to one of these semantic variants:
+
+- `Navigation` — settings, menus, help, and inventory/detail routes;
+- `Inspector` — process/session, document/copy, evidence, and tool detail;
+- `Picker` — model, context, secret, mention/file, and similar bounded selection;
+- `Prompt` — permission, responder-backed decision, confirmation, and extension action request;
+- `LegacyExtension` — bounded compatibility adapter for arbitrary extension payloads.
+
+Input precedence inside a variant is nearest-scope first: transient text/search editor, pending confirmation, child picker/prompt, destination, then root close. Background producers may queue a blocking prompt but may not replace an active surface or discard its navigation state. When accepted for display, the prompt retains an explicit return target and resumes the prior surface after resolution.
+
 ### Renderer-neutral navigation contract
 
-`surfaces::navigation` defines:
+`surfaces::navigation` defines only canonical destination identities, semantic breadcrumbs, shell titles, and navigation affordances. It does not contain selection indexes, filters, Ratatui keys, geometry, or concrete `MenuState`.
 
-- canonical destination identities;
-- semantic breadcrumbs;
-- projected shell title and navigation affordances;
-- destination-local state needed to restore selection/filter position;
-- transient interaction kind without Ratatui key or geometry types.
-
-TUI-owned `navigation.rs` resolves destination identities to existing menu projection builders. Projection data is rebuilt from live backing state rather than retained in navigation history.
+TUI-owned `navigation.rs` owns destination-local `MenuState` snapshots and resolves destination identities to existing menu projection builders. Projection data is rebuilt from live backing state rather than retained in navigation history. State restoration is identity-based: the selected row ID is restored if still visible, otherwise selection clamps to the first available row; filters are retained; unavailable destinations return to the nearest valid parent with a diagnostic. Reordering never retargets an action by stale numeric index.
 
 ### Canonical destination routing
 
@@ -41,11 +49,17 @@ Escape precedence is:
 3. pop one destination;
 4. close the root and restore conversation mode.
 
-### Rendering and viewport transition
+### Rendering and terminal geometry
 
-When an exclusive surface is active, `App::draw` clears the complete frame and renders only the interactive shell. `menu_surface` accepts its content area directly and no longer unconditionally derives centered modal geometry.
+In native-transcript mode the Ratatui terminal is created once with a terminal-height inline viewport (using a saturating requested height so later terminal resizes remain terminal-bounded). The viewport mode is not replaced while the session is active. Compact conversation mode allocates its live fixtures within the bottom `native_transcript_viewport_height` rows of that frame; an exclusive interactive surface instead consumes the entire frame. Alternate-screen sessions already own the entire frame and use the same composition rule.
 
-The terminal loop tracks desired presentation mode. Entering navigation expands the active inline viewport to available terminal height through the existing resize-aware terminal path; leaving restores `native_transcript_viewport_height`. Transition redraws must not publish completed conversation segments to native scrollback.
+This distinction is normative: **complete live frame** means `frame.area()` after Ratatui has reconciled the physical terminal geometry, not the compact conversation sub-area. Entering or leaving navigation changes composition only; it must not recreate `Terminal`, enter or leave alternate screen, or publish transcript content. A focused probe and regression test must establish that the terminal-height inline viewport preserves native scrollback before production wiring lands.
+
+Every exclusive renderer must style every cell in its target rectangle. Passive notifications are queued while an exclusive surface is active; they may not visually or interactively preempt it. A blocking permission or responder-backed prompt is itself an exclusive surface transition, not a late overlay.
+
+### Settings action availability
+
+The navigation shell does not imply universal editability. Settings rows may attach an action only when the runtime implements that editor or destination. Unsupported projected editors are visibly unavailable with a diagnostic reason and cannot advertise an enabled primary action. Enter invokes the row's declared enabled action; it does not promise that every projected row can be edited.
 
 ### Compatibility boundary
 

@@ -1,12 +1,13 @@
 ---
 id: tui-full-display-navigation-shell
 title: "Full-display TUI navigation shell"
-status: decided
+status: implementing
 parent: tui-surface-substrate-reevaluation
 tags: [tui, navigation, settings, inline-terminal, menus, ux]
 open_questions: []
 dependencies: []
 related: []
+openspec_change: tui-full-display-navigation-shell
 ---
 
 # Full-display TUI navigation shell
@@ -35,11 +36,11 @@ Operator validation on 2026-08-12: resized the active inline terminal repeatedly
 
 ## Decisions
 
-### Interactive surfaces exclusively own the live inline display
+### Interactive surfaces exclusively own the live display
 
 **Status:** accepted
 
-**Rationale:** The compact conversation viewport cannot simultaneously provide useful menu capacity. When navigation, an inspector, a picker, or a blocking prompt is active, normal conversation composition and permanent fixtures are suspended. Modal describes input/lifecycle semantics only; it does not imply visual layering over conversation.
+**Rationale:** The compact conversation composition cannot simultaneously provide useful menu capacity. Native-transcript mode creates one terminal-height inline viewport and composes compact conversation fixtures inside it; an interactive surface instead consumes `frame.area()` without replacing the terminal or viewport mode. When navigation, an inspector, a picker, or a blocking prompt is active, normal conversation composition and permanent fixtures are suspended and all input is routed to one exclusive owner. Modal describes lifecycle semantics only; it does not imply visual layering over conversation.
 
 ### Settings is the canonical configuration hierarchy
 
@@ -116,7 +117,11 @@ Operator validation on 2026-08-12: resized the active inline terminal repeatedly
 - Do not special-case `/extensions` in the renderer; all structured interactive destinations use the same exclusive-display mechanism.
 - Preserve renderer-neutral projections under `surfaces::*`; no Ratatui geometry or key codes may enter semantic projection types.
 - Do not flatten settings inventories into a single eagerly-built projection; destination projections retain independent refresh and capability ownership.
-- Entering and leaving full-display mode must preserve native terminal scrollback and restore the compact conversation viewport without republishing completed exchanges.
-- Selectors opened from a settings destination must return to that destination on confirm or cancel rather than discarding parent context.
+- Preserve native terminal scrollback by creating one terminal-height inline viewport for native-transcript mode, composing compact conversation fixtures inside it, and retaining that viewport mode for the session.
+- Treat `frame.area()` as the complete live frame; surface entry/exit changes composition only and must not recreate `Terminal`, switch alternate-screen state, or republish completed exchanges.
+- Selectors and blocking prompts opened from an existing surface must carry explicit return targets and restore parent state on confirm or cancel.
+- All keyboard, paste, and mouse input must pass through one exclusive-surface dispatcher; events may not fall through to composer handling.
+- Passive notifications queue during exclusive ownership; extension modal/action payloads must not clobber an active surface or one another.
 - Slash aliases and settings rows must resolve through a canonical destination router, not recursively execute UI slash commands.
-- Tests must cover constrained terminal heights, viewport transition restoration, deep-link equivalence, breadcrumb/Back behavior, and input precedence.
+- Settings rows without a registered runtime editor/destination must render unavailable rather than advertise an inert enabled action.
+- Tests must cover constrained terminal heights, terminal-height inline scrollback, physical resize, deep-link equivalence, invalid routes, breadcrumb/Back behavior, input arbitration, extension-event concurrency, and identity-based state restoration.
