@@ -322,12 +322,15 @@ pub(crate) fn summarize_tool_args(tool_name: &str, args: Option<&str>) -> Option
             if let Some(value) = json_arg(args)
                 && let Some(path) = json_string_field(&value, &["path", "file"])
             {
-                let bytes = value
+                let extent = value
                     .get("content")
                     .and_then(|v| v.as_str())
-                    .map(|content| format!(" · {} bytes", content.len()))
+                    .map(|content| {
+                        let lines = content.lines().count();
+                        format!(" · {lines} line{}", if lines == 1 { "" } else { "s" })
+                    })
                     .unwrap_or_default();
-                return Some(format!("{path}{bytes}"));
+                return Some(format!("{path}{extent}"));
             }
             fallback()
         }
@@ -583,15 +586,23 @@ fn summarize_tool_result(tool_name: &str, result: Option<&str>) -> Option<String
     }
 
     if matches!(tool_name, "edit")
-        && let Some(line) = lines
-            .iter()
-            .map(|line| clean_inline_text(line.trim()))
-            .find(|line| {
-                line.to_ascii_lowercase()
-                    .contains("successfully replaced text")
-            })
+        && lines.iter().any(|line| {
+            let lower = line.trim().to_ascii_lowercase();
+            lower.contains("successfully replaced text") || lower.starts_with("changed ")
+        })
     {
-        return Some(crate::util::truncate(&line, 96));
+        return None;
+    }
+
+    if matches!(tool_name, "write")
+        && lines.iter().any(|line| {
+            let line = line.trim();
+            (line.starts_with("Created ") || line.starts_with("Wrote "))
+                && line.contains(" lines, ")
+                && line.ends_with(" bytes)")
+        })
+    {
+        return None;
     }
 
     if matches!(tool_name, "commit")
@@ -3374,6 +3385,29 @@ mod tests {
         let summary = summarize_tool_result("read", Some("}")).expect("summary");
 
         assert_eq!(summary, "1 line");
+    }
+
+    #[test]
+    fn mutation_success_results_do_not_repeat_argument_summary() {
+        assert_eq!(
+            summarize_tool_result("edit", Some("Successfully replaced text in src/lib.rs.")),
+            None
+        );
+        assert_eq!(
+            summarize_tool_result("write", Some("Wrote src/lib.rs (3 lines, 42 bytes)")),
+            None
+        );
+    }
+
+    #[test]
+    fn summarize_write_args_show_path_and_line_extent() {
+        let summary = summarize_tool_args(
+            "write",
+            Some(r#"{"path":"src/lib.rs","content":"one\ntwo\nthree\n"}"#),
+        )
+        .expect("summary");
+
+        assert_eq!(summary, "src/lib.rs · 3 lines");
     }
 
     #[test]
