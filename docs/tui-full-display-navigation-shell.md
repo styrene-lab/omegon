@@ -12,6 +12,11 @@ openspec_change: tui-full-display-navigation-shell
 
 # Full-display TUI navigation shell
 
+> Historical design retained from the native-inline branch. Current runtime and
+> terminal ownership follow `docs/tui-presentations.md` and
+> `openspec/changes/tui-dual-presentation/`. Statements below describe the earlier
+> proposal, not acceptance evidence for the rebased implementation.
+
 ## Overview
 
 Replace constrained conversation overlays with an exclusive full-display interactive surface model. `/settings` becomes the canonical configuration hierarchy; task-oriented commands such as `/extensions`, `/skills`, `/model`, and `/auth` deep-link into settings destinations. Inspectors and blocking prompts use the same exclusive display ownership without being misclassified as settings. Semantic menu projections remain renderer-neutral; the TUI shell owns navigation history, input routing, viewport transitions, and return to conversation.

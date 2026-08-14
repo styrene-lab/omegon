@@ -4,6 +4,9 @@ state: implementing
 
 # TUI presentation settings and capability remediation
 
+> Historical proposal retained during rebase. Terminal-inherited colors remain
+> the default; named palettes are opt-in.
+
 ## Intent
 
 Expand the canonical UI settings destination into capability-aware appearance, theme, glyph/Nerd Font, startup splash, conversation, layout, and accessibility controls with live preview and profile persistence.

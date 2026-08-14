@@ -11,6 +11,10 @@ related: []
 
 # TUI presentation settings and capability remediation
 
+> Historical design retained during rebase. The adapted implementation keeps
+> terminal-inherited colors as its default; Alpharius and Styrene are opt-in.
+> Current terminal ownership follows `docs/tui-presentations.md`.
+
 ## Research
 
 ### Existing implementation seams

@@ -19,13 +19,26 @@ use crate::tui::{command_surfaces, theme::Theme};
 #[cfg(test)]
 use crate::tui::theme::Alpharius;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(crate) struct MenuState {
     pub active_tab: String,
     pub selected_row: usize,
     pub filter: String,
     pub mode: MenuMode,
+    /// Derived render cache; not part of the operator's navigation state.
+    rendered_page_rows: std::cell::Cell<usize>,
 }
+
+impl PartialEq for MenuState {
+    fn eq(&self, other: &Self) -> bool {
+        self.active_tab == other.active_tab
+            && self.selected_row == other.selected_row
+            && self.filter == other.filter
+            && self.mode == other.mode
+    }
+}
+
+impl Eq for MenuState {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActiveMenu {
@@ -188,7 +201,7 @@ fn menu_lines<'a>(
     let rows = state.visible_rows(projection);
     let footer = projection.footer.as_deref().unwrap_or(match state.mode {
         MenuMode::Search => "type to filter · Backspace edit · Esc browse · Enter run",
-        MenuMode::Browse => "↑/↓ navigate · Tab category · / search · Enter run · Esc close",
+        MenuMode::Browse => "↑/↓ navigate · PgUp/PgDn page · Home/End · Tab category · / search · Enter run · Esc close",
     });
     let footer_segments = wrap_display(footer, width);
     let body_budget = usize::from(inner_height)
@@ -198,6 +211,7 @@ fn menu_lines<'a>(
     let mut previous_group: Option<&str> = None;
 
     if rows.is_empty() {
+        state.rendered_page_rows.set(1);
         lines.push(Line::from(Span::styled(
             "No matching rows",
             theme.style_ui_secondary(),
@@ -259,6 +273,9 @@ fn menu_lines<'a>(
             used += needed;
             end += 1;
         }
+        state
+            .rendered_page_rows
+            .set(end.saturating_sub(start).max(1));
         if end < rows.len() {
             lines.push(Line::from(Span::styled(
                 format!("  ↓ {} more", rows.len() - end),
@@ -550,6 +567,7 @@ impl MenuState {
             selected_row: 0,
             filter: String::new(),
             mode: MenuMode::Browse,
+            rendered_page_rows: std::cell::Cell::new(1),
         }
     }
 
@@ -681,6 +699,24 @@ impl MenuState {
 
     pub(crate) fn move_up(&mut self) {
         self.selected_row = self.selected_row.saturating_sub(1);
+    }
+
+    pub(crate) fn move_page(&mut self, projection: &MenuProjection, direction: isize) {
+        let last = self.visible_rows(projection).len().saturating_sub(1);
+        let page = self.rendered_page_rows.get().max(1);
+        self.selected_row = if direction < 0 {
+            self.selected_row.saturating_sub(page)
+        } else {
+            self.selected_row.saturating_add(page).min(last)
+        };
+    }
+
+    pub(crate) fn move_home(&mut self) {
+        self.selected_row = 0;
+    }
+
+    pub(crate) fn move_end(&mut self, projection: &MenuProjection) {
+        self.selected_row = self.visible_rows(projection).len().saturating_sub(1);
     }
 
     pub(crate) fn move_down(&mut self, projection: &MenuProjection) {
@@ -901,6 +937,59 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].group_label, "Alpha");
         assert_eq!(rows[0].row.label, "Rust");
+    }
+
+    #[test]
+    fn paging_tracks_rendered_rows_after_resize_and_clamps_filtered_endpoints() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let mut projection = projection();
+        projection.tabs[0].groups[0].rows = (0..80)
+            .map(|index| {
+                let label = format!("ITEM_{index:02}");
+                let mut item = row(&label, &label, "/status");
+                item.description =
+                    "A detail that wraps across several cells in narrow menus".into();
+                item
+            })
+            .collect();
+        let mut state = MenuState::new(&projection);
+        let mut capacities = Vec::new();
+        for height in [20, 35] {
+            state.move_home();
+            let mut terminal = Terminal::new(TestBackend::new(80, height)).unwrap();
+            terminal
+                .draw(|frame| {
+                    render_menu_surface(frame, frame.area(), &Alpharius, &projection, &state);
+                })
+                .unwrap();
+            let visible = terminal
+                .backend()
+                .buffer()
+                .content
+                .chunks(80)
+                .filter(|line| {
+                    line.iter()
+                        .map(|cell| cell.symbol())
+                        .collect::<String>()
+                        .contains("ITEM_")
+                })
+                .count();
+            assert!(visible > 0);
+            state.move_page(&projection, 1);
+            assert_eq!(state.selected_row, visible);
+            state.move_page(&projection, -1);
+            assert_eq!(state.selected_row, 0);
+            capacities.push(visible);
+        }
+        assert!(capacities[1] > capacities[0], "{capacities:?}");
+        state.filter = "ITEM_79".into();
+        state.move_end(&projection);
+        state.move_page(&projection, 1);
+        assert_eq!(state.selected_row, 0);
+        state.filter = "absent".into();
+        state.move_end(&projection);
+        state.move_page(&projection, -1);
+        assert_eq!(state.selected_row, 0);
     }
 
     #[test]

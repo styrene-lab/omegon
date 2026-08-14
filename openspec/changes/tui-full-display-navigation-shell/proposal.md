@@ -4,6 +4,9 @@ state: proposed
 
 # Full-display TUI navigation shell
 
+> Historical branch proposal retained for provenance. Current terminal ownership
+> follows `../tui-dual-presentation/`, rather than the earlier ownership model below.
+
 ## Intent
 
 Replace constrained conversation overlays with an exclusive full-display interactive surface model. `/settings` becomes the canonical configuration hierarchy; task-oriented commands such as `/extensions`, `/skills`, `/model`, and `/auth` deep-link into settings destinations. Inspectors and blocking prompts use the same exclusive display ownership without being misclassified as settings. Semantic menu projections remain renderer-neutral; the TUI shell owns navigation history, input routing, viewport transitions, and return to conversation.

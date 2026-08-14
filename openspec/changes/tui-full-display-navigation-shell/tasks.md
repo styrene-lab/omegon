@@ -1,5 +1,8 @@
 # Tasks: Full-display TUI navigation shell
 
+> Historical branch checklist. Checked items record work on the original branch,
+> not verification of this rebased tree. Current ownership uses `../tui-dual-presentation/`.
+
 Dependencies: Group 2 depends on Group 1. Group 3 depends on Groups 1–2. Group 4 depends on Group 3. Group 5 validates all prior groups.
 
 ## 1. Navigation contracts and state machine

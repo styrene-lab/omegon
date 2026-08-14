@@ -1,5 +1,9 @@
 # TUI presentation — Delta Spec
 
+> Historical branch requirements. Rebase adaptation keeps terminal-inherited
+> colors as the default and named palettes opt-in. These deltas are historical,
+> not a replacement for the current terminal-ownership baseline.
+
 ## ADDED Requirements
 
 ### Requirement: Canonical presentation controls

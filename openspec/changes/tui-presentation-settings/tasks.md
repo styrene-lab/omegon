@@ -1,5 +1,8 @@
 # Tasks: TUI presentation settings and capability remediation
 
+> Historical branch checklist. Checked items are original-branch evidence, not
+> verification of the rebased implementation. Terminal-inherited colors remain default.
+
 Dependencies: Group 2 depends on Group 1. Group 3 depends on Groups 1–2. Group 4 validates all prior groups.
 
 ## 1. Preference and resolution contracts

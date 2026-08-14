@@ -1,5 +1,8 @@
 # TUI navigation — Delta Spec
 
+> Historical branch requirements. Current accepted terminal ownership follows
+> `../../tui-dual-presentation/`; these deltas have not been merged into its baseline.
+
 ## ADDED Requirements
 
 ### Requirement: Exclusive interactive display ownership

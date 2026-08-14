@@ -18,6 +18,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- TUI presentation settings add opt-in named palettes and persisted glyph preferences with capability diagnostics. Terminal-inherited colors remain the default, and startup-splash choices survive profile saves.
+- Structured menus support Page Up, Page Down, Home, and End using the rendered row capacity. Compact tool summaries omit redundant content, and context status distinguishes unmeasured startup usage.
+
 - Inline `/splash` now returns an immediate notice instead of entering a blocking fullscreen animation, keeping live input and event processing available.
 
 - Private TUI acceptance retains the exact observed replay checkpoint and rejects external HTTP(S) discovery through its loopback fixture proxy.

@@ -1,5 +1,8 @@
 # Design: TUI presentation settings and capability remediation
 
+> Historical design. Rebase adaptation keeps terminal-inherited colors as the
+> default and named palettes opt-in; current snapshot-based semantic ownership remains authoritative.
+
 ## Architecture
 
 Presentation preferences remain canonical runtime settings and profile fields. `ThemePreference` names a registry entry; `GlyphPreference` records operator intent independently from `GlyphCapability`, and resolution produces an effective `GlyphProfile`. The semantic Settings projection exposes requested/effective state and warning/remediation rows without importing Ratatui types.

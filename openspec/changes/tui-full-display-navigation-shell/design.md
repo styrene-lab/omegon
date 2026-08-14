@@ -1,5 +1,8 @@
 # Design: Full-display TUI navigation shell
 
+> Historical branch design. Current terminal ownership is specified by
+> `../tui-dual-presentation/`; this record does not replace that contract.
+
 ## Context
 
 Omegon runs Ratatui in an inline viewport sized for compact conversation fixtures. Structured menus are currently rendered inside that compact frame using centered modal geometry. The result is an unusably small menu viewport and fragmented parent/child interaction state.

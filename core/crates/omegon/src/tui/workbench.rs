@@ -1542,6 +1542,27 @@ fn worker_status_style(status: &str, t: &dyn theme::Theme, bg: ratatui::style::C
     Style::default().fg(fg).bg(bg)
 }
 
+fn workstream_summary_text(workstreams: &[WorkstreamSummary], width: usize) -> Option<String> {
+    let current = workstreams.first()?;
+    let progress = format!("{} {}", current.progress(), current.status.label());
+    let detailed = format!(
+        " {} workstreams · current: {} · {}",
+        workstreams.len(),
+        current.title,
+        progress
+    );
+    if detailed.chars().count() <= width {
+        return Some(detailed);
+    }
+
+    let focused = format!(" {} · {}", current.title, progress);
+    if focused.chars().count() <= width {
+        return Some(focused);
+    }
+
+    Some(format!(" {progress}"))
+}
+
 fn render_workstream_summary(
     area: Rect,
     frame: &mut Frame,
@@ -1549,18 +1570,9 @@ fn render_workstream_summary(
     workstreams: &[WorkstreamSummary],
     bg: ratatui::style::Color,
 ) {
-    if workstreams.is_empty() {
+    let Some(text) = workstream_summary_text(workstreams, area.width as usize) else {
         return;
-    }
-    let mut text = format!(" workstreams×{}", workstreams.len());
-    if let Some(first) = workstreams.first() {
-        text.push_str(&format!(
-            " · {} {} {}",
-            first.status.label(),
-            first.progress(),
-            first.title
-        ));
-    }
+    };
     Paragraph::new(Line::from(Span::styled(
         crate::util::truncate(&text, area.width as usize),
         Style::default().fg(t.accent_muted()).bg(bg),
@@ -1572,6 +1584,30 @@ fn render_workstream_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workstream_summary_distinguishes_aggregate_from_current_item() {
+        let workstreams = vec![WorkstreamSummary {
+            id: "a3-evidence-ledger".into(),
+            title: "a3-evidence-ledger".into(),
+            status: WorkstreamStatus::Complete,
+            completed: 9,
+            total: 9,
+        }];
+
+        assert_eq!(
+            workstream_summary_text(&workstreams, 100).as_deref(),
+            Some(" 1 workstreams · current: a3-evidence-ledger · 9/9 complete")
+        );
+        assert_eq!(
+            workstream_summary_text(&workstreams, 40).as_deref(),
+            Some(" a3-evidence-ledger · 9/9 complete")
+        );
+        assert_eq!(
+            workstream_summary_text(&workstreams, 12).as_deref(),
+            Some(" 9/9 complete")
+        );
+    }
 
     #[test]
     fn plan_status_styles_follow_neutral_conversation_semantics() {
