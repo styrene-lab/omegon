@@ -14,15 +14,16 @@ Dependencies: Group 2 depends on Group 1. Group 3 depends on Groups 1–2. Group
 - [ ] 1.4 Add the single `InteractiveSurface` enum and return-target/pending-prompt model that replaces simultaneous top-level menu, selector, process, copy, prompt, mention-picker, and extension-modal ownership.
 - [ ] 1.5 Write failing tests for push/pop/root close, deterministic bare Settings, complete alias equivalence, invalid routes, deep-link replacement, input consumption, queued prompt return, and identity-based local-state restoration; register the test file before production implementation.
 
-## 2. Exclusive rendering and viewport ownership
+## 2. Exclusive rendering and two-terminal ownership
 <!-- specs: tui-navigation -->
 
-- [ ] 2.1 Initialize native-transcript mode once with a terminal-height inline viewport and retain its viewport mode for the session; prove this preserves scrollback with a focused probe/test before wiring production composition.
-- [ ] 2.2 Compose compact conversation fixtures inside that frame and short-circuit `App::draw` so the active exclusive surface clears, styles, and owns every cell in `frame.area()`.
-- [ ] 2.3 Refactor `render_menu_surface` with an explicit full-display layout mode/content area rather than relying on a larger argument to modal `command_modal_area`.
-- [ ] 2.4 Queue passive notifications during exclusive ownership and route blocking prompts through `InteractiveSurface` with an explicit return target.
-- [ ] 2.5 Add normal-height and constrained-height buffer/snapshot tests for fixture absence, selected-row visibility, overflow indicators, and complete cell styling.
-- [ ] 2.6 Test entry/exit and later physical resize without terminal recreation, viewport-mode replacement, alternate-screen transition, transcript republication, or scrollback loss.
+- [ ] 2.1 Add a pure `TerminalPresentation` transition state machine for bounded primary-screen inline conversation and distinct alternate-screen fullscreen interaction; cover entry, exit, repeated cycles, partial acquisition rollback, and idempotent restoration before production wiring.
+- [ ] 2.2 Keep the inline `Terminal` alive but dormant while fullscreen owns a separately constructed `Terminal`; preserve the existing `App`, coordinator, channels, event drains, scheduler, and canonical conversation state in one `run_tui` loop.
+- [ ] 2.3 Acquire and release alternate-screen and fullscreen-only mouse modes symmetrically and only after successful terminal commands; never insert native transcript publications into the fullscreen terminal.
+- [ ] 2.4 Compose compact conversation in the bounded inline frame and short-circuit fullscreen rendering so the active exclusive surface clears, styles, and owns every cell in its `frame.area()`.
+- [ ] 2.5 Refactor `render_menu_surface` with an explicit fullscreen layout mode/content area rather than relying on centered-modal geometry; derive paging from rendered row capacity with one-row overlap.
+- [ ] 2.6 Queue passive notifications during exclusive ownership and route blocking prompts through `InteractiveSurface` with an explicit return target.
+- [ ] 2.7 Add normal-height and constrained-height buffer/snapshot tests for fixture absence, selected-row visibility, overflow indicators, complete cell styling, physical resize, deferred exactly-once publication, and restoration after repeated cycles.
 
 ## 3. Canonical Settings hierarchy and deep links
 <!-- specs: tui-navigation -->

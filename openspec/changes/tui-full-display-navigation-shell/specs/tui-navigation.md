@@ -126,23 +126,38 @@ Then the filter is retained
 And the prior row identity is selected if it remains visible
 And otherwise selection clamps to the first available visible row without retargeting an action by stale index
 
-### Requirement: Viewport restoration
+### Requirement: Two-terminal presentation restoration
 
-The native-transcript TUI must be initialized once with a terminal-height inline viewport. Conversation mode must compose compact fixtures inside that frame, while exclusive surfaces consume the complete frame. Surface transitions must not recreate the terminal, switch alternate-screen state, publish transcript content, or impair later physical terminal resize handling.
+The native-transcript TUI must retain a bounded primary-screen inline terminal for conversation and create a distinct alternate-screen fullscreen terminal for exclusive interaction. The inline terminal remains alive and dormant during fullscreen ownership. Surface transitions must preserve the live runtime loop, defer native transcript publication while fullscreen is active, and restore terminal modes symmetrically.
 
-#### Scenario: Terminal-height inline viewport preserves scrollback
+#### Scenario: Bounded inline viewport preserves scrollback
 Given native-transcript mode has completed exchanges in terminal scrollback
-When the terminal-height inline viewport renders compact conversation geometry and the operator resizes and scrolls the physical terminal
+When the bounded inline conversation viewport renders and the operator resizes and scrolls the physical terminal
 Then completed exchanges remain reachable in native scrollback
-And the live frame remains bounded to the current physical terminal
+And the live inline frame remains bounded to the current physical terminal
 
-#### Scenario: Closing settings restores conversation
-Given completed exchanges exist in terminal scrollback and Settings is active
+#### Scenario: Opening settings acquires separate fullscreen ownership
+Given the bounded primary-screen inline terminal is active
+When the operator opens the Settings root
+Then alternate-screen ownership is acquired before a distinct fullscreen terminal renders Settings
+And the inline terminal remains alive and dormant
+And the existing App, runtime channels, event receivers, and scheduler remain active
+And native transcript insertion is not attempted on the alternate screen
+
+#### Scenario: Closing settings restores conversation transactionally
+Given completed canonical exchanges became publishable while Settings owned the fullscreen terminal
 When the operator closes the Settings root
-Then the compact inline conversation viewport is restored
-And completed exchanges are not republished into scrollback
-And permanent fixtures use the restored compact geometry
-And the Ratatui terminal instance and viewport mode were not replaced during the transition
+Then fullscreen-only mouse capture and alternate-screen ownership are released successfully
+And the bounded inline terminal resumes on the primary screen
+And pending exchanges are inserted once in canonical order
+And the publication cursor advances only after successful insertion
+
+#### Scenario: Failed fullscreen transition rolls back acquired modes
+Given the bounded inline terminal owns the primary screen
+When entering or leaving fullscreen fails after acquiring only part of its terminal modes
+Then only successfully acquired modes are recorded as owned
+And rollback releases those modes in reverse order
+And a later transition or final terminal restoration remains safe and idempotent
 
 ### Requirement: Settings actions reflect runtime support
 

@@ -5,7 +5,8 @@ status: implementing
 parent: tui-surface-substrate-reevaluation
 tags: [tui, navigation, settings, inline-terminal, menus, ux]
 open_questions: []
-dependencies: []
+dependencies:
+  - inline-fullscreen-terminal-ownership
 related: []
 openspec_change: tui-full-display-navigation-shell
 ---
@@ -100,6 +101,12 @@ Operator validation on 2026-08-12: resized the active inline terminal repeatedly
 **Status:** accepted
 
 **Rationale:** Live operator validation showed repeated inline-terminal resizing preserves scrolling and correctly reflows permanent TUI elements. The navigation shell may therefore transition between compact conversation and full-display geometry using the existing resize-aware terminal path, with regression tests guarding restoration and non-republication.
+
+### Full-display transitions may rely on supported terminal geometry changes
+
+**Status:** superseded
+
+**Rationale:** Superseded by inline-fullscreen-terminal-ownership. Physical terminal resize evidence does not establish safe ownership for changing a stock Ratatui inline viewport from bounded conversation geometry to full-screen interaction geometry. Rich interactions now use a distinct alternate-screen fullscreen Terminal while the bounded inline Terminal remains dormant.
 
 ## Implementation Notes
 

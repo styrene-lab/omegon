@@ -52,13 +52,15 @@ Escape precedence is:
 3. pop one destination;
 4. close the root and restore conversation mode.
 
-### Rendering and terminal geometry
+### Rendering and terminal ownership
 
-In native-transcript mode the Ratatui terminal is created once with a terminal-height inline viewport (using a saturating requested height so later terminal resizes remain terminal-bounded). The viewport mode is not replaced while the session is active. Compact conversation mode allocates its live fixtures within the bottom `native_transcript_viewport_height` rows of that frame; an exclusive interactive surface instead consumes the entire frame. Alternate-screen sessions already own the entire frame and use the same composition rule.
+Native-transcript conversation retains its bounded primary-screen inline `Terminal` for the entire session. The inline terminal is the only target allowed to call `insert_before`, preserving completed exchanges in native scrollback. Opening a root interactive surface enters the alternate screen and constructs a distinct fullscreen `Terminal`; the inline terminal remains alive but dormant until primary-screen ownership returns.
 
-This distinction is normative: **complete live frame** means `frame.area()` after Ratatui has reconciled the physical terminal geometry, not the compact conversation sub-area. Entering or leaving navigation changes composition only; it must not recreate `Terminal`, enter or leave alternate screen, or publish transcript content. A focused probe and regression test must establish that the terminal-height inline viewport preserves native scrollback before production wiring lands.
+The fullscreen transition is presentation-only. `App`, the coordinator, command and cancellation channels, event receivers, scheduler, and canonical conversation remain in the same `run_tui` loop. Entering fullscreen must not await agent completion, suspend drains, or introduce a second transcript queue. While fullscreen is active the committed `TranscriptPublicationCursor` remains unchanged and completed records remain in canonical conversation state. On return, primary-screen ownership is restored before pending records are inserted and the cursor is committed only after insertion succeeds.
 
-Every exclusive renderer must style every cell in its target rectangle. Passive notifications are queued while an exclusive surface is active; they may not visually or interactively preempt it. A blocking permission or responder-backed prompt is itself an exclusive surface transition, not a late overlay.
+Terminal-mode acquisition and release are success-ordered and symmetric. The session guard records alternate-screen and fullscreen-only mouse capture only after the corresponding terminal command succeeds, and clears each record only after release succeeds. A failed partial transition rolls back the modes actually acquired; panic, ordinary error, repeated entry/exit, and final `Drop` restoration remain idempotent.
+
+Every exclusive renderer must style every cell in `frame.area()` of the fullscreen terminal. Passive notifications are queued while an exclusive surface is active; they may not visually or interactively preempt it. A blocking permission or responder-backed prompt is itself an exclusive surface transition, not a late overlay.
 
 ### Settings action availability
 
