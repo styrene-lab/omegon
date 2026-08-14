@@ -17,7 +17,7 @@ Dependencies: Group 2 depends on Group 1. Group 3 depends on Groups 1–2. Group
 ## 2. Exclusive rendering and two-terminal ownership
 <!-- specs: tui-navigation -->
 
-- [ ] 2.1 Add a pure `TerminalPresentation` transition state machine for bounded primary-screen inline conversation and distinct alternate-screen fullscreen interaction; cover entry, exit, repeated cycles, partial acquisition rollback, and idempotent restoration before production wiring.
+- [x] 2.1 Add a pure `TerminalPresentation` transition state machine for bounded primary-screen inline conversation and distinct alternate-screen fullscreen interaction; cover entry, exit, repeated cycles, partial acquisition rollback, and idempotent restoration before production wiring.
 - [ ] 2.2 Keep the inline `Terminal` alive but dormant while fullscreen owns a separately constructed `Terminal`; preserve the existing `App`, coordinator, channels, event drains, scheduler, and canonical conversation state in one `run_tui` loop.
 - [ ] 2.3 Acquire and release alternate-screen and fullscreen-only mouse modes symmetrically and only after successful terminal commands; never insert native transcript publications into the fullscreen terminal.
 - [ ] 2.4 Compose compact conversation in the bounded inline frame and short-circuit fullscreen rendering so the active exclusive surface clears, styles, and owns every cell in its `frame.area()`.
