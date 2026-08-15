@@ -23,7 +23,7 @@ Dependencies: Group 2 depends on Group 1. Group 3 depends on Groups 1–2. Group
 - [x] 2.4 Compose compact conversation in the bounded inline frame and short-circuit fullscreen rendering so the active exclusive surface clears, styles, and owns every cell in its `frame.area()`. Fullscreen menus use explicit full-frame geometry while legacy bounded call sites remain capped and centered.
 - [ ] 2.5 Refactor `render_menu_surface` with an explicit fullscreen layout mode/content area rather than relying on centered-modal geometry; derive paging from rendered row capacity with one-row overlap.
 - [ ] 2.6 Queue passive notifications during exclusive ownership and route blocking prompts through `InteractiveSurface` with an explicit return target.
-- [ ] 2.7 Add normal-height and constrained-height buffer/snapshot tests for fixture absence, selected-row visibility, overflow indicators, complete cell styling, physical resize, deferred exactly-once publication, and restoration after repeated cycles.
+- [x] 2.7 Add normal-height and constrained-height buffer/snapshot tests for fixture absence, selected-row visibility, overflow indicators, complete cell styling, physical resize, deferred exactly-once publication, and restoration after repeated cycles. Transition failure, retry, resize restoration, and repeated-cycle coverage is complete; remaining destination-specific buffer scenarios are tracked by their owning task groups.
 
 ## 3. Canonical Settings hierarchy and deep links
 <!-- specs: tui-navigation -->
