@@ -703,7 +703,8 @@ impl MenuState {
 
     pub(crate) fn move_page(&mut self, projection: &MenuProjection, direction: isize) {
         let last = self.visible_rows(projection).len().saturating_sub(1);
-        let page = self.rendered_page_rows.get().max(1);
+        // Keep one rendered row of overlap so paging retains visual context.
+        let page = self.rendered_page_rows.get().saturating_sub(1).max(1);
         self.selected_row = if direction < 0 {
             self.selected_row.saturating_sub(page)
         } else {
@@ -976,7 +977,7 @@ mod tests {
                 .count();
             assert!(visible > 0);
             state.move_page(&projection, 1);
-            assert_eq!(state.selected_row, visible);
+            assert_eq!(state.selected_row, visible.saturating_sub(1).max(1));
             state.move_page(&projection, -1);
             assert_eq!(state.selected_row, 0);
             capacities.push(visible);
