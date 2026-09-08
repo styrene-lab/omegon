@@ -311,20 +311,18 @@ async fn persist_embedding(
     operation_id: String,
     cancellation: tokio_util::sync::CancellationToken,
 ) {
-    match tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        embed_svc.embed(&content),
-    )
-    .await
-    {
+    let generated = tokio::select! {
+        _ = cancellation.cancelled() => return,
+        result = tokio::time::timeout(std::time::Duration::from_secs(30), embed_svc.embed_identified(&content)) => result,
+    };
+    match generated {
         Ok(Ok(embedding)) => {
             if let Err(error) = binding
                 .invoke(crate::memory_service::MemoryRequestV1::ApplyMutation {
                     scope: crate::memory_service::MemoryScopeV1::Project,
                     operation_id,
-                    mutation: MemoryMutation::StoreEmbedding {
+                    mutation: MemoryMutation::StoreIdentifiedEmbedding {
                         fact: fact.clone(),
-                        model_name: embed_svc.model_name().to_string(),
                         embedding,
                     },
                     cancellation,
@@ -845,22 +843,28 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 };
 
                 let query_vector = if let Some(ref embed_svc) = self.embed_service {
-                    match embed_svc.embed(&query).await {
-                        Ok(query_embedding) => Some(query_embedding),
-                        Err(e) => {
-                            tracing::debug!(error = %e, "embedding generation failed, FTS-only");
-                            None
-                        }
+                    tokio::select! {
+                        _ = cancel.cancelled() => return Err(MemoryFeatureInvokeError(ManagedServiceCallError::Cancelled).into()),
+                        result = tokio::time::timeout(std::time::Duration::from_secs(30), embed_svc.embed_identified(&query)) => match result {
+                            Ok(Ok(query_embedding)) => Some(query_embedding),
+                            _ => None,
+                        },
                     }
                 } else {
                     None
                 };
-                let crate::memory_service::MemoryPayloadV1::ScoredFacts(results) = self
+                let (query_space, query_vector) = match query_vector {
+                    Some(embedding) => (Some(embedding.space), Some(embedding.values)),
+                    None => (None, None),
+                };
+                let crate::memory_service::MemoryPayloadV1::RecallReport(report) = self
                     .invoke(crate::memory_service::MemoryRequestV1::HybridSearch {
                         scope: crate::memory_service::MemoryScopeV1::Project,
                         mind: self.mind.clone(),
                         query,
                         query_vector,
+                        query_space,
+                        include_diagnostics: true,
                         filter,
                         limit: k,
                         fetch_limit: fetch_k,
@@ -872,16 +876,20 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     anyhow::bail!("managed memory returned an unexpected search response");
                 };
 
+                let results = report.results;
+                let diagnostic =
+                    omegon_memory::renderer::vector_diagnostic_label(&report.diagnostics);
+
                 if results.is_empty() {
                     return Ok(ToolResult {
                         content: vec![ContentBlock::Text {
-                            text: "No matching facts found.".into(),
+                            text: format!("No matching facts found.\n{diagnostic}"),
                         }],
-                        details: Value::Null,
+                        details: serde_json::json!({"count":0,"vector":report.diagnostics}),
                     });
                 }
 
-                let mut lines = Vec::new();
+                let mut lines = vec![diagnostic];
                 for (i, sf) in results.iter().enumerate() {
                     let section = serde_json::to_string(&sf.fact.section).unwrap_or_default();
                     let section = section.trim_matches('"');
@@ -891,11 +899,11 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         sf.fact.content.clone()
                     };
                     lines.push(format!(
-                        "{}. [{}] ({}, {:.0}%) {}",
+                        "{}. [{}] ({}, {}) {}",
                         i + 1,
                         sf.fact.id,
                         section,
-                        sf.similarity * 100.0,
+                        omegon_memory::renderer::recall_score_label(sf),
                         content,
                     ));
                 }
@@ -903,7 +911,8 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     content: vec![ContentBlock::Text {
                         text: lines.join("\n"),
                     }],
-                    details: serde_json::json!({ "count": results.len() }),
+                    details: serde_json::json!({ "count": results.len(), "vector": report.diagnostics,
+                        "scores":results.iter().map(|result| serde_json::json!({"id":result.fact.id,"scores":result.scores,"graph_evidence":result.graph_evidence})).collect::<Vec<_>>() }),
                 })
             }
             crate::tool_registry::memory::MEMORY_QUERY => {
@@ -1628,6 +1637,127 @@ mod tests {
             "{archive_text}"
         );
         assert!(recall_text.contains("[constraint]"), "{recall_text}");
+    }
+
+    #[tokio::test]
+    async fn wave4_recall_reports_incompatible_vectors_and_named_scores() {
+        struct IdentifiedService(&'static str);
+        #[async_trait]
+        impl EmbeddingService for IdentifiedService {
+            async fn embed(&self, _: &str) -> Result<Vec<f32>, omegon_memory::EmbedError> {
+                panic!("memory must use identified generation");
+            }
+            fn model_name(&self) -> &str {
+                self.0
+            }
+            async fn embed_identified(
+                &self,
+                _: &str,
+            ) -> Result<omegon_memory::IdentifiedEmbedding, omegon_memory::EmbedError> {
+                Ok(omegon_memory::IdentifiedEmbedding {
+                    space: omegon_memory::EmbeddingSpace {
+                        model: self.0.into(),
+                        revision: "fixture-v1".into(),
+                        preprocessing: "raw-v1".into(),
+                        dimensions: 2,
+                    },
+                    values: vec![1.0, 0.0],
+                })
+            }
+        }
+        let (feature, mut bus, _dir) = managed_feature().await;
+        let stored = feature
+            .apply_mutation(
+                "wave4-fact".into(),
+                MemoryMutation::StoreFact {
+                    request: StoreFact {
+                        mind: "test".into(),
+                        content: "zircon identified recall".into(),
+                        section: Section::Constraints,
+                        source: None,
+                        decay_profile: Default::default(),
+                    },
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let MemoryMutationEffect::FactStored {
+            fact_id, version, ..
+        } = stored.effect
+        else {
+            panic!("fact");
+        };
+        let embedding = IdentifiedService("model-a")
+            .embed_identified("unused")
+            .await
+            .unwrap();
+        feature
+            .apply_mutation(
+                "wave4-index".into(),
+                MemoryMutation::StoreIdentifiedEmbedding {
+                    fact: FactPrecondition {
+                        id: fact_id,
+                        expected_version: version,
+                    },
+                    embedding,
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let feature = feature.with_embed_service(Arc::new(IdentifiedService("model-b")));
+        let degraded = feature
+            .execute(
+                "memory_recall",
+                "wrong-space",
+                serde_json::json!({"query":"zircon"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let feature = feature.with_embed_service(Arc::new(IdentifiedService("model-a")));
+        let compatible = feature
+            .execute(
+                "memory_recall",
+                "same-space",
+                serde_json::json!({"query":"zircon"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        feature
+            .execute(
+                "memory_store",
+                "automatic-index",
+                serde_json::json!({"section":"Architecture","content":"newborn auto indexed fact"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let automatic = feature
+            .execute(
+                "memory_recall",
+                "automatic-recall",
+                serde_json::json!({"query":"newborn"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert_eq!(degraded.details["vector"]["incompatible"], 1);
+        assert!(degraded.content[0].as_text().unwrap().contains("lexical="));
+        assert!(degraded.details["scores"][0]["scores"]["cosine"].is_null());
+        let text = compatible.content[0].as_text().unwrap();
+        for label in ["lexical=", "cosine=", "rrf="] {
+            assert!(text.contains(label), "{text}");
+        }
+        assert!(!text.contains('%'));
+        assert_eq!(automatic.details["vector"]["compatible"], 2);
     }
 
     #[tokio::test]

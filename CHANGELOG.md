@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Memory retrieval now requires model/revision/preprocessing identity and source fingerprints for vector comparison. Schema v10 preserves legacy vectors as unverified until repair. Recall reports named scores and index degradation, labels directional conflicts, and avoids obsolete supersession expansion. Embedding backfill honors `--cwd`, skips ready vectors, uses version-checked writes, and reports unavailable/incomplete repair as an error.
+
 - Memory formation now bounds provider text while streaming and requires terminal completion, preserves contiguous excerpts across unreadable chunks, and rejects contradictory evidence identities. Capture-policy v2 removes volatile retry metadata and separates mind-scoped receipts; invalid model configuration preserves source capture. Episode search tolerates quoted queries and matches titles consistently across both backends.
 
 - Session memory now captures bounded, attributed semantic evidence before extraction. Extraction is independently configurable with `memoryExtractionModel` and `memoryExtractionEnabled`; generated candidates remain pending inferences. Memory schema v9 preserves formation evidence and extraction outcomes, with verified migration from v5–v8 and atomic completion, search updates, and stale episode-vector invalidation.

@@ -34,6 +34,9 @@ pub enum MemoryError {
     #[error("No embeddings available — run embedding indexer first")]
     NoEmbeddings,
 
+    #[error("Vector comparison requires an explicit embedding-space identity")]
+    EmbeddingIdentityRequired,
+
     #[error("Memory operation identity conflicts with a different payload: {0}")]
     OperationConflict(String),
 
@@ -63,6 +66,9 @@ pub(crate) fn mutation_payload_hash(mutation: &MemoryMutation) -> Result<String>
 fn validate_mutation(mutation: &MemoryMutation) -> Result<()> {
     if let MemoryMutation::StoreEmbedding { embedding, .. } = mutation {
         validate_embedding(embedding)?;
+    }
+    if let MemoryMutation::StoreIdentifiedEmbedding { embedding, .. } = mutation {
+        embedding.validate()?;
     }
     Ok(())
 }
@@ -204,9 +210,8 @@ pub trait MemoryBackend: Send + Sync {
         self.fts_search(mind, query, k).await
     }
 
-    /// Vector similarity search. Returns facts ranked by cosine similarity × decay confidence.
-    /// Returns `Err(EmbeddingDimensionMismatch)` if query dims don't match stored model.
-    /// Returns `Err(NoEmbeddings)` if no vectors exist for this mind.
+    /// Legacy unidentified query. Native backends return EmbeddingIdentityRequired;
+    /// use search_identified to compare vectors under an explicit space contract.
     async fn vector_search(
         &self,
         mind: &str,
@@ -255,6 +260,66 @@ pub trait MemoryBackend: Send + Sync {
         }
         self.vector_search_cancellable(mind, embedding, k, min_similarity, cancelled)
             .await
+    }
+
+    /// Compare only compatible, content-current vectors and report skipped index states.
+    async fn search_identified(
+        &self,
+        mind: &str,
+        query: &IdentifiedEmbedding,
+        k: usize,
+        min_similarity: f32,
+        filter: &SearchFilter,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<VectorSearchReport> {
+        let _ = (mind, query, k, min_similarity, filter, cancelled);
+        Err(MemoryError::EmbeddingIdentityRequired)
+    }
+
+    async fn embedding_index_state(
+        &self,
+        fact_id: &str,
+        space: &EmbeddingSpace,
+    ) -> Result<EmbeddingIndexState> {
+        let _ = (fact_id, space);
+        Err(MemoryError::EmbeddingIdentityRequired)
+    }
+
+    async fn get_fact_filtered(
+        &self,
+        mind: &str,
+        id: &str,
+        filter: &SearchFilter,
+    ) -> Result<Option<Fact>> {
+        if filter.intent == SearchIntent::Historical {
+            return Err(MemoryError::InvalidMutation(
+                "historical lookup unsupported".into(),
+            ));
+        }
+        Ok(self
+            .get_fact(id)
+            .await?
+            .filter(|fact| fact.mind == mind && filter.matches(fact)))
+    }
+
+    async fn get_edges_filtered(
+        &self,
+        mind: &str,
+        id: &str,
+        filter: &SearchFilter,
+        limit: usize,
+    ) -> Result<Vec<Edge>> {
+        if filter != &SearchFilter::default() {
+            return Err(MemoryError::InvalidMutation(
+                "filtered edges unsupported".into(),
+            ));
+        }
+        Ok(self
+            .get_edges(mind, id)
+            .await?
+            .into_iter()
+            .take(limit)
+            .collect())
     }
 
     /// Store an embedding vector for a fact. Registers the model in embedding_metadata

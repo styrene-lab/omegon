@@ -427,7 +427,7 @@ pub(crate) fn ensure_project_memory_store_ready(
             Ok(Some(result))
         }
         version => anyhow::bail!(
-            "unsupported memory schema v{version} at {}; run `omegon memory migrate --status --path {}` and restore a supported v5-v8 backup or upgrade Omegon",
+            "unsupported memory schema v{version} at {}; run `omegon memory migrate --status --path {}` and restore a supported v5-v9 backup or upgrade Omegon",
             db_path.display(),
             db_path.display()
         ),
@@ -719,9 +719,8 @@ impl AgentSetup {
                 );
                 embed_service = if svc.probe().await {
                     tracing::info!(
-                        url = svc.base_url(),
                         model = svc.model_name(),
-                        "embedding service available — hybrid search enabled"
+                        "embedding service reachable — query identity and index readiness are checked during recall"
                     );
                     Some(std::sync::Arc::new(svc)
                         as std::sync::Arc<dyn omegon_memory::EmbeddingService>)

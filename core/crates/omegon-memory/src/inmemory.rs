@@ -17,6 +17,8 @@ struct EmbeddingEntry {
     model_name: String,
     embedding: Vec<f32>,
     inserted_at: String,
+    space: Option<EmbeddingSpace>,
+    source_hash: Option<String>,
 }
 
 #[derive(Clone)]
@@ -352,11 +354,38 @@ impl InMemoryBackend {
                     model_name: model_name.clone(),
                     embedding,
                     inserted_at: now_iso(),
+                    space: None,
+                    source_hash: None,
                 });
                 Ok(MemoryMutationEffect::EmbeddingStored {
                     fact_id: fact.id,
                     model_name,
                     dims,
+                })
+            }
+            MemoryMutation::StoreIdentifiedEmbedding { fact, embedding } => {
+                embedding.validate()?;
+                Self::check_fact_precondition(state, &fact)?;
+                let source = state.facts.get(&fact.id).unwrap();
+                if source.status != FactStatus::Active {
+                    return Err(MemoryError::InvalidMutation(
+                        "embedding source must be active".into(),
+                    ));
+                }
+                let source_hash = crate::retrieval::raw_content_hash(&source.content);
+                state.embeddings.retain(|entry| entry.fact_id != fact.id);
+                state.embeddings.push(EmbeddingEntry {
+                    fact_id: fact.id.clone(),
+                    model_name: embedding.space.model.clone(),
+                    embedding: embedding.values,
+                    inserted_at: now_iso(),
+                    source_hash: Some(source_hash),
+                    space: Some(embedding.space.clone()),
+                });
+                Ok(MemoryMutationEffect::EmbeddingStored {
+                    fact_id: fact.id,
+                    model_name: embedding.space.model,
+                    dims: embedding.space.dimensions,
                 })
             }
             MemoryMutation::CreateEdge { mind, request } => {
@@ -971,6 +1000,11 @@ impl MemoryBackend for InMemoryBackend {
                     fact: f.clone(),
                     similarity: relevance,
                     score,
+                    scores: RetrievalScores {
+                        lexical: Some(relevance),
+                        ..Default::default()
+                    },
+                    graph_evidence: vec![],
                 })
             })
             .collect();
@@ -992,59 +1026,8 @@ impl MemoryBackend for InMemoryBackend {
         k: usize,
         min_similarity: f32,
     ) -> Result<Vec<ScoredFact>> {
-        let s = self.state.lock().unwrap();
-
-        // Find embeddings for this mind
-        let mind_embeddings: Vec<&EmbeddingEntry> = s
-            .embeddings
-            .iter()
-            .filter(|e| {
-                s.facts
-                    .get(&e.fact_id)
-                    .is_some_and(|f| f.mind == mind && f.status == FactStatus::Active)
-            })
-            .collect();
-
-        if mind_embeddings.is_empty() {
-            return Err(MemoryError::NoEmbeddings);
-        }
-
-        // Check dimension
-        let expected_dims = mind_embeddings[0].embedding.len() as u32;
-        let got_dims = embedding.len() as u32;
-        if expected_dims != got_dims {
-            return Err(MemoryError::EmbeddingDimensionMismatch {
-                expected: expected_dims,
-                got: got_dims,
-                stored_model: mind_embeddings[0].model_name.clone(),
-            });
-        }
-
-        let mut results: Vec<ScoredFact> = mind_embeddings
-            .iter()
-            .filter_map(|e| {
-                let sim = vectors::cosine_similarity(&e.embedding, embedding);
-                if sim < min_similarity {
-                    return None;
-                }
-                let fact = s.facts.get(&e.fact_id)?.clone();
-                let score = crate::decay::ambient_score(sim as f64, &fact)?;
-                Some(ScoredFact {
-                    fact,
-                    similarity: sim as f64,
-                    score,
-                })
-            })
-            .collect();
-
-        results.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.fact.id.cmp(&b.fact.id))
-        });
-        results.truncate(k);
-        Ok(results)
+        let _ = (mind, embedding, k, min_similarity);
+        Err(MemoryError::EmbeddingIdentityRequired)
     }
 
     async fn vector_search_cancellable(
@@ -1075,53 +1058,11 @@ impl MemoryBackend for InMemoryBackend {
         filter: &SearchFilter,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> Result<Vec<ScoredFact>> {
-        let state = self.state.lock().unwrap();
-        let mut matching = state.embeddings.iter().filter(|entry| {
-            state
-                .facts
-                .get(&entry.fact_id)
-                .is_some_and(|fact| fact.mind == mind && filter.matches(fact))
-        });
-        let Some(first) = matching.next() else {
-            return Err(MemoryError::NoEmbeddings);
-        };
-        if first.embedding.len() != embedding.len() {
-            return Err(MemoryError::EmbeddingDimensionMismatch {
-                expected: first.embedding.len() as u32,
-                got: embedding.len() as u32,
-                stored_model: first.model_name.clone(),
-            });
+        let _ = (mind, embedding, k, min_similarity, filter);
+        if cancelled() {
+            return Err(MemoryError::Cancelled);
         }
-        let mut results = Vec::new();
-        for entry in std::iter::once(first).chain(matching) {
-            if cancelled() {
-                return Err(MemoryError::Cancelled);
-            }
-            let similarity = vectors::cosine_similarity(&entry.embedding, embedding);
-            if similarity < min_similarity {
-                continue;
-            }
-            let Some(fact) = state.facts.get(&entry.fact_id).cloned() else {
-                continue;
-            };
-            let Some(score) = filter.score(similarity as f64, &fact) else {
-                continue;
-            };
-            results.push(ScoredFact {
-                fact,
-                similarity: similarity as f64,
-                score,
-            });
-        }
-        results.sort_by(|left, right| {
-            right
-                .score
-                .partial_cmp(&left.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| left.fact.id.cmp(&right.fact.id))
-        });
-        results.truncate(k);
-        Ok(results)
+        Err(MemoryError::EmbeddingIdentityRequired)
     }
 
     async fn store_embedding(
@@ -1154,6 +1095,8 @@ impl MemoryBackend for InMemoryBackend {
             model_name: model_name.into(),
             embedding: embedding.to_vec(),
             inserted_at: now_iso(),
+            space: None,
+            source_hash: None,
         });
         Ok(())
     }
@@ -1169,6 +1112,124 @@ impl MemoryBackend for InMemoryBackend {
             dims: e.embedding.len() as u32,
             inserted_at: e.inserted_at.clone(),
         }))
+    }
+
+    async fn search_identified(
+        &self,
+        mind: &str,
+        query: &IdentifiedEmbedding,
+        k: usize,
+        minimum: f32,
+        filter: &SearchFilter,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<VectorSearchReport> {
+        let mut top = crate::retrieval::VectorAccumulator::new(query, k, minimum)?;
+        if cancelled() {
+            return Err(MemoryError::Cancelled);
+        }
+        if k == 0 {
+            return Ok(top.finish());
+        }
+        let state = self.state.lock().unwrap();
+        for entry in &state.embeddings {
+            if cancelled() {
+                return Err(MemoryError::Cancelled);
+            }
+            let Some(fact) = state
+                .facts
+                .get(&entry.fact_id)
+                .filter(|fact| fact.mind == mind && filter.matches(fact))
+            else {
+                continue;
+            };
+            if !top.eligible(crate::retrieval::index_state(
+                entry.space.as_ref(),
+                entry.source_hash.as_deref(),
+                &fact.content,
+                &query.space,
+            )) {
+                continue;
+            }
+            IdentifiedEmbedding {
+                space: query.space.clone(),
+                values: entry.embedding.clone(),
+            }
+            .validate()?;
+            let similarity = vectors::cosine_similarity(&entry.embedding, &query.values);
+            if similarity >= minimum {
+                top.push(fact.clone(), similarity as f64, filter);
+            }
+        }
+        Ok(top.finish())
+    }
+
+    async fn embedding_index_state(
+        &self,
+        id: &str,
+        space: &EmbeddingSpace,
+    ) -> Result<EmbeddingIndexState> {
+        space.validate()?;
+        let state = self.state.lock().unwrap();
+        let fact = state
+            .facts
+            .get(id)
+            .ok_or_else(|| MemoryError::FactNotFound(id.into()))?;
+        let Some(entry) = state.embeddings.iter().find(|entry| entry.fact_id == id) else {
+            return Ok(EmbeddingIndexState::Missing);
+        };
+        Ok(crate::retrieval::index_state(
+            entry.space.as_ref(),
+            entry.source_hash.as_deref(),
+            &fact.content,
+            space,
+        ))
+    }
+
+    async fn get_fact_filtered(
+        &self,
+        mind: &str,
+        id: &str,
+        filter: &SearchFilter,
+    ) -> Result<Option<Fact>> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .facts
+            .get(id)
+            .filter(|fact| fact.mind == mind && filter.matches(fact))
+            .cloned())
+    }
+
+    async fn get_edges_filtered(
+        &self,
+        mind: &str,
+        id: &str,
+        filter: &SearchFilter,
+        limit: usize,
+    ) -> Result<Vec<Edge>> {
+        let state = self.state.lock().unwrap();
+        let mut edges = state
+            .edges
+            .iter()
+            .filter(|edge| edge.source_id == id || edge.target_id == id)
+            .filter(|edge| {
+                [&edge.source_id, &edge.target_id].iter().all(|id| {
+                    state
+                        .facts
+                        .get(*id)
+                        .is_some_and(|fact| fact.mind == mind && filter.matches(fact))
+                })
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        edges.sort_by(|a, b| {
+            b.confidence
+                .total_cmp(&a.confidence)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        edges.truncate(limit.min(1024));
+        Ok(edges)
     }
 
     async fn create_edge(&self, req: CreateEdge) -> Result<Edge> {

@@ -65,11 +65,27 @@ pub async fn expand_edges_cancellable(
 pub async fn expand_edges_filtered_cancellable(
     backend: &dyn MemoryBackend,
     mind: &str,
-    mut results: Vec<ScoredFact>,
+    results: Vec<ScoredFact>,
     limit: usize,
     filter: &crate::SearchFilter,
     cancelled: &dyn Fn() -> bool,
 ) -> Option<Vec<ScoredFact>> {
+    expand_edges_filtered_checked(backend, mind, results, limit, filter, cancelled)
+        .await
+        .ok()
+}
+
+pub async fn expand_edges_filtered_checked<C: Fn() -> bool + ?Sized>(
+    backend: &dyn MemoryBackend,
+    mind: &str,
+    mut results: Vec<ScoredFact>,
+    limit: usize,
+    filter: &crate::SearchFilter,
+    cancelled: &C,
+) -> crate::backend::Result<Vec<ScoredFact>> {
+    if cancelled() {
+        return Err(crate::MemoryError::Cancelled);
+    }
     use std::collections::{BTreeMap, HashSet};
 
     const MAX_SEEDS: usize = 1_000;
@@ -89,18 +105,15 @@ pub async fn expand_edges_filtered_cancellable(
         .iter()
         .map(|result| result.fact.id.clone())
         .collect();
-    let mut candidates = BTreeMap::<String, f64>::new();
-    for result in results.iter().take(MAX_SEEDS) {
+    let seed_results = results.iter().take(MAX_SEEDS).cloned().collect::<Vec<_>>();
+    let mut candidates = BTreeMap::<String, (f64, Vec<crate::GraphEvidence>)>::new();
+    for result in &seed_results {
         if cancelled() {
-            return None;
+            return Err(crate::MemoryError::Cancelled);
         }
-        let mut edges = match backend.get_edges(mind, &result.fact.id).await {
-            Ok(edges) => edges,
-            Err(e) => {
-                tracing::debug!(fact_id = %result.fact.id, error = %e, "edge lookup failed");
-                continue;
-            }
-        };
+        let mut edges = backend
+            .get_edges_filtered(mind, &result.fact.id, filter, MAX_EDGES_PER_SEED)
+            .await?;
         edges.sort_by(|left, right| {
             right
                 .confidence
@@ -109,37 +122,84 @@ pub async fn expand_edges_filtered_cancellable(
                 .then_with(|| left.id.cmp(&right.id))
         });
         for edge in edges.into_iter().take(MAX_EDGES_PER_SEED) {
+            if !edge.confidence.is_finite()
+                || edge.confidence <= 0.0
+                || edge.confidence > 1.0
+                || edge.relation.len() > 128
+            {
+                continue;
+            }
+            let relation = edge.relation.trim().to_lowercase().replace([' ', '-'], "_");
+            let kind = relation_kind(&relation);
             let neighbor_id = if edge.source_id == result.fact.id {
-                edge.target_id
+                edge.target_id.clone()
             } else {
-                edge.source_id
+                edge.source_id.clone()
+            };
+            let evidence = crate::GraphEvidence {
+                edge_id: edge.id,
+                other_fact_id: result.fact.id.clone(),
+                relation: edge.relation,
+                outgoing: edge.source_id == neighbor_id,
+                kind,
             };
             if seeds.contains(&neighbor_id) {
+                if let Some(seed) = results.iter_mut().find(|seed| seed.fact.id == neighbor_id) {
+                    add_graph_evidence(&mut seed.graph_evidence, evidence);
+                }
+                continue;
+            }
+            if kind == crate::GraphRelationKind::Unknown {
+                continue;
+            }
+            if filter.intent == crate::SearchIntent::Current
+                && ((relation == "supersedes" && edge.source_id == result.fact.id)
+                    || (relation == "superseded_by" && edge.target_id == result.fact.id))
+            {
                 continue;
             }
             let score = result.score * edge.confidence * 0.5;
-            candidates
-                .entry(neighbor_id)
-                .and_modify(|existing| *existing = existing.max(score))
-                .or_insert(score);
+            let candidate = candidates.entry(neighbor_id).or_insert((score, vec![]));
+            candidate.0 = candidate.0.max(score);
+            add_graph_evidence(&mut candidate.1, evidence);
         }
     }
-    for (neighbor_id, score) in candidates.into_iter().take(MAX_NEIGHBOR_LOADS) {
+    let mut candidates = candidates.into_iter().collect::<Vec<_>>();
+    candidates.sort_by(|(left_id, left), (right_id, right)| {
+        right
+            .0
+            .total_cmp(&left.0)
+            .then_with(|| left_id.cmp(right_id))
+    });
+    for (neighbor_id, (score, evidence)) in candidates.into_iter().take(MAX_NEIGHBOR_LOADS) {
         if cancelled() {
-            return None;
+            return Err(crate::MemoryError::Cancelled);
         }
-        if let Ok(Some(fact)) = backend.get_fact(&neighbor_id).await {
+        if let Some(fact) = backend
+            .get_fact_filtered(mind, &neighbor_id, filter)
+            .await?
+        {
             if fact.mind != mind {
                 continue;
             }
             let Some(score) = filter.score(score, &fact) else {
                 continue;
             };
-            results.push(ScoredFact {
-                similarity: score,
-                score,
-                fact,
-            });
+            for relationship in &evidence {
+                if let Some(seed) = results
+                    .iter_mut()
+                    .find(|seed| seed.fact.id == relationship.other_fact_id)
+                {
+                    let mut inverse = relationship.clone();
+                    inverse.other_fact_id = neighbor_id.clone();
+                    inverse.outgoing = !inverse.outgoing;
+                    add_graph_evidence(&mut seed.graph_evidence, inverse);
+                }
+            }
+            let mut result = ScoredFact::new(fact, score, score);
+            result.scores.graph = Some(score);
+            result.graph_evidence = evidence;
+            results.push(result);
         }
     }
     results.sort_by(|a, b| {
@@ -149,7 +209,31 @@ pub async fn expand_edges_filtered_cancellable(
             .then_with(|| a.fact.id.cmp(&b.fact.id))
     });
     results.truncate(limit);
-    Some(results)
+    if cancelled() {
+        return Err(crate::MemoryError::Cancelled);
+    }
+    Ok(results)
+}
+
+fn relation_kind(relation: &str) -> crate::GraphRelationKind {
+    use crate::GraphRelationKind::*;
+    match relation {
+        "related" | "related_to" | "depends_on" | "required_by" => Related,
+        "supports" | "supported_by" => Support,
+        "contradicts" | "contradiction" | "conflicts_with" | "contradicted_by" => Contradiction,
+        "supersedes" | "superseded_by" => Supersession,
+        _ => Unknown,
+    }
+}
+
+fn add_graph_evidence(items: &mut Vec<crate::GraphEvidence>, item: crate::GraphEvidence) {
+    if items.len() < 16
+        && !items
+            .iter()
+            .any(|existing| existing.edge_id == item.edge_id)
+    {
+        items.push(item);
+    }
 }
 
 /// Shared early context policy: explicit task matches, otherwise eligible current
@@ -192,11 +276,7 @@ mod tests {
             })
             .await
             .unwrap();
-        ScoredFact {
-            similarity: 1.0,
-            score: 1.0,
-            fact: result.fact,
-        }
+        ScoredFact::new(result.fact, 1.0, 1.0)
     }
 
     #[tokio::test]

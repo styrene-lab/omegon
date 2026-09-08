@@ -6,6 +6,52 @@ use crate::types::*;
 /// Renders facts and episodes as a markdown block for LLM context injection.
 pub struct MarkdownRenderer;
 
+/// Retrieval signals are ranks/proximity, never calibrated truth percentages.
+pub fn recall_score_label(result: &ScoredFact) -> String {
+    let mut labels = Vec::new();
+    for (name, value) in [
+        ("lexical", result.scores.lexical),
+        ("cosine", result.scores.cosine),
+        ("rrf", result.scores.rrf),
+        ("graph proximity", result.scores.graph),
+    ] {
+        if let Some(value) = value {
+            labels.push(format!("{name}={value:.4e}"));
+        }
+    }
+    if labels.is_empty() {
+        labels.push(format!("legacy rank={:.4e}", result.score));
+    }
+    for evidence in &result.graph_evidence {
+        labels.push(format!(
+            "{:?}: {} {} {}",
+            evidence.kind,
+            if evidence.outgoing {
+                "self"
+            } else {
+                &evidence.other_fact_id
+            },
+            evidence.relation,
+            if evidence.outgoing {
+                &evidence.other_fact_id
+            } else {
+                "self"
+            }
+        ));
+    }
+    labels.join(", ")
+}
+
+pub fn vector_diagnostic_label(diagnostics: &VectorDiagnostics) -> String {
+    if diagnostics.identity_unavailable {
+        return "Semantic retrieval unavailable: no verified query identity; keyword results retained.".into();
+    }
+    format!(
+        "Vector index: {} compatible, {} legacy, {} incompatible, {} stale. Missing or outdated vectors can be repaired with embedding backfill.",
+        diagnostics.compatible, diagnostics.legacy, diagnostics.incompatible, diagnostics.stale
+    )
+}
+
 impl ContextRenderer for MarkdownRenderer {
     fn render_context(
         &self,

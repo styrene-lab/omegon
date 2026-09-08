@@ -123,14 +123,101 @@ pub enum DecayProfileName {
 }
 
 /// A fact with search scoring attached.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmbeddingSpace {
+    pub model: String,
+    pub revision: String,
+    pub preprocessing: String,
+    pub dimensions: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IdentifiedEmbedding {
+    pub space: EmbeddingSpace,
+    pub values: Vec<f32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VectorDiagnostics {
+    pub compatible: usize,
+    pub legacy: usize,
+    pub incompatible: usize,
+    pub stale: usize,
+    pub identity_unavailable: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct VectorSearchReport {
+    pub results: Vec<ScoredFact>,
+    pub diagnostics: VectorDiagnostics,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EmbeddingIndexState {
+    Missing,
+    Legacy,
+    Incompatible,
+    Stale,
+    Ready,
+}
+
+/// A fact with search scoring attached.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoredFact {
     #[serde(flatten)]
     pub fact: Fact,
-    /// Raw cosine similarity (0.0–1.0), or FTS5 rank score.
+    /// Legacy raw cosine (-1.0–1.0), lexical, or proximity value. Prefer named scores.
     pub similarity: f64,
-    /// Combined score: similarity × decay-adjusted confidence.
+    /// Ranking value, potentially fused or graph-derived. Not a probability.
     pub score: f64,
+    #[serde(default)]
+    pub scores: RetrievalScores,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub graph_evidence: Vec<GraphEvidence>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RetrievalScores {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lexical: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cosine: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rrf: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphRelationKind {
+    Related,
+    Support,
+    Contradiction,
+    Supersession,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GraphEvidence {
+    pub edge_id: String,
+    pub other_fact_id: String,
+    pub relation: String,
+    pub outgoing: bool,
+    pub kind: GraphRelationKind,
+}
+
+impl ScoredFact {
+    pub fn new(fact: Fact, similarity: f64, score: f64) -> Self {
+        Self {
+            fact,
+            similarity,
+            score,
+            scores: Default::default(),
+            graph_evidence: vec![],
+        }
+    }
 }
 
 /// A session episode narrative.
@@ -463,6 +550,10 @@ pub enum MemoryMutation {
         fact: FactPrecondition,
         model_name: String,
         embedding: Vec<f32>,
+    },
+    StoreIdentifiedEmbedding {
+        fact: FactPrecondition,
+        embedding: IdentifiedEmbedding,
     },
     CreateEdge {
         mind: String,

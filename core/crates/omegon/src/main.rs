@@ -1853,7 +1853,7 @@ async fn main() -> anyhow::Result<()> {
             .await
         }
         Some(Commands::Ollama { ref action }) => run_ollama_command(action).await,
-        Some(Commands::Embedding { ref action }) => run_embedding_command(action).await,
+        Some(Commands::Embedding { ref action }) => run_embedding_command(action, &cli.cwd).await,
         Some(Commands::Sentry {
             ref config,
             control_port,
@@ -4241,7 +4241,10 @@ async fn ollama_status() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
+async fn run_embedding_command(
+    action: &EmbeddingAction,
+    cwd: &std::path::Path,
+) -> anyhow::Result<()> {
     match action {
         EmbeddingAction::Download { model } => {
             let short_name = model.rsplit('/').next().unwrap_or(model);
@@ -4315,7 +4318,10 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
                         &model_dir,
                         &default_model,
                     ) {
-                        Ok(svc) => println!("Model loads successfully ({})", svc.model_name()),
+                        Ok(svc) => println!(
+                            "Model loads successfully ({})",
+                            omegon_memory::EmbeddingService::model_name(&svc)
+                        ),
                         Err(e) => println!("Model failed to load: {e}"),
                     }
                 }
@@ -4327,7 +4333,7 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
             }
         }
         EmbeddingAction::Backfill => {
-            let cwd = std::fs::canonicalize(std::env::current_dir()?)?;
+            let cwd = std::fs::canonicalize(cwd)?;
             let project_root = setup::find_project_root(&cwd);
 
             let memory_dir = {
@@ -4359,18 +4365,15 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
                         match crate::local_embedding::LocalEmbeddingService::from_default_dir() {
                             Ok(svc) => Box::new(svc),
                             Err(e) => {
-                                println!("No embedding service available: {e}");
-                                println!("Run: omegon embedding download");
-                                return Ok(());
+                                anyhow::bail!("No embedding service available: {e}");
                             }
                         }
                     }
                     #[cfg(not(feature = "local-embeddings"))]
                     {
-                        println!(
+                        anyhow::bail!(
                             "No embedding service available (Ollama not reachable, local-embeddings feature not enabled)"
                         );
-                        return Ok(());
                     }
                 }
             };
@@ -4406,6 +4409,8 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
                 let mut failed = 0usize;
                 let mut skipped = 0usize;
                 let mut failures = Vec::new();
+                let repair_run = uuid::Uuid::new_v4();
+                let mut repair_space: Option<omegon_memory::EmbeddingSpace> = None;
                 loop {
                     let response = handle
                         .invoke(crate::memory_service::MemoryRequestV1::ListFactsPage {
@@ -4442,24 +4447,51 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
                     }
                     for fact in page.facts {
                         attempted += 1;
-                        match embed_svc.embed(&fact.content).await {
+                        if let Some(space) = &repair_space {
+                            match handle.invoke(crate::memory_service::MemoryRequestV1::EmbeddingIndexState {
+                                scope:crate::memory_service::MemoryScopeV1::Project, fact_id:fact.id.clone(), space:space.clone(), cancellation:cancellation.clone(),
+                            }).await {
+                                Ok(crate::memory_service::MemoryResponseV1 {payload:crate::memory_service::MemoryPayloadV1::EmbeddingIndexState(omegon_memory::EmbeddingIndexState::Ready),..}) => { skipped += 1; continue; }
+                                Err(error) => { failed += 1; if failures.len() < 10 { failures.push(format!("{}: index inspection failed: {error:?}", fact.id)); } continue; }
+                                Ok(crate::memory_service::MemoryResponseV1 {payload:crate::memory_service::MemoryPayloadV1::EmbeddingIndexState(_),..}) => {},
+                                Ok(_) => { failed += 1; if failures.len() < 10 { failures.push("unexpected index inspection response".into()); } continue; }
+                            }
+                        }
+                        let generated = tokio::time::timeout(std::time::Duration::from_secs(30), embed_svc.embed_identified(&fact.content)).await
+                            .unwrap_or_else(|_| Err(omegon_memory::EmbedError::Unavailable("embedding repair generation timed out".into())));
+                        match generated {
                             Ok(embedding) => {
+                                if repair_space.as_ref().is_some_and(|space| space != &embedding.space) {
+                                    failed += 1;
+                                    failures.push("embedding space changed during repair; rerun against a stable model".into());
+                                    cancellation.cancel();
+                                    break;
+                                }
+                                repair_space.get_or_insert_with(|| embedding.space.clone());
+                                match handle.invoke(crate::memory_service::MemoryRequestV1::EmbeddingIndexState {
+                                    scope:crate::memory_service::MemoryScopeV1::Project, fact_id:fact.id.clone(), space:embedding.space.clone(), cancellation:cancellation.clone(),
+                                }).await {
+                                    Ok(crate::memory_service::MemoryResponseV1 {payload:crate::memory_service::MemoryPayloadV1::EmbeddingIndexState(omegon_memory::EmbeddingIndexState::Ready),..}) => { skipped += 1; continue; }
+                                    Ok(crate::memory_service::MemoryResponseV1 {payload:crate::memory_service::MemoryPayloadV1::EmbeddingIndexState(_),..}) => {},
+                                    Err(error) => { failed += 1; if failures.len() < 10 { failures.push(format!("{}: index inspection failed: {error:?}", fact.id)); } continue; }
+                                    Ok(_) => { failed += 1; if failures.len() < 10 { failures.push("unexpected index inspection response".into()); } continue; }
+                                }
                                 match handle
                                     .invoke(
                                         crate::memory_service::MemoryRequestV1::ApplyMutation {
                                             scope: crate::memory_service::MemoryScopeV1::Project,
                                             operation_id: format!(
-                                                "embedding-backfill:{}:{}:{}",
-                                                embed_svc.model_name(),
+                                                "embedding-backfill:{repair_run}:{}:{}:{}:{}",
+                                                embedding.space.fingerprint(),
                                                 fact.id,
-                                                fact.version
+                                                fact.version,
+                                                omegon_memory::retrieval::raw_content_hash(&fact.content)
                                             ),
-                                            mutation: omegon_memory::MemoryMutation::StoreEmbedding {
+                                            mutation: omegon_memory::MemoryMutation::StoreIdentifiedEmbedding {
                                                 fact: omegon_memory::FactPrecondition {
                                                     id: fact.id.clone(),
                                                     expected_version: fact.version,
                                                 },
-                                                model_name: embed_svc.model_name().into(),
                                                 embedding,
                                             },
                                             cancellation: cancellation.clone(),
@@ -4507,6 +4539,7 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
                                         fact.id
                                     ));
                                 }
+                                if matches!(error, omegon_memory::EmbedError::Unavailable(_)) { cancellation.cancel(); break; }
                             }
                         }
                         if attempted.is_multiple_of(50) || attempted == inventory_total {
@@ -4516,7 +4549,7 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
                         }
                     }
                     cursor = page.next_cursor;
-                    if cursor.is_none() {
+                    if cursor.is_none() || cancellation.is_cancelled() {
                         break;
                     }
                 }

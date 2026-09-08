@@ -10,10 +10,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-pub const MEMORY_SCHEMA_VERSION: i64 = 9;
+pub const MEMORY_SCHEMA_VERSION: i64 = 10;
 pub const PRIMENSUS_MIND: &str = "primensus";
 pub const LEGACY_MIND: &str = "legacy";
-pub const LEGACY_MEMORY_SCHEMA_VERSIONS: std::ops::RangeInclusive<i64> = 5..=8;
+pub const LEGACY_MEMORY_SCHEMA_VERSIONS: std::ops::RangeInclusive<i64> = 5..=9;
 use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -94,7 +94,7 @@ impl SqliteBackend {
         )?;
         if !LEGACY_MEMORY_SCHEMA_VERSIONS.contains(&source_version) {
             anyhow::bail!(
-                "memory migration only supports schema v5 through v8 sources; found v{source_version}"
+                "memory migration only supports schema v5 through v9 sources; found v{source_version}"
             );
         }
         let integrity_check: String =
@@ -140,6 +140,8 @@ impl SqliteBackend {
                     format!("UPDATE facts SET mind = '{LEGACY_MIND}' WHERE mind = 'default'"),
                     format!("UPDATE episodes SET mind = '{LEGACY_MIND}' WHERE mind = 'default'"),
                     "ALTER TABLE episodes ADD COLUMN formation TEXT; -- if absent".into(),
+                    "ALTER TABLE facts_vec ADD COLUMN space TEXT; -- if absent".into(),
+                    "ALTER TABLE facts_vec ADD COLUMN source_hash TEXT; -- if absent".into(),
                     format!(
                         "INSERT INTO schema_version (version, applied_at) VALUES ({MEMORY_SCHEMA_VERSION}, datetime('now'))"
                     ),
@@ -149,6 +151,8 @@ impl SqliteBackend {
                     format!("UPDATE facts SET mind = '{PRIMENSUS_MIND}' WHERE mind = 'default'"),
                     format!("UPDATE episodes SET mind = '{PRIMENSUS_MIND}' WHERE mind = 'default'"),
                     "ALTER TABLE episodes ADD COLUMN formation TEXT; -- if absent".into(),
+                    "ALTER TABLE facts_vec ADD COLUMN space TEXT; -- if absent".into(),
+                    "ALTER TABLE facts_vec ADD COLUMN source_hash TEXT; -- if absent".into(),
                     format!(
                         "INSERT INTO schema_version (version, applied_at) VALUES ({MEMORY_SCHEMA_VERSION}, datetime('now'))"
                     ),
@@ -444,6 +448,8 @@ impl SqliteBackend {
             )?;
             Self::add_column_if_missing(&transaction, "episodes", "tool_calls_count", "INTEGER")?;
             Self::add_column_if_missing(&transaction, "episodes", "formation", "TEXT")?;
+            Self::add_column_if_missing(&transaction, "facts_vec", "space", "TEXT")?;
+            Self::add_column_if_missing(&transaction, "facts_vec", "source_hash", "TEXT")?;
             transaction.execute_batch(
                 "CREATE TABLE IF NOT EXISTS memory_operation_receipts (
                     operation_id TEXT PRIMARY KEY,
@@ -741,6 +747,8 @@ impl SqliteBackend {
             CREATE TABLE IF NOT EXISTS facts_vec (
                 fact_id    TEXT PRIMARY KEY,
                 embedding  BLOB NOT NULL,
+                space      TEXT,
+                source_hash TEXT,
                 model_name TEXT NOT NULL DEFAULT '',
                 dims       INTEGER NOT NULL,
                 created_at TEXT NOT NULL,
@@ -1460,6 +1468,29 @@ impl MemoryBackend for SqliteBackend {
                     dims,
                 }
             }
+            MemoryMutation::StoreIdentifiedEmbedding { fact, embedding } => {
+                embedding.validate()?;
+                let source = Self::check_fact_precondition(&transaction, &fact)?;
+                if source.status != FactStatus::Active {
+                    return Err(MemoryError::InvalidMutation(
+                        "embedding source must be active".into(),
+                    ));
+                }
+                let space = serde_json::to_string(&embedding.space)
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                let source_hash = crate::retrieval::raw_content_hash(&source.content);
+                let timestamp = now_iso();
+                transaction.execute("INSERT OR REPLACE INTO facts_vec (fact_id,embedding,model_name,dims,created_at,space,source_hash) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                    params![fact.id, vectors::vector_to_blob(&embedding.values), embedding.space.model, embedding.space.dimensions, timestamp, space, source_hash])
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                transaction.execute("INSERT OR IGNORE INTO embedding_metadata (model_name,dims,inserted_at) VALUES (?1,?2,?3)", params![embedding.space.model,embedding.space.dimensions,timestamp])
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                MemoryMutationEffect::EmbeddingStored {
+                    fact_id: fact.id,
+                    model_name: embedding.space.model,
+                    dims: embedding.space.dimensions,
+                }
+            }
             MemoryMutation::CreateEdge { mind, request } => {
                 for fact_id in [&request.source_id, &request.target_id] {
                     let endpoint: Option<(String, String)> = transaction
@@ -2046,6 +2077,11 @@ impl MemoryBackend for SqliteBackend {
                     fact,
                     similarity: relevance,
                     score,
+                    scores: RetrievalScores {
+                        lexical: Some(relevance),
+                        ..Default::default()
+                    },
+                    graph_evidence: vec![],
                 })
             })
             .collect();
@@ -2067,77 +2103,8 @@ impl MemoryBackend for SqliteBackend {
         k: usize,
         min_similarity: f32,
     ) -> Result<Vec<ScoredFact>> {
-        let conn = self.conn.lock().unwrap();
-
-        // Check if any embeddings exist for this mind
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM facts_vec fv JOIN facts f ON f.id = fv.fact_id WHERE f.mind = ?1",
-            params![mind], |r| r.get(0),
-        ).map_err(|e| MemoryError::Storage(e.into()))?;
-
-        if count == 0 {
-            return Err(MemoryError::NoEmbeddings);
-        }
-
-        // Check dimension match
-        let stored_dims: u32 = conn.query_row(
-            "SELECT dims FROM facts_vec fv JOIN facts f ON f.id = fv.fact_id WHERE f.mind = ?1 LIMIT 1",
-            params![mind], |r| r.get(0),
-        ).map_err(|e| MemoryError::Storage(e.into()))?;
-
-        let query_dims = embedding.len() as u32;
-        if stored_dims != query_dims {
-            let model: String = conn.query_row(
-                "SELECT model_name FROM facts_vec fv JOIN facts f ON f.id = fv.fact_id WHERE f.mind = ?1 LIMIT 1",
-                params![mind], |r| r.get(0),
-            ).map_err(|e| MemoryError::Storage(e.into()))?;
-            return Err(MemoryError::EmbeddingDimensionMismatch {
-                expected: stored_dims,
-                got: query_dims,
-                stored_model: model,
-            });
-        }
-
-        // Linear scan — load all vectors and compute cosine similarity
-        let mut stmt = conn
-            .prepare(
-                "SELECT fv.fact_id, fv.embedding, f.* FROM facts_vec fv \
-             JOIN facts f ON f.id = fv.fact_id \
-             WHERE f.mind = ?1 AND f.status = 'active'",
-            )
-            .map_err(|e| MemoryError::Storage(e.into()))?;
-
-        let mut results: Vec<ScoredFact> = stmt
-            .query_map(params![mind], |row| {
-                let blob: Vec<u8> = row.get("embedding")?;
-                let fact = Self::row_to_fact(row)?;
-                Ok((blob, fact))
-            })
-            .map_err(|e| MemoryError::Storage(e.into()))?
-            .filter_map(|r| r.map_err(|e| tracing::debug!("row deser: {e}")).ok())
-            .filter_map(|(blob, fact)| {
-                let vec = vectors::blob_to_vector(&blob);
-                let sim = vectors::cosine_similarity(&vec, embedding);
-                if sim < min_similarity {
-                    return None;
-                }
-                let score = crate::decay::ambient_score(sim as f64, &fact)?;
-                Some(ScoredFact {
-                    similarity: sim as f64,
-                    score,
-                    fact,
-                })
-            })
-            .collect();
-
-        results.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.fact.id.cmp(&b.fact.id))
-        });
-        results.truncate(k);
-        Ok(results)
+        let _ = (mind, embedding, k, min_similarity);
+        Err(MemoryError::EmbeddingIdentityRequired)
     }
 
     async fn vector_search_cancellable(
@@ -2168,81 +2135,11 @@ impl MemoryBackend for SqliteBackend {
         filter: &SearchFilter,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> Result<Vec<ScoredFact>> {
-        let conn = self.conn.lock().unwrap();
-        let section = filter.section.as_ref().map(|section| {
-            serde_json::to_string(section)
-                .unwrap_or_default()
-                .trim_matches('"')
-                .to_string()
-        });
-        let mut statement = conn
-            .prepare(
-                "SELECT fv.embedding, fv.model_name, fv.dims, f.* FROM facts_vec fv \
-                 JOIN facts f ON f.id = fv.fact_id \
-                  WHERE f.mind = ?1 \
-                  AND ((?2 = 0 AND f.status = 'active') OR (?2 = 1 AND f.status IN ('archived','dormant','superseded'))) \
-                  AND (?3 IS NULL OR f.section = ?3) ORDER BY fv.fact_id",
-            )
-            .map_err(|error| MemoryError::Storage(error.into()))?;
-        let mut rows = statement
-            .query(params![
-                mind,
-                filter.intent == SearchIntent::Historical,
-                section
-            ])
-            .map_err(|error| MemoryError::Storage(error.into()))?;
-        let mut found = false;
-        let mut results = Vec::new();
-        while let Some(row) = rows
-            .next()
-            .map_err(|error| MemoryError::Storage(error.into()))?
-        {
-            if cancelled() {
-                return Err(MemoryError::Cancelled);
-            }
-            found = true;
-            let dimensions = row
-                .get::<_, u32>("dims")
-                .map_err(|error| MemoryError::Storage(error.into()))?;
-            if dimensions != embedding.len() as u32 {
-                return Err(MemoryError::EmbeddingDimensionMismatch {
-                    expected: dimensions,
-                    got: embedding.len() as u32,
-                    stored_model: row
-                        .get("model_name")
-                        .map_err(|error| MemoryError::Storage(error.into()))?,
-                });
-            }
-            let blob: Vec<u8> = row
-                .get("embedding")
-                .map_err(|error| MemoryError::Storage(error.into()))?;
-            let fact =
-                Self::row_to_fact(row).map_err(|error| MemoryError::Storage(error.into()))?;
-            let similarity = vectors::cosine_similarity(&vectors::blob_to_vector(&blob), embedding);
-            if similarity < min_similarity {
-                continue;
-            }
-            let Some(score) = filter.score(similarity as f64, &fact) else {
-                continue;
-            };
-            results.push(ScoredFact {
-                fact,
-                similarity: similarity as f64,
-                score,
-            });
+        let _ = (mind, embedding, k, min_similarity, filter);
+        if cancelled() {
+            return Err(MemoryError::Cancelled);
         }
-        if !found {
-            return Err(MemoryError::NoEmbeddings);
-        }
-        results.sort_by(|left, right| {
-            right
-                .score
-                .partial_cmp(&left.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| left.fact.id.cmp(&right.fact.id))
-        });
-        results.truncate(k);
-        Ok(results)
+        Err(MemoryError::EmbeddingIdentityRequired)
     }
 
     async fn store_embedding(
@@ -2309,8 +2206,7 @@ impl MemoryBackend for SqliteBackend {
     async fn embedding_metadata(&self, mind: &str) -> Result<Option<EmbeddingMetadata>> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT em.model_name, em.dims, em.inserted_at FROM embedding_metadata em \
-             JOIN facts_vec fv ON fv.model_name = em.model_name \
+            "SELECT fv.model_name, fv.dims, fv.created_at FROM facts_vec fv \
              JOIN facts f ON f.id = fv.fact_id \
              WHERE f.mind = ?1 LIMIT 1",
             params![mind],
@@ -2324,6 +2220,186 @@ impl MemoryBackend for SqliteBackend {
         )
         .optional()
         .map_err(|e| MemoryError::Storage(e.into()))
+    }
+
+    async fn search_identified(
+        &self,
+        mind: &str,
+        query: &IdentifiedEmbedding,
+        k: usize,
+        minimum: f32,
+        filter: &SearchFilter,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<VectorSearchReport> {
+        let mut top = crate::retrieval::VectorAccumulator::new(query, k, minimum)?;
+        if cancelled() {
+            return Err(MemoryError::Cancelled);
+        }
+        if k == 0 {
+            return Ok(top.finish());
+        }
+        let conn = self.conn.lock().unwrap();
+        let section = filter.section.as_ref().map(|section| {
+            serde_json::to_string(section)
+                .unwrap()
+                .trim_matches('"')
+                .to_string()
+        });
+        let mut statement = conn.prepare("SELECT f.*, fv.embedding, fv.space, fv.source_hash, fv.dims AS vector_dims, fv.model_name AS vector_model FROM facts f JOIN facts_vec fv ON fv.fact_id=f.id WHERE f.mind=?1 AND ((?2=0 AND f.status='active') OR (?2=1 AND f.status IN ('dormant','archived','superseded'))) AND (?3 IS NULL OR f.section=?3) ORDER BY f.id")
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        let mut rows = statement
+            .query(params![
+                mind,
+                filter.intent == SearchIntent::Historical,
+                section
+            ])
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        while let Some(row) = rows
+            .next()
+            .map_err(|error| MemoryError::Storage(error.into()))?
+        {
+            if cancelled() {
+                return Err(MemoryError::Cancelled);
+            }
+            let fact =
+                Self::row_to_fact(row).map_err(|error| MemoryError::Storage(error.into()))?;
+            let space = crate::retrieval::stored_space(
+                row.get("space")
+                    .map_err(|error| MemoryError::Storage(error.into()))?,
+            )?;
+            let source_hash: Option<String> = row
+                .get("source_hash")
+                .map_err(|error| MemoryError::Storage(error.into()))?;
+            if let Some(space) = &space {
+                let dims: u32 = row
+                    .get("vector_dims")
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                let model: String = row
+                    .get("vector_model")
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                if dims != space.dimensions || model != space.model {
+                    return Err(MemoryError::Storage(anyhow::anyhow!(
+                        "inconsistent vector metadata"
+                    )));
+                }
+            }
+            if !top.eligible(crate::retrieval::index_state(
+                space.as_ref(),
+                source_hash.as_deref(),
+                &fact.content,
+                &query.space,
+            )) {
+                continue;
+            }
+            let blob: Vec<u8> = row
+                .get("embedding")
+                .map_err(|error| MemoryError::Storage(error.into()))?;
+            let vector = crate::retrieval::decode(&blob, &query.space)?;
+            let similarity = vectors::cosine_similarity(&vector, &query.values);
+            if similarity >= minimum {
+                top.push(fact, similarity as f64, filter);
+            }
+        }
+        Ok(top.finish())
+    }
+
+    async fn embedding_index_state(
+        &self,
+        id: &str,
+        space: &EmbeddingSpace,
+    ) -> Result<EmbeddingIndexState> {
+        space.validate()?;
+        let conn = self.conn.lock().unwrap();
+        type IndexRow = (
+            String,
+            Option<String>,
+            Option<String>,
+            Option<Vec<u8>>,
+            Option<u32>,
+            Option<String>,
+        );
+        let row: Option<IndexRow> = conn.query_row(
+            "SELECT f.content,v.space,v.source_hash,v.embedding,v.dims,v.model_name FROM facts f LEFT JOIN facts_vec v ON v.fact_id=f.id WHERE f.id=?1", params![id],
+            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?))).optional().map_err(|error| MemoryError::Storage(error.into()))?;
+        let Some((content, encoded, hash, blob, dims, model)) = row else {
+            return Err(MemoryError::FactNotFound(id.into()));
+        };
+        let Some(blob) = blob else {
+            return Ok(EmbeddingIndexState::Missing);
+        };
+        let stored = crate::retrieval::stored_space(encoded)?;
+        if stored.as_ref().is_some_and(|stored| {
+            dims != Some(stored.dimensions) || model.as_deref() != Some(stored.model.as_str())
+        }) {
+            return Err(MemoryError::Storage(anyhow::anyhow!(
+                "inconsistent vector metadata"
+            )));
+        }
+        let state =
+            crate::retrieval::index_state(stored.as_ref(), hash.as_deref(), &content, space);
+        if state == EmbeddingIndexState::Ready {
+            crate::retrieval::decode(&blob, space)?;
+        }
+        Ok(state)
+    }
+
+    async fn get_fact_filtered(
+        &self,
+        mind: &str,
+        id: &str,
+        filter: &SearchFilter,
+    ) -> Result<Option<Fact>> {
+        let conn = self.conn.lock().unwrap();
+        let fact = conn
+            .query_row(
+                "SELECT * FROM facts WHERE id=?1 AND mind=?2",
+                params![id, mind],
+                Self::row_to_fact,
+            )
+            .optional()
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        Ok(fact.filter(|fact| filter.matches(fact)))
+    }
+
+    async fn get_edges_filtered(
+        &self,
+        mind: &str,
+        id: &str,
+        filter: &SearchFilter,
+        limit: usize,
+    ) -> Result<Vec<Edge>> {
+        let conn = self.conn.lock().unwrap();
+        let section = filter.section.as_ref().map(|section| {
+            serde_json::to_string(section)
+                .unwrap()
+                .trim_matches('"')
+                .to_string()
+        });
+        let mut stmt = conn.prepare("SELECT e.* FROM edges e JOIN facts s ON s.id=e.source_fact_id JOIN facts t ON t.id=e.target_fact_id WHERE (s.id=?1 OR t.id=?1) AND s.mind=?2 AND t.mind=?2 AND e.status='active' AND ((?3=0 AND s.status='active' AND t.status='active') OR (?3=1 AND s.status IN ('archived','dormant','superseded') AND t.status IN ('archived','dormant','superseded'))) AND (?4 IS NULL OR (s.section=?4 AND t.section=?4)) ORDER BY e.confidence DESC,e.id LIMIT ?5")
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        stmt.query_map(
+            params![
+                id,
+                mind,
+                filter.intent == SearchIntent::Historical,
+                section,
+                limit.min(1024) as i64
+            ],
+            |row| {
+                Ok(Edge {
+                    id: row.get("id")?,
+                    source_id: row.get("source_fact_id")?,
+                    target_id: row.get("target_fact_id")?,
+                    relation: row.get("relation")?,
+                    description: row.get("description")?,
+                    confidence: row.get("confidence")?,
+                    created_at: row.get("created_at")?,
+                })
+            },
+        )
+        .map_err(|error| MemoryError::Storage(error.into()))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| MemoryError::Storage(error.into()))
     }
 
     async fn create_edge(&self, req: CreateEdge) -> Result<Edge> {
@@ -2622,8 +2698,7 @@ impl MemoryBackend for SqliteBackend {
 
         let meta: Option<(String, u32)> = conn
             .query_row(
-                "SELECT em.model_name, em.dims FROM embedding_metadata em \
-             JOIN facts_vec fv ON fv.model_name = em.model_name \
+                "SELECT fv.model_name, fv.dims FROM facts_vec fv \
              JOIN facts f ON f.id = fv.fact_id \
              WHERE f.mind = ?1 LIMIT 1",
                 params![mind],
@@ -2716,8 +2791,11 @@ mod tests {
             params![version],
         )
         .unwrap();
-        conn.execute_batch("ALTER TABLE episodes DROP COLUMN formation;")
-            .unwrap();
+        conn.execute_batch("ALTER TABLE facts_vec DROP COLUMN space; ALTER TABLE facts_vec DROP COLUMN source_hash;").unwrap();
+        if version < 9 {
+            conn.execute_batch("ALTER TABLE episodes DROP COLUMN formation;")
+                .unwrap();
+        }
         if version < 8 {
             conn.execute_batch(
                 "DROP TABLE memory_operation_receipts;

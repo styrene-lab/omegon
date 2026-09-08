@@ -28,6 +28,7 @@ pub mod maintenance;
 #[cfg(feature = "agent")]
 pub mod provider;
 pub mod renderer;
+pub mod retrieval;
 pub mod service;
 pub mod sqlite;
 pub mod types;

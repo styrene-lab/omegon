@@ -204,13 +204,20 @@ async fn memory_campaign_portable_round_trip_isolated_minds_and_releases_every_f
     outcome(
         &binding,
         "round-vector",
-        MemoryMutation::StoreEmbedding {
+        MemoryMutation::StoreIdentifiedEmbedding {
             fact: FactPrecondition {
                 id: first_id.clone(),
                 expected_version: first_version,
             },
-            model_name: "campaign-model".into(),
-            embedding: vec![1.0, 0.0, 0.0],
+            embedding: omegon_memory::IdentifiedEmbedding {
+                space: omegon_memory::EmbeddingSpace {
+                    model: "campaign-model".into(),
+                    revision: "fixture-v1".into(),
+                    preprocessing: "raw-v1".into(),
+                    dimensions: 3,
+                },
+                values: vec![1.0, 0.0, 0.0],
+            },
         },
     )
     .await;
@@ -360,17 +367,27 @@ async fn memory_campaign_portable_round_trip_isolated_minds_and_releases_every_f
             && episodes[0].tool_calls_count == Some(7))
     );
 
-    let search = |mind: &str, query: &str, query_vector| MemoryRequestV1::HybridSearch {
-        scope: MemoryScopeV1::Project,
-        filter: Default::default(),
-        mind: mind.into(),
-        query: query.into(),
-        query_vector,
-        limit: 2,
-        fetch_limit: 4,
-        min_similarity: 0.0,
-        cancellation: CancellationToken::new(),
-    };
+    let search =
+        |mind: &str, query: &str, query_vector: Option<Vec<f32>>| MemoryRequestV1::HybridSearch {
+            scope: MemoryScopeV1::Project,
+            filter: Default::default(),
+            mind: mind.into(),
+            query: query.into(),
+            query_space: query_vector
+                .as_ref()
+                .map(|vector| omegon_memory::EmbeddingSpace {
+                    model: "campaign-model".into(),
+                    revision: "fixture-v1".into(),
+                    preprocessing: "raw-v1".into(),
+                    dimensions: vector.len() as u32,
+                }),
+            query_vector,
+            include_diagnostics: false,
+            limit: 2,
+            fetch_limit: 4,
+            min_similarity: 0.0,
+            cancellation: CancellationToken::new(),
+        };
     let first_fts = reopened
         .invoke(search(MIND_B, "Isolated beta", Some(vec![1.0, 0.0, 0.0])))
         .await

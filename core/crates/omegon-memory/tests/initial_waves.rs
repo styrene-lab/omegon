@@ -14,9 +14,28 @@ async fn filtered_channels_respect_section_scope_and_read_only_history() {
     for backend in backends {
         backend.import_jsonl(FIXTURE).await.unwrap();
         let before = backend.export_jsonl("wave").await.unwrap();
+        let space = omegon_memory::EmbeddingSpace {
+            model: "fixture-space".into(),
+            revision: "fixture-v1".into(),
+            preprocessing: "raw-v1".into(),
+            dimensions: 2,
+        };
         for id in ["current", "constraint"] {
+            let fact = backend.get_fact(id).await.unwrap().unwrap();
             backend
-                .store_embedding(id, "fixture-space", &[1.0, 0.0])
+                .apply_mutation(
+                    &format!("index-{id}"),
+                    omegon_memory::MemoryMutation::StoreIdentifiedEmbedding {
+                        fact: omegon_memory::FactPrecondition {
+                            id: id.into(),
+                            expected_version: fact.version,
+                        },
+                        embedding: omegon_memory::IdentifiedEmbedding {
+                            space: space.clone(),
+                            values: vec![1.0, 0.0],
+                        },
+                    },
+                )
                 .await
                 .unwrap();
         }
@@ -34,9 +53,20 @@ async fn filtered_channels_respect_section_scope_and_read_only_history() {
             intent: SearchIntent::Current,
         };
         let seeds = backend
-            .vector_search_filtered_cancellable("wave", &[1.0, 0.0], 1, 0.0, &filter, &|| false)
+            .search_identified(
+                "wave",
+                &omegon_memory::IdentifiedEmbedding {
+                    space,
+                    values: vec![1.0, 0.0],
+                },
+                1,
+                0.0,
+                &filter,
+                &|| false,
+            )
             .await
-            .unwrap();
+            .unwrap()
+            .results;
         assert_eq!(seeds.len(), 1);
         assert_eq!(seeds[0].fact.id, "constraint");
         let expanded = omegon_memory::service::expand_edges_filtered_cancellable(

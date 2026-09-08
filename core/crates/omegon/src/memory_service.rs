@@ -222,6 +222,10 @@ pub(crate) enum MemoryRequestV1 {
         #[serde(default)]
         filter: omegon_memory::SearchFilter,
         query_vector: Option<Vec<f32>>,
+        #[serde(default)]
+        query_space: Option<omegon_memory::EmbeddingSpace>,
+        #[serde(default)]
+        include_diagnostics: bool,
         limit: usize,
         fetch_limit: usize,
         min_similarity: f32,
@@ -259,6 +263,8 @@ pub(crate) enum MemoryRequestV1 {
         scope: MemoryScopeV1,
         mind: String,
         vector: Vec<f32>,
+        #[serde(default)]
+        space: Option<omegon_memory::EmbeddingSpace>,
         limit: usize,
         min_similarity: f32,
         #[serde(skip, default)]
@@ -267,6 +273,13 @@ pub(crate) enum MemoryRequestV1 {
     EmbeddingMetadata {
         scope: MemoryScopeV1,
         mind: String,
+        #[serde(skip, default)]
+        cancellation: CancellationToken,
+    },
+    EmbeddingIndexState {
+        scope: MemoryScopeV1,
+        fact_id: String,
+        space: omegon_memory::EmbeddingSpace,
         #[serde(skip, default)]
         cancellation: CancellationToken,
     },
@@ -384,6 +397,7 @@ impl MemoryRequestV1 {
             | Self::FtsSearch { cancellation, .. }
             | Self::VectorSearch { cancellation, .. }
             | Self::EmbeddingMetadata { cancellation, .. }
+            | Self::EmbeddingIndexState { cancellation, .. }
             | Self::GetEdges { cancellation, .. }
             | Self::ListEpisodes { cancellation, .. }
             | Self::SearchEpisodes { cancellation, .. }
@@ -415,6 +429,8 @@ pub(crate) enum MemoryPayloadV1 {
     ManagedStatus(ManagedMemoryStatusV1),
     ScoredFacts(Vec<ScoredFact>),
     EmbeddingMetadata(Option<EmbeddingMetadata>),
+    RecallReport(omegon_memory::VectorSearchReport),
+    EmbeddingIndexState(omegon_memory::EmbeddingIndexState),
     Edges(Vec<Edge>),
     Episodes(Vec<Episode>),
     Mutation(MemoryMutationOutcome),
@@ -561,6 +577,7 @@ pub(crate) enum MemoryServiceErrorCodeV1 {
     StoreUnavailable,
     FactNotFound,
     EmbeddingDimensionMismatch,
+    EmbeddingIdentityRequired,
     NoEmbeddings,
     OperationConflict,
     FactVersionConflict,
@@ -606,6 +623,9 @@ impl MemoryServiceErrorV1 {
                 MemoryServiceErrorCodeV1::EmbeddingDimensionMismatch
             }
             MemoryError::NoEmbeddings => MemoryServiceErrorCodeV1::NoEmbeddings,
+            MemoryError::EmbeddingIdentityRequired => {
+                MemoryServiceErrorCodeV1::EmbeddingIdentityRequired
+            }
             MemoryError::OperationConflict(_) => MemoryServiceErrorCodeV1::OperationConflict,
             MemoryError::FactVersionConflict { .. } => {
                 MemoryServiceErrorCodeV1::FactVersionConflict
@@ -1517,6 +1537,8 @@ fn execute_request(
                     query,
                     filter,
                     query_vector,
+                    query_space,
+                    include_diagnostics,
                     limit,
                     fetch_limit,
                     min_similarity,
@@ -1528,14 +1550,18 @@ fn execute_request(
                     if cancelled() {
                         return Err(MemoryError::Cancelled);
                     }
-                    let vector = if let Some(vector) = query_vector {
+                    let mut diagnostics = omegon_memory::VectorDiagnostics::default();
+                    let vector = if let (Some(vector), Some(space)) = (query_vector, query_space) {
                         if cancelled() {
                             return Err(MemoryError::Cancelled);
                         }
                         match backend
-                            .vector_search_filtered_cancellable(
+                            .search_identified(
                                 &mind,
-                                &vector,
+                                &omegon_memory::IdentifiedEmbedding {
+                                    space,
+                                    values: vector,
+                                },
                                 fetch_limit,
                                 min_similarity,
                                 &filter,
@@ -1543,14 +1569,18 @@ fn execute_request(
                             )
                             .await
                         {
-                            Ok(results) => results,
-                            Err(MemoryError::NoEmbeddings) => Vec::new(),
-                            Err(error) => {
-                                tracing::debug!(%error, "vector search unavailable, FTS-only");
+                            Ok(report) => {
+                                diagnostics = report.diagnostics;
+                                report.results
+                            }
+                            Err(MemoryError::EmbeddingIdentityRequired) => {
+                                diagnostics.identity_unavailable = true;
                                 Vec::new()
                             }
+                            Err(error) => return Err(error),
                         }
                     } else {
+                        diagnostics.identity_unavailable = true;
                         Vec::new()
                     };
                     if cancelled() {
@@ -1561,7 +1591,7 @@ fn execute_request(
                     } else {
                         omegon_memory::rrf_merge(&fts, &vector, 60.0, fetch_limit)
                     };
-                    let results = omegon_memory::service::expand_edges_filtered_cancellable(
+                    let results = omegon_memory::service::expand_edges_filtered_checked(
                         backend,
                         &mind,
                         results,
@@ -1569,12 +1599,20 @@ fn execute_request(
                         &filter,
                         cancelled,
                     )
-                    .await
-                    .ok_or(MemoryError::Cancelled)?
+                    .await?
                     .into_iter()
                     .take(limit)
                     .collect();
-                    Ok(MemoryPayloadV1::ScoredFacts(results))
+                    if include_diagnostics {
+                        Ok(MemoryPayloadV1::RecallReport(
+                            omegon_memory::VectorSearchReport {
+                                results,
+                                diagnostics,
+                            },
+                        ))
+                    } else {
+                        Ok(MemoryPayloadV1::ScoredFacts(results))
+                    }
                 }
                 MemoryRequestV1::ContextSnapshot {
                     mind,
@@ -1642,13 +1680,31 @@ fn execute_request(
                 MemoryRequestV1::VectorSearch {
                     mind,
                     vector,
+                    space,
                     limit,
                     min_similarity,
                     ..
-                } => backend
-                    .vector_search(&mind, &vector, limit, min_similarity)
+                } => {
+                    let space = space.ok_or(MemoryError::EmbeddingIdentityRequired)?;
+                    backend
+                        .search_identified(
+                            &mind,
+                            &omegon_memory::IdentifiedEmbedding {
+                                space,
+                                values: vector,
+                            },
+                            limit,
+                            min_similarity,
+                            &Default::default(),
+                            cancelled,
+                        )
+                        .await
+                        .map(MemoryPayloadV1::RecallReport)
+                }
+                MemoryRequestV1::EmbeddingIndexState { fact_id, space, .. } => backend
+                    .embedding_index_state(&fact_id, &space)
                     .await
-                    .map(MemoryPayloadV1::ScoredFacts),
+                    .map(MemoryPayloadV1::EmbeddingIndexState),
                 MemoryRequestV1::EmbeddingMetadata { mind, .. } => backend
                     .embedding_metadata(&mind)
                     .await
@@ -1889,6 +1945,7 @@ fn request_scope(request: &MemoryRequestV1) -> MemoryScopeV1 {
         | MemoryRequestV1::FtsSearch { scope, .. }
         | MemoryRequestV1::VectorSearch { scope, .. }
         | MemoryRequestV1::EmbeddingMetadata { scope, .. }
+        | MemoryRequestV1::EmbeddingIndexState { scope, .. }
         | MemoryRequestV1::GetEdges { scope, .. }
         | MemoryRequestV1::ListEpisodes { scope, .. }
         | MemoryRequestV1::SearchEpisodes { scope, .. }
@@ -2168,6 +2225,12 @@ mod tests {
         else {
             panic!("expected second fact");
         };
+        let space = omegon_memory::EmbeddingSpace {
+            model: "test-model".into(),
+            revision: "fixture-v1".into(),
+            preprocessing: "raw-v1".into(),
+            dimensions: 2,
+        };
         for (id, version, vector) in [
             (first_id.clone(), first_version, vec![1.0, 0.0]),
             (second_id.clone(), second_version, vec![0.8, 0.2]),
@@ -2176,13 +2239,15 @@ mod tests {
                 .invoke(request(
                     MemoryScopeV1::Project,
                     &format!("embedding-{id}"),
-                    MemoryMutation::StoreEmbedding {
+                    MemoryMutation::StoreIdentifiedEmbedding {
                         fact: FactPrecondition {
                             id,
                             expected_version: version,
                         },
-                        model_name: "test-model".into(),
-                        embedding: vector,
+                        embedding: omegon_memory::IdentifiedEmbedding {
+                            space: space.clone(),
+                            values: vector,
+                        },
                     },
                 ))
                 .await
@@ -2211,6 +2276,8 @@ mod tests {
                 mind: MIND.into(),
                 query: "OAuth authentication".into(),
                 query_vector: Some(vec![1.0, 0.0]),
+                query_space: Some(space),
+                include_diagnostics: true,
                 filter: Default::default(),
                 limit: 2,
                 fetch_limit: 4,
@@ -2220,8 +2287,8 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            matches!(hybrid.payload, MemoryPayloadV1::ScoredFacts(results)
-            if results.len() == 2 && results[0].fact.id == first_id)
+            matches!(hybrid.payload, MemoryPayloadV1::RecallReport(report)
+            if report.results.len() == 2 && report.results[0].fact.id == first_id && report.diagnostics.compatible == 2)
         );
 
         let fts_only = handle
@@ -2230,6 +2297,8 @@ mod tests {
                 mind: MIND.into(),
                 query: "OAuth authentication".into(),
                 query_vector: None,
+                query_space: None,
+                include_diagnostics: false,
                 filter: Default::default(),
                 limit: 1,
                 fetch_limit: 2,
@@ -2787,6 +2856,7 @@ mod tests {
             scope: MemoryScopeV1::Global,
             mind: MIND.into(),
             vector: vec![1.0, 0.0],
+            space: None,
             limit: 3,
             min_similarity: 0.2,
             cancellation: CancellationToken::new(),

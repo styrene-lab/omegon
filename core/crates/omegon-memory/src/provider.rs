@@ -269,7 +269,7 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ToolProvider
         tool_name: &str,
         _call_id: &str,
         args: Value,
-        _cancel: tokio_util::sync::CancellationToken,
+        cancel: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<ToolResult> {
         match tool_name {
             "memory_store" => {
@@ -313,9 +313,24 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ToolProvider
                 // Use FTS search (vector search requires embeddings which may not be available)
                 let results = self
                     .backend
-                    .fts_search_filtered(&self.mind, &query, k, &filter)
+                    .fts_search_filtered(
+                        &self.mind,
+                        &query,
+                        k.saturating_mul(2).min(10_000),
+                        &filter,
+                    )
                     .await
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+                let results = crate::service::expand_edges_filtered_checked(
+                    &self.backend,
+                    &self.mind,
+                    results,
+                    k,
+                    &filter,
+                    &|| cancel.is_cancelled(),
+                )
+                .await?;
 
                 if results.is_empty() {
                     return Ok(ToolResult {
@@ -337,11 +352,11 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ToolProvider
                         sf.fact.content.clone()
                     };
                     lines.push(format!(
-                        "{}. [{}] ({}, {:.0}%) {}",
+                        "{}. [{}] ({}, {}) {}",
                         i + 1,
                         sf.fact.id,
                         section,
-                        sf.similarity * 100.0,
+                        crate::renderer::recall_score_label(sf),
                         content,
                     ));
                 }
