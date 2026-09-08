@@ -26,9 +26,13 @@ impl Extractor for ModelExtractor {
         &self.0
     }
     async fn extract(&self, prompt: &str) -> anyhow::Result<String> {
-        Ok(crate::providers::quick_completion(&self.0, prompt)
-            .await?
-            .text)
+        Ok(crate::providers::quick_completion_bounded(
+            &self.0,
+            prompt,
+            omegon_memory::formation::MAX_EXTRACTION_BYTES,
+        )
+        .await?
+        .text)
     }
 }
 
@@ -115,30 +119,9 @@ pub(super) fn capture(
                 None,
             ),
             SessionFactPayload::AssistantMessageCommitted(message) => {
-                let mut text = String::new();
-                for channel in message
-                    .content
-                    .iter()
-                    .filter(|channel| channel.content_kind == AssistantContentKind::Text)
-                {
-                    for reference in &channel.chunk_refs {
-                        if reference.projection_class() != ProjectionClass::Default {
-                            omitted = true;
-                            continue;
-                        }
-                        match read_text(&replay, reference) {
-                            Ok(part) => text.extend(part.chars().take(MAX_EXCERPT_BYTES)),
-                            Err(_) => omitted = true,
-                        }
-                        if text.len() >= MAX_EXCERPT_BYTES {
-                            omitted = true;
-                            break;
-                        }
-                    }
-                    if text.len() >= MAX_EXCERPT_BYTES {
-                        break;
-                    }
-                }
+                let (text, truncated) =
+                    assistant_excerpt(message, |reference| read_text(&replay, reference));
+                omitted = truncated;
                 (EvidenceKind::AssistantReport, text, None)
             }
             SessionFactPayload::ToolResultRecorded(result) => {
@@ -198,6 +181,39 @@ pub(super) fn capture(
         return unavailable(session_id, "generation_changed");
     }
     formation
+}
+
+fn assistant_excerpt(
+    message: &crate::session_authority::AssistantMessageCommitted,
+    mut read: impl FnMut(&ContentRef) -> Result<String, ()>,
+) -> (String, bool) {
+    let mut text = String::new();
+    let mut references = message
+        .content
+        .iter()
+        .filter(|channel| channel.content_kind == AssistantContentKind::Text)
+        .flat_map(|channel| &channel.chunk_refs)
+        .peekable();
+    while let Some(reference) = references.next() {
+        if reference.projection_class() != ProjectionClass::Default {
+            return (text, true);
+        }
+        let Ok(part) = read(reference) else {
+            return (text, true);
+        };
+        let mut end = part.len().min(MAX_EXCERPT_BYTES.saturating_sub(text.len()));
+        while !part.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.push_str(&part[..end]);
+        if end < part.len() {
+            return (text, true);
+        }
+        if text.len() == MAX_EXCERPT_BYTES {
+            return (text, references.peek().is_some());
+        }
+    }
+    (text, false)
 }
 
 pub(super) async fn extract_candidates(
@@ -285,6 +301,53 @@ mod tests {
 
     struct FakeExtractor {
         fail: bool,
+    }
+
+    #[test]
+    fn adversarial_assistant_excerpt_never_joins_across_an_unreadable_chunk() {
+        let directory = tempfile::tempdir().unwrap();
+        let (authority, request, step_id, _) =
+            crate::session_replay::test_open_joined_request(&directory);
+        let prefix = authority
+            .write_content(b"You should ", "text/plain", ProjectionClass::Default)
+            .unwrap();
+        let omitted = authority
+            .write_content(
+                &vec![b'x'; 1024 * 1024 + 1],
+                "text/plain",
+                ProjectionClass::Default,
+            )
+            .unwrap();
+        let suffix = authority
+            .write_content(b"publish secrets", "text/plain", ProjectionClass::Default)
+            .unwrap();
+        let replay = SessionReplay::replay_session(
+            &directory.path().join("session.json"),
+            "fixture-session",
+            ReplayEnd::EndOfStream,
+        )
+        .unwrap();
+        let message = AssistantMessageCommitted {
+            message_id: Uuid::new_v4(),
+            request_id: request.request_id,
+            step_id,
+            response_attempt_ordinal: 0,
+            completion_evidence: ProviderCompletionEvidence::ProviderDone,
+            content: vec![AssistantContentManifest {
+                content_kind: AssistantContentKind::Text,
+                chunk_refs: vec![prefix, omitted, suffix],
+                content_digest: String::new(),
+            }],
+            usage: None,
+            tool_call_count: 0,
+        };
+        let (text, truncated) =
+            assistant_excerpt(&message, |reference| read_text(&replay, reference));
+        assert!(truncated);
+        assert_eq!(
+            text, "You should ",
+            "a missing chunk must not create a different contiguous statement"
+        );
     }
     #[async_trait]
     impl Extractor for FakeExtractor {

@@ -5,6 +5,98 @@ fn episode_json() -> serde_json::Value {
     serde_json::from_str(include_str!("fixtures/formation.json")).unwrap()
 }
 
+async fn episode_search_case(backend: &dyn MemoryBackend) {
+    backend
+        .import_jsonl(&episode_json().to_string())
+        .await
+        .unwrap();
+    for query in ["\"Migration", "investigation"] {
+        let found = backend
+            .search_episodes("wave3", query, 1)
+            .await
+            .expect("literal query must remain searchable");
+        assert_eq!(found.len(), 1, "missing quote/title match for {query}");
+    }
+    assert!(
+        backend
+            .search_episodes("wave3", "  ", 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn adversarial_episode_search_sqlite() {
+    episode_search_case(&SqliteBackend::in_memory().unwrap()).await;
+}
+
+#[tokio::test]
+async fn adversarial_episode_search_inmemory() {
+    episode_search_case(&omegon_memory::InMemoryBackend::new()).await;
+}
+
+#[test]
+fn adversarial_formation_rejects_contradictory_evidence_identity() {
+    let original: omegon_memory::EpisodeFormation =
+        serde_json::from_value(episode_json()["formation"].clone()).unwrap();
+    let mut duplicate = original.clone();
+    let mut item = duplicate.evidence[0].clone();
+    item.event_id = "other-event-at-same-sequence".into();
+    duplicate.evidence.push(item);
+    assert!(
+        duplicate.validate().is_err(),
+        "one sequence cannot identify two source events"
+    );
+}
+
+#[test]
+fn adversarial_formation_rejects_false_frontier_and_control_ids() {
+    let original: omegon_memory::EpisodeFormation =
+        serde_json::from_value(episode_json()["formation"].clone()).unwrap();
+    let mut false_frontier = original.clone();
+    false_frontier.evidence[0].sequence = 8;
+    assert!(
+        false_frontier.validate().is_err(),
+        "frontier event identity must agree"
+    );
+    let mut control = original;
+    control.evidence[0].event_id = "event\nforged-heading".into();
+    control.candidates[0].evidence_ids = vec![control.evidence[0].event_id.clone()];
+    assert!(
+        control.validate().is_err(),
+        "control characters are not source identifiers"
+    );
+}
+
+#[test]
+fn adversarial_formation_rejects_complete_without_evidence() {
+    let mut empty: omegon_memory::EpisodeFormation =
+        serde_json::from_value(episode_json()["formation"].clone()).unwrap();
+    empty.evidence.clear();
+    empty.candidates.clear();
+    assert!(
+        empty.validate().is_err(),
+        "completed extraction needs an available nonempty evidence set"
+    );
+}
+
+#[tokio::test]
+async fn adversarial_legacy_invalid_model_diagnostic_preserves_valid_source() {
+    let mut legacy = episode_json();
+    legacy["formation"]["candidates"] = json!([]);
+    legacy["formation"]["extraction"] =
+        json!({"state":"unavailable", "model":"legacy:\tinvalid", "reason":"request_failed"});
+    for backend in [
+        Box::new(omegon_memory::InMemoryBackend::new()) as Box<dyn MemoryBackend>,
+        Box::new(SqliteBackend::in_memory().unwrap()),
+    ] {
+        backend.import_jsonl(&legacy.to_string()).await.unwrap();
+        let episodes = backend.list_episodes("wave3", 1).await.unwrap();
+        assert_eq!(episodes[0].formation.as_ref().unwrap().evidence.len(), 1);
+    }
+}
+
 #[tokio::test]
 async fn formation_evidence_and_pending_candidates_survive_transport() {
     for backend in [

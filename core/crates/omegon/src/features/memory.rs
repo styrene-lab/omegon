@@ -144,7 +144,16 @@ impl MemoryFeature {
     }
 
     pub fn with_extraction_model(mut self, model: String) -> Self {
-        self.extractor = Some(Arc::new(formation::ModelExtractor(model)));
+        let model = model.trim();
+        if model.is_empty()
+            || model.len() > omegon_memory::formation::MAX_IDENTIFIER_BYTES
+            || model.chars().any(char::is_control)
+        {
+            self.extractor = None;
+            tracing::warn!("invalid memory extraction model configuration; extraction disabled");
+        } else {
+            self.extractor = Some(Arc::new(formation::ModelExtractor(model.into())));
+        }
         self
     }
 
@@ -155,18 +164,14 @@ impl MemoryFeature {
         embeddings: Option<Arc<dyn EmbeddingService>>,
     ) -> Self {
         self.extractor = None;
-        if let Some(service) = embeddings {
-            self = self.with_embed_service(service);
-        }
+        self.embed_service = embeddings;
         if !child && profile.memory_extraction_enabled != Some(false) {
             let model = profile
                 .memory_extraction_model
                 .as_deref()
                 .unwrap_or(formation::DEFAULT_EXTRACTION_MODEL)
                 .trim();
-            if !model.is_empty() {
-                self = self.with_extraction_model(model.into());
-            }
+            self = self.with_extraction_model(model.into());
         }
         self
     }
@@ -348,56 +353,77 @@ struct SessionEndPipelineInput {
     duration_secs: f64,
 }
 
-async fn run_session_end_pipeline(input: SessionEndPipelineInput) {
-    const EPISODE_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-    const VAULT_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
-
-    let now = chrono::Utc::now();
+fn formation_episode_request(input: &SessionEndPipelineInput) -> (String, StoreEpisode) {
     let session_key = format!("{:x}", Sha256::digest(input.session_id.as_bytes()));
     let source_key = format!(
         "{:x}",
         Sha256::digest(
             serde_json::to_vec(&(
+                &input.mind,
                 &input.evidence.source,
+                &input.evidence.evidence,
+                input.evidence.version,
+                input.evidence.truncated,
                 input.extractor.as_ref().map(|extractor| extractor.model())
             ))
             .expect("source serialization")
         )
     );
-    let mut evidence = input.evidence;
+    let mut evidence = input.evidence.clone();
+    evidence.candidates.clear();
+    evidence.rejected_candidates = 0;
+    evidence.extraction = omegon_memory::ExtractionOutcome::Disabled;
     if let Some(extractor) = &input.extractor {
         evidence.extraction = omegon_memory::ExtractionOutcome::Pending {
             model: extractor.model().into(),
         };
     }
 
+    let date = evidence
+        .evidence
+        .last()
+        .and_then(|item| chrono::DateTime::parse_from_rfc3339(&item.recorded_at).ok())
+        .map(|timestamp| timestamp.date_naive().to_string());
+    (
+        format!("session:{session_key}:formation-v2:{source_key}"),
+        StoreEpisode {
+            mind: input.mind.clone(),
+            title: format!("Session memory: {}", input.session_id),
+            narrative: evidence.narrative(),
+            date,
+            affected_nodes: vec![],
+            affected_changes: vec![],
+            files_changed: vec![],
+            tags: vec!["auto".into(), "formation-v2".into()],
+            tool_calls_count: None,
+            formation: Some(Box::new(evidence)),
+        },
+    )
+}
+
+async fn run_session_end_pipeline(input: SessionEndPipelineInput) {
+    const EPISODE_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+    const VAULT_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+    tracing::debug!(
+        turns = input.turns,
+        tool_calls = input.tool_calls,
+        duration_secs = input.duration_secs,
+        "advisory session statistics for memory capture"
+    );
+    let (operation_id, request) = formation_episode_request(&input);
+    let evidence = request
+        .formation
+        .as_deref()
+        .expect("formation request")
+        .clone();
     let episode_cancellation = tokio_util::sync::CancellationToken::new();
     let episode =
         input
             .memory_binding
             .invoke(crate::memory_service::MemoryRequestV1::ApplyMutation {
                 scope: crate::memory_service::MemoryScopeV1::Project,
-                operation_id: format!("session:{session_key}:formation-v1:{source_key}"),
-                mutation: MemoryMutation::StoreEpisode {
-                    request: StoreEpisode {
-                        mind: input.mind.clone(),
-                        title: format!(
-                            "Session {}: {}t {}tc ({:.0}s)",
-                            now.format("%Y-%m-%d"),
-                            input.turns,
-                            input.tool_calls,
-                            input.duration_secs
-                        ),
-                        narrative: evidence.narrative(),
-                        date: Some(now.format("%Y-%m-%d").to_string()),
-                        affected_nodes: vec![],
-                        affected_changes: vec![],
-                        files_changed: vec![],
-                        tags: vec!["auto".into()],
-                        tool_calls_count: Some(input.tool_calls),
-                        formation: Some(Box::new(evidence.clone())),
-                    },
-                },
+                operation_id: operation_id.clone(),
+                mutation: MemoryMutation::StoreEpisode { request },
                 cancellation: episode_cancellation.clone(),
             });
     let stored = match tokio::time::timeout(EPISODE_PHASE_TIMEOUT, episode).await {
@@ -430,9 +456,7 @@ async fn run_session_end_pipeline(input: SessionEndPipelineInput) {
                 .memory_binding
                 .invoke(crate::memory_service::MemoryRequestV1::ApplyMutation {
                     scope: crate::memory_service::MemoryScopeV1::Project,
-                    operation_id: format!(
-                        "session:{session_key}:formation-v1:{source_key}:complete"
-                    ),
+                    operation_id: format!("{operation_id}:complete"),
                     mutation: MemoryMutation::CompleteFormation {
                         episode_id,
                         formation: Box::new(completed),
@@ -1643,6 +1667,135 @@ mod tests {
         let replacement = second.expect("explicit empty replacement must retire prior live memory");
         assert_eq!(replacement.source, "memory");
         assert!(replacement.content.is_empty());
+    }
+
+    fn adversarial_input() -> SessionEndPipelineInput {
+        SessionEndPipelineInput {
+            mind: "test".into(),
+            memory_binding: Default::default(),
+            extractor: None,
+            evidence: formation::sample_evidence(),
+            session_id: "synthetic-session".into(),
+            status_root: Default::default(),
+            turns: 1,
+            tool_calls: 1,
+            duration_secs: 1.0,
+        }
+    }
+
+    #[test]
+    fn adversarial_capture_replay_ignores_advisory_statistics() {
+        let mut input = adversarial_input();
+        let first = formation_episode_request(&input);
+        input.turns = 500;
+        input.tool_calls = 900;
+        input.duration_secs = 3600.0;
+        let second = formation_episode_request(&input);
+        assert_eq!(first.0, second.0);
+        assert_eq!(
+            first.1, second.1,
+            "same capture identity must bind the same payload"
+        );
+    }
+
+    #[test]
+    fn adversarial_capture_date_comes_from_evidence_and_minds_are_isolated() {
+        let mut input = adversarial_input();
+        input.evidence.evidence[0].recorded_at = "2001-01-01T00:00:00Z".into();
+        let first = formation_episode_request(&input);
+        assert_eq!(first.1.date.as_deref(), Some("2001-01-01"));
+        input.mind = "other".into();
+        assert_ne!(
+            first.0,
+            formation_episode_request(&input).0,
+            "mind scopes cannot share a capture receipt"
+        );
+    }
+
+    #[tokio::test]
+    async fn adversarial_stable_capture_payload_replays_through_managed_storage() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        let mut input = adversarial_input();
+        let (id, request) = formation_episode_request(&input);
+        assert!(id.contains(":formation-v2:"));
+        let first = feature
+            .apply_mutation(
+                id.clone(),
+                MemoryMutation::StoreEpisode { request },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(!first.replayed);
+        input.turns = 100;
+        input.tool_calls = 200;
+        input.duration_secs = 86400.0;
+        let (_, request) = formation_episode_request(&input);
+        let replay = feature
+            .apply_mutation(
+                id,
+                MemoryMutation::StoreEpisode { request },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(first.effect, replay.effect);
+        input.mind = "other".into();
+        let (id, request) = formation_episode_request(&input);
+        assert!(
+            !feature
+                .apply_mutation(
+                    id,
+                    MemoryMutation::StoreEpisode { request },
+                    CancellationToken::new()
+                )
+                .await
+                .unwrap()
+                .replayed
+        );
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
+    async fn adversarial_invalid_model_does_not_discard_source_evidence() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        let profile = crate::settings::Profile {
+            memory_extraction_model: Some("m".repeat(513)),
+            ..Default::default()
+        };
+        let feature = feature.with_capabilities(&profile, false, None);
+        let mut input = adversarial_input();
+        input.memory_binding = feature.memory_binding.clone();
+        input.extractor = feature.extractor.clone();
+        run_session_end_pipeline(input).await;
+        let payload = feature
+            .invoke(crate::memory_service::MemoryRequestV1::ListEpisodes {
+                scope: crate::memory_service::MemoryScopeV1::Project,
+                mind: "test".into(),
+                limit: 1,
+                cancellation: CancellationToken::new(),
+            })
+            .await
+            .unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        let crate::memory_service::MemoryPayloadV1::Episodes(episodes) = payload else {
+            panic!("episodes");
+        };
+        assert_eq!(
+            episodes.len(),
+            1,
+            "invalid optional model must not prevent durable capture"
+        );
+        assert!(feature.extractor.is_none());
     }
 
     #[test]

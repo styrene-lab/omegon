@@ -7,12 +7,17 @@ pub const MAX_EXCERPT_BYTES: usize = 1024;
 pub const MAX_EVIDENCE_BYTES: usize = 32_768;
 pub const MAX_CANDIDATES: usize = 32;
 pub const MAX_EXTRACTION_BYTES: usize = 65_536;
+pub const MAX_IDENTIFIER_BYTES: usize = 512;
 
 fn invalid() -> MemoryError {
     MemoryError::InvalidMutation("invalid or oversized formation evidence".into())
 }
 fn identifier(value: &str) -> bool {
-    !value.trim().is_empty() && value.len() <= 512
+    !value.trim().is_empty() && value.len() <= MAX_IDENTIFIER_BYTES
+}
+
+fn source_identifier(value: &str) -> bool {
+    identifier(value) && !value.chars().any(char::is_control)
 }
 
 impl EpisodeFormation {
@@ -30,9 +35,9 @@ impl EpisodeFormation {
                 sequence,
                 event_id,
             } => {
-                if !identifier(session_id)
-                    || !identifier(stream_id)
-                    || !identifier(event_id)
+                if !source_identifier(session_id)
+                    || !source_identifier(stream_id)
+                    || !source_identifier(event_id)
                     || *sequence == 0
                 {
                     return Err(invalid());
@@ -40,7 +45,7 @@ impl EpisodeFormation {
                 *sequence
             }
             FormationSource::Unavailable { session_id, reason } => {
-                if !identifier(session_id)
+                if !source_identifier(session_id)
                     || !identifier(reason)
                     || !self.evidence.is_empty()
                     || !self.candidates.is_empty()
@@ -52,12 +57,15 @@ impl EpisodeFormation {
         };
         let mut ids = HashSet::new();
         let mut bytes = 0usize;
+        let mut previous_sequence = 0;
         for item in &self.evidence {
             bytes = bytes.saturating_add(item.excerpt.len());
-            if !identifier(&item.event_id)
+            if !source_identifier(&item.event_id)
                 || !ids.insert(item.event_id.as_str())
-                || item.sequence == 0
+                || item.sequence <= previous_sequence
                 || item.sequence > frontier
+                || matches!(&self.source, FormationSource::Available { event_id, sequence, .. }
+                    if item.sequence == *sequence && item.event_id != *event_id)
                 || chrono::DateTime::parse_from_rfc3339(&item.recorded_at).is_err()
                 || item.excerpt.len() > MAX_EXCERPT_BYTES
                 || bytes > MAX_EVIDENCE_BYTES
@@ -65,6 +73,7 @@ impl EpisodeFormation {
             {
                 return Err(invalid());
             }
+            previous_sequence = item.sequence;
         }
         for candidate in &self.candidates {
             if !candidate_valid(candidate, &ids) {
@@ -72,7 +81,10 @@ impl EpisodeFormation {
             }
         }
         match &self.extraction {
-            ExtractionOutcome::Complete { model } if identifier(model) => {}
+            ExtractionOutcome::Complete { model }
+                if identifier(model)
+                    && !self.evidence.is_empty()
+                    && matches!(self.source, FormationSource::Available { .. }) => {}
             ExtractionOutcome::Disabled if self.candidates.is_empty() => {}
             ExtractionOutcome::Pending { model }
                 if identifier(model) && self.candidates.is_empty() => {}

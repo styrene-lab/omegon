@@ -2459,15 +2459,19 @@ impl MemoryBackend for SqliteBackend {
         let conn = self.conn.lock().unwrap();
         let fts_query = query
             .split_whitespace()
-            .map(|w| format!("\"{w}\""))
+            .map(|w| format!("\"{}\"", w.replace('"', "\"\"")))
             .collect::<Vec<_>>()
             .join(" OR ");
+
+        if fts_query.is_empty() || k == 0 {
+            return Ok(Vec::new());
+        }
 
         let mut stmt = conn
             .prepare(
                 "SELECT e.* FROM episodes_fts efts \
              JOIN episodes e ON e.id = efts.id \
-             WHERE episodes_fts MATCH ?1 AND efts.mind = ?2 \
+              WHERE episodes_fts MATCH ?1 AND e.mind = ?2 \
               ORDER BY rank, e.id LIMIT ?3",
             )
             .map_err(|e| MemoryError::Storage(e.into()))?;

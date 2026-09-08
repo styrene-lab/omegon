@@ -1268,15 +1268,33 @@ impl MemoryBackend for InMemoryBackend {
 
     async fn search_episodes(&self, mind: &str, query: &str, k: usize) -> Result<Vec<Episode>> {
         let s = self.state.lock().unwrap();
-        let query_lower = query.to_lowercase();
-        let mut results: Vec<Episode> = s
+        let query_lower = query.replace('"', " ").to_lowercase();
+        let terms: Vec<&str> = query_lower.split_whitespace().collect();
+        if terms.is_empty() || k == 0 {
+            return Ok(Vec::new());
+        }
+        let mut results: Vec<(usize, &Episode)> = s
             .episodes
             .iter()
-            .filter(|e| e.mind == mind && e.narrative.to_lowercase().contains(&query_lower))
-            .cloned()
+            .filter(|episode| episode.mind == mind)
+            .filter_map(|episode| {
+                let text = format!("{} {}", episode.title, episode.narrative).to_lowercase();
+                let hits = terms.iter().filter(|term| text.contains(**term)).count();
+                (hits > 0).then_some((hits, episode))
+            })
             .collect();
+        results.sort_by(|(left_score, left), (right_score, right)| {
+            right_score
+                .cmp(left_score)
+                .then_with(|| right.date.cmp(&left.date))
+                .then_with(|| right.created_at.cmp(&left.created_at))
+                .then_with(|| left.id.cmp(&right.id))
+        });
         results.truncate(k);
-        Ok(results)
+        Ok(results
+            .into_iter()
+            .map(|(_, episode)| episode.clone())
+            .collect())
     }
 
     async fn export_jsonl(&self, mind: &str) -> Result<String> {
