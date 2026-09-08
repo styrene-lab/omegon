@@ -2,6 +2,58 @@
 
 ## ADDED Requirements
 
+### Requirement: Extraction enforces stream limits and terminal completion
+
+Memory extraction SHALL stop accumulating provider text at its byte limit and
+require a successful terminal event. Valid JSON followed by EOF alone is not
+successful provider completion.
+
+#### Scenario: Oversized provider output
+Given provider text deltas exceed the extraction byte budget
+When memory extraction collects the stream
+Then it rejects the overflowing delta before appending it
+And it closes the response receiver while preserving the pending source episode
+
+#### Scenario: Provider closes without Done
+Given a provider emits syntactically valid candidate JSON but no Done event
+When the stream closes
+Then extraction is recorded as unavailable rather than complete
+
+### Requirement: Capture replay identity is stable within a mind and policy
+
+Capture IDs and their source-write payloads SHALL be determined by the mind,
+captured evidence, configured extractor, and capture policy. Advisory counters and
+the wall clock at retry SHALL not change that payload. Policy upgrades SHALL use
+explicitly versioned operation namespaces and retain earlier receipts.
+
+#### Scenario: Delayed repeat changes counters
+Given the same source snapshot is processed twice with different advisory counts and durations
+When the source write is retried under the same policy
+Then the payload remains identical and the recorded operation can replay
+And another mind receives a distinct operation identity
+
+### Requirement: Excerpts do not concatenate across unavailable content
+
+An assistant excerpt SHALL remain a contiguous readable prefix. A missing,
+restricted, or oversized chunk terminates the excerpt and marks it truncated.
+
+#### Scenario: Unreadable middle chunk
+Given an assistant message has a readable prefix, an unreadable middle chunk, and a readable suffix
+When an evidence excerpt is captured
+Then the suffix is not joined to the prefix
+And the excerpt reports truncation
+
+### Requirement: Formation evidence has consistent source identities
+
+Retained evidence sequences SHALL increase strictly and agree with the source
+event ID at the frontier. Source identifiers SHALL reject control characters.
+Complete extraction SHALL require available nonempty evidence.
+
+#### Scenario: Contradictory source identity
+Given two evidence items identify different events at the same sequence
+When the formation is validated
+Then validation rejects the contradictory evidence before persistence
+
 ### Requirement: Session episodes retain substantive committed evidence
 
 Automatic episodes SHALL retain source-linked goals, decisions, attempts, outcomes,

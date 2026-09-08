@@ -27,6 +27,10 @@ Set `memoryExtractionEnabled` to `false` to disable inference while retaining
 evidence capture and ordinary memory tools. Child sessions keep automatic extraction
 disabled. Configuration takes effect when a new memory feature is constructed.
 
+Blank model specs, control characters, and specs exceeding 512 UTF-8 bytes disable
+only the extractor with a diagnostic that does not include the invalid value.
+Source evidence capture remains available.
+
 ## Evidence and outcomes
 
 The optional episode `formation` envelope records source session/stream/frontier
@@ -45,6 +49,11 @@ Extraction accepts at most 32 candidates and rejects malformed candidates,
 unsupported references, and model-supplied authority fields. Domain constants are
 authoritative for these limits.
 
+The memory provider collector enforces a 64 KiB text budget while receiving deltas.
+It requires a terminal `Done` event; valid JSON followed by EOF is insufficient.
+An unreadable or oversized assistant chunk ends the excerpt rather than joining
+text across the missing content.
+
 ## Durability and inspection
 
 Source evidence is committed before inference. A separate atomic
@@ -55,6 +64,17 @@ receipt update in the same transaction.
 Cancellation during inference leaves a durable pending record. Automatic restart
 scheduling remains later-wave work. Repeated completed operations replay their
 recorded outcome rather than duplicating episodes or reinforcing facts.
+
+Capture-policy v2 binds operation identities to the mind, retained source evidence,
+and configured extractor. Retry-time counters and wall-clock dates are excluded
+from the bound payload. Episode dates come from retained evidence when available;
+unknown dates are assigned by storage on the first write. Advisory statistics
+remain runtime diagnostics rather than evidence metadata.
+
+The database remains schema v9 and formation envelopes remain wire version 1.
+Existing capture-policy v1 records and receipts are retained. The first v2 capture
+of an earlier source can create a new policy-versioned episode; repeats within v2
+are replay-safe.
 
 Read narratives with `memory_episodes`. The complete typed envelope is preserved
 by JSONL export/import and in SQLite's `episodes.formation` column. Pending-to-complete

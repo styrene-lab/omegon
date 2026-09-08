@@ -13,6 +13,12 @@ When recall receives those terms with unmatched quotes or FTS-like operators
 Then retrieval does not surface an FTS syntax error
 And matching identifier-bearing facts remain discoverable
 
+#### Scenario: Episode search handles quoted names and title-only matches
+Given an episode whose title contains the query term
+When episode search receives that term with an unmatched quote
+Then both supported backends return the episode without an FTS syntax error
+And an empty episode query returns an empty result set
+
 ### Requirement: Operational storage failures remain observable
 
 Storage and index operational failures SHALL remain distinguishable from an

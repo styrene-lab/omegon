@@ -23,3 +23,12 @@
 - [ ] Verify migration/reopen and main-crate integration; map scenarios to tests and record red/green results.
 - [ ] Run applicable landing gates from ../../memory-modernization.md and validate this change.
 - [x] Complete the Wave 3 slice gate in verification-wave-3.md; keep the remaining checkpoint/queue tasks open.
+
+## 4. Post-acceptance adversarial hardening
+<!-- specs: memory/formation -->
+
+- [x] RED/GREEN: Enforce extraction byte limits during streaming and require terminal Done.
+- [x] RED/GREEN: Make capture identity and payload stable across advisory changes and mind scopes.
+- [x] RED/GREEN: Stop assistant excerpts at unavailable chunks and enforce source identity consistency.
+- [x] Verify legacy invalid-model diagnostics preserve valid source evidence.
+- [x] Complete final rechecks and handoff in adversarial-review-wave-3.md before Wave 4.

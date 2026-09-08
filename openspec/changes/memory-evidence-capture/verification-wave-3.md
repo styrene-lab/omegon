@@ -4,6 +4,9 @@
 
 Branch: `fix/memory-formation-wave3`, based on the accepted initial-wave branch.
 Implementation and test revision: `f90e793e`.
+The later [post-acceptance adversarial review](adversarial-review-wave-3.md)
+reproduced additional defects and records their fixes. This original gate record
+is retained as historical evidence, not a substitute for that follow-up verdict.
 Participating changes: evidence capture, capability independence, and the minimal
 episode-provenance slice. Full fact applicability, lifecycle-authority admission,
 component status, interval checkpoints, durable scheduling, and automatic pending

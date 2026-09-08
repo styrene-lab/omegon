@@ -22,6 +22,17 @@ And extraction unavailability is distinguishable from an empty extraction result
 
 ## ADDED Requirements
 
+### Requirement: Invalid extraction configuration does not discard evidence
+
+Invalid optional extraction model configuration SHALL disable that extractor with
+a content-free diagnostic while retaining evidence capture and other capabilities.
+
+#### Scenario: Oversized model configuration
+Given the configured extraction model exceeds the supported identifier bound
+When a session source is captured
+Then the evidence episode is retained without invoking the invalid extractor
+And the model value is not copied into diagnostics
+
 ### Requirement: Extraction models use independently configurable host routing
 
 Parent sessions SHALL configure extraction independently of embedding discovery.

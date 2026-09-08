@@ -21,3 +21,9 @@
 - [ ] Verify no-agent compilation, setup behavior, non-interactive status, and replay/reopen of pending indexing state.
 - [ ] Record scenario mappings and red/green evidence; run applicable landing gates from ../../memory-modernization.md and validate this change.
 - [x] Complete the scoped Wave 3 gate in ../memory-evidence-capture/verification-wave-3.md; indexing repair remains later-wave work.
+
+## 4. Adversarial configuration isolation
+<!-- specs: memory/models -->
+
+- [x] RED/GREEN: Reject invalid model configuration before it can prevent source persistence.
+- [x] Complete the compatibility and landing recheck in ../memory-evidence-capture/adversarial-review-wave-3.md.

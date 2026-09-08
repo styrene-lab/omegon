@@ -20,3 +20,9 @@
 - [ ] Map every scenario to tests and record red/green results, FTS-only behavior, and main-crate tool integration checks.
 - [x] Complete the Wave 1 landing/adversarial gates documented in verification-wave-1.md; retain Wave 4 requirements as pending.
 - [ ] Run applicable landing gates from ../../memory-modernization.md and validate this change.
+
+## 4. Adversarial episode-search parity
+<!-- specs: memory/search-stability -->
+
+- [x] RED/GREEN: Fix quoted episode queries, title matching, and empty-query behavior across both backends.
+- [x] Complete the final landing recheck in ../memory-evidence-capture/adversarial-review-wave-3.md.
