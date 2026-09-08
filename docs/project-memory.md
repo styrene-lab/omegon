@@ -33,7 +33,7 @@ Project memory gives agents persistent knowledge across sessions. It operates at
 - **Task-completion facts**: Write/edit tool calls queue `Recent Work` facts with 2-day half-life, capturing mid-term "what was accomplished" continuity.
 - **Structural pruning ceiling**: `computeConfidence()` caps effective half-life at 90 days regardless of reinforcement count. Per-section LLM archival pass fires at session_start when any section exceeds 60 facts.
 - **Mind-scoped durability**: Durable facts, vectors, edges, and episodes are isolated by mind label. The host selects the active mind scope; the managed version-1 service does not expose a standalone durable mind-record or parent-mutation API.
-- **JSONL sync**: `facts.jsonl` exported for git tracking; `merge=union` gitattribute enables multi-branch fact merging. Volatile runtime scoring metadata (confidence, reinforcement counts, decay scores) omitted from exports for stable diffs.
+- **JSONL sync**: `facts.jsonl` exports active and historical facts for git tracking. Modern records include persisted confidence, reinforcement state, and source-session metadata in an optional `operational` object. Computed retrieval/decay scores remain transient. Legacy updates that omit `operational` preserve the destination's existing state. Lamport versions control replacement; equal or older versions do not overwrite a record. The `merge=union` gitattribute enables multi-branch fact merging.
 - **Global knowledge base**: Cross-project facts stored in `~/.config/omegon/global-memory.db`.
 
 ## Key Files

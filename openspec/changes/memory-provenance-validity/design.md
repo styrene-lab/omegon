@@ -37,3 +37,24 @@ document portable fields versus local access/salience metadata.
 Render compact provenance with an evidence handle. Treat imported content as data;
 its text cannot change authority, applicability, or harness instruction precedence.
 An evidence reference provides attribution, not authorization to execute content.
+
+## Wave 5 transport prerequisite
+
+Export all fact statuses before adding richer validity metadata. Active-only exports
+lose correction history and can leave exported edges without their historical endpoints.
+The additive `JsonlFact.operational` object carries persisted confidence, reinforcement
+count/time, decay rate, last access, source session, lifecycle timestamps, and jj change identity.
+Computed relevance and effective decay scores remain transient.
+
+This changes the earlier stable-diff choice to omit operational metadata: reliable
+round-trip state takes priority over suppressing legitimate persisted-state changes.
+Newer modern records replace operational state; legacy records preserve it on update.
+New legacy imports keep the existing initialization defaults. Equal/older versions
+remain no-ops, including metadata-only differences. An absent source uses an empty
+SQLite source value mapped to `None`, rather than inventing the label `manual`.
+No schema change is needed for this transport slice; the database stays at v10.
+
+Validate operational numeric bounds and RFC3339 timestamps before mutation. Reject
+semantic validation failures atomically with the import batch and its receipt.
+Existing malformed-line accounting remains in place. Export must propagate fact-row
+read errors instead of returning an apparently complete document with missing history.

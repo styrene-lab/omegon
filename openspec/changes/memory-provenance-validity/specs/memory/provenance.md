@@ -47,6 +47,18 @@ Then its content and lifecycle status remain intact
 And absent evidence remains explicitly unknown
 And transport alone does not reinforce the fact
 
+#### Scenario: Historical records retain operational state in transport
+Given active, archived, dormant, and superseded facts with persisted confidence and reinforcement metadata
+When JSONL export is imported into an empty supported backend
+Then all four lifecycle populations and their operational state are preserved
+And correction edges retain their historical endpoints
+
+#### Scenario: Legacy update cannot reset known operational state
+Given a destination fact with known confidence and reinforcement timestamps
+When a newer legacy JSONL record omits operational metadata
+Then the destination retains that operational state
+And an equal or older record does not replace it
+
 #### Scenario: Migration fails before completion
 Given a supported legacy database and an injected failure during provenance migration
 When migration executes

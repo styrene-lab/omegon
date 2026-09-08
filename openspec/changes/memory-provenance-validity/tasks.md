@@ -25,3 +25,10 @@
 - [ ] GREEN: Implement migration and schema-contract updates preserving legacy unknowns and operational metadata.
 - [ ] Verify vault idempotency/path boundaries and both backends; record scenario mappings and red/green outcomes.
 - [ ] Run applicable landing gates from ../../memory-modernization.md and validate this change.
+
+## 4. Wave 5 transport prerequisite
+<!-- specs: memory/provenance -->
+
+- [x] RED/GREEN: Preserve all four fact statuses and operational metadata across SQLite/in-memory transport; retain unknown source labels.
+- [x] Verify legacy-update preservation, modern version-controlled replacement, idempotency, historical edge endpoints, reopen, and rejected-batch receipt rollback.
+- [x] Record the transport landing gate and same-executor adversarial review in verification-wave-5-transport.md.

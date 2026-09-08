@@ -18,7 +18,9 @@ at `f90e793e`, with
 [formation evidence and gate results](changes/memory-evidence-capture/verification-wave-3.md).
 Wave 4 is **accepted** at `fa8b0959`; see its
 [verification record](changes/memory-retrieval-contract/verification-wave-4.md).
-Waves 5–8 remain **planned**.
+Wave 5 is **implementing**, beginning with the
+[transport prerequisite](changes/memory-provenance-validity/verification-wave-5-transport.md).
+Waves 6–8 remain **planned**.
 The [post-Wave-3 adversarial review](changes/memory-evidence-capture/adversarial-review-wave-3.md)
 is accepted at `987272da`; six reproduced findings were fixed before Wave 4.
 Consult those records for gate outcomes rather
