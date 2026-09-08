@@ -71,7 +71,8 @@ from the bound payload. Episode dates come from retained evidence when available
 unknown dates are assigned by storage on the first write. Advisory statistics
 remain runtime diagnostics rather than evidence metadata.
 
-The database remains schema v9 and formation envelopes remain wire version 1.
+Formation envelopes remain wire version 1; the subsequent retrieval wave advances
+the database to schema v10 without changing that envelope.
 Existing capture-policy v1 records and receipts are retained. The first v2 capture
 of an earlier source can create a new policy-versioned episode; repeats within v2
 are replay-safe.
@@ -83,11 +84,12 @@ produces an error rather than silently disappearing.
 
 ## Schema compatibility
 
-Schema v9 adds the nullable formation column. Initialized project stores on schemas
-v5–v8 migrate through the existing backup/verification workflow before startup opens
+Schema v9 introduced the nullable formation column; schema v10 retains it and adds
+vector identity metadata. Initialized project stores on schemas v5–v9 migrate
+through the existing backup/verification workflow before startup opens
 them. Legacy episodes retain absent evidence as unknown. Separately managed stores
-must use the explicit migration workflow before opening with a v9 backend; older
-binaries cannot open a v9 store.
+must use the explicit migration workflow before opening with a v10 backend; older
+binaries cannot open a v10 store.
 
 Inspect the project migration state with:
 

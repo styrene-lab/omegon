@@ -9,17 +9,20 @@
 ## 2. Embedding identity and explanatory ranking
 <!-- specs: memory/retrieval -->
 
-- [ ] RED: Add equal-dimension/different-model, unknown legacy space, repair replay, fused-score rendering, and graph-conflict cases.
-- [ ] GREEN: Add embedding-space metadata, compatible-query enforcement, repair state, named score components, and relation-aware bounded expansion.
-- [ ] REFACTOR: Share the public domain contract between MemoryProvider, managed service, and MemoryFeature adapters.
+- [x] RED: Reproduce unidentified equal-dimensional vector comparison and missing score/conflict metadata; add model/revision/pipeline/dimension drift fixtures.
+- [x] GREEN: Persist explicit embedding space and source hashes, expose per-fact index state, and enforce identified query comparison.
+- [x] Add named channel scores, bounded top-k collection, directional graph evidence, conflict labels, and current/historical supersession behavior.
+- [x] Share domain contracts and score formatting between standalone and live managed adapters; preserve legacy hybrid response envelopes unless diagnostics are requested.
 
 ## 3. Verification
 <!-- specs: memory/retrieval, memory/search-stability -->
 
-- [ ] Verify vector migration/reopen and failed-repair atomicity; update wire/schema fixtures where changed.
-- [ ] Map every scenario to tests and record red/green results, FTS-only behavior, and main-crate tool integration checks.
+- [x] Verify schema-v9 migration to v10, reopen, unknown legacy identity, stale content fingerprints, and failed-repair rollback; regenerate the schema contract.
+- [x] Exercise the real backfill CLI against a local fake server, including `--cwd`, ready-vector skipping, and unchanged fact reinforcement/version.
+- [x] Verify Ollama digest-change fencing and optional local artifact identity/shape boundaries with controlled tests.
+- [x] Complete scenario mappings, final gates, and adversarial verdict in verification-wave-4.md.
 - [x] Complete the Wave 1 landing/adversarial gates documented in verification-wave-1.md; retain Wave 4 requirements as pending.
-- [ ] Run applicable landing gates from ../../memory-modernization.md and validate this change.
+- [x] Run applicable landing gates from ../../memory-modernization.md and validate this change.
 
 ## 4. Adversarial episode-search parity
 <!-- specs: memory/search-stability -->

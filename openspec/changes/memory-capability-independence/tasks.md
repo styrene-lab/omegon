@@ -27,3 +27,11 @@
 
 - [x] RED/GREEN: Reject invalid model configuration before it can prevent source persistence.
 - [x] Complete the compatibility and landing recheck in ../memory-evidence-capture/adversarial-review-wave-3.md.
+
+## 5. Wave 4 explicit indexing repair
+<!-- specs: memory/models -->
+
+- [x] Route automatic indexing and recall through identified generation, with bounded waits and cooperative cancellation.
+- [x] Expose missing/legacy/incompatible/stale/ready per-fact state and preserve facts when generation or version-checked writes fail.
+- [x] Verify explicit CLI repair, ready-vector skipping, digest drift, and no reinforcement from repair.
+- [x] Complete the Wave 4 gate in ../memory-retrieval-contract/verification-wave-4.md; durable retry scheduling and full component status remain open.

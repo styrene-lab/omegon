@@ -19,6 +19,10 @@ Wave 3's independent extraction and evidence-backed formation slice is accepted
 at `f90e793e`;
 see its [verification record](changes/memory-evidence-capture/verification-wave-3.md).
 
+Wave 4 is accepted at `fa8b0959`: identified vectors, explicit score/relationship
+signals, schema-v10 migration, and the verified repair CLI. See its
+[verification record](changes/memory-retrieval-contract/verification-wave-4.md).
+
 The [phased execution plan](memory-modernization-execution.md) defines wave entry
 criteria, TDD verification, adversarial review, and acceptance/handoff gates.
 
