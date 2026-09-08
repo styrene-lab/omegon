@@ -463,6 +463,9 @@ impl InMemoryBackend {
             }
             match serde_json::from_str::<JsonlRecord>(trimmed) {
                 Ok(JsonlRecord::Fact(jf)) => {
+                    if let Some(operational) = &jf.operational {
+                        operational.validate()?;
+                    }
                     persisted_lamport_version(jf.version)?;
                     let content_hash = jf
                         .content_hash
@@ -475,7 +478,7 @@ impl InMemoryBackend {
                             updated.section = jf.section;
                             updated.mind = jf.mind;
                             updated.status = jf.status;
-                            updated.source = jf.source;
+                            updated.source = jf.source.filter(|source| !source.is_empty());
                             updated.content_hash = Some(content_hash);
                             updated.superseded_by = jf.supersedes;
                             updated.decay_profile = jf.decay_profile;
@@ -483,6 +486,10 @@ impl InMemoryBackend {
                             updated.layer = jf.layer;
                             updated.tags = jf.tags;
                             updated.version = jf.version;
+                            updated.created_at = jf.created_at;
+                            if let Some(operational) = jf.operational {
+                                operational.apply_to(&mut updated);
+                            }
                             state.version_clock = state.version_clock.max(jf.version);
                             Self::insert_fact(state, jf.id, updated)?;
                             stats.reinforced += 1;
@@ -491,7 +498,7 @@ impl InMemoryBackend {
                         }
                     } else {
                         state.version_clock = state.version_clock.max(jf.version);
-                        let fact = Fact {
+                        let mut fact = Fact {
                             id: jf.id.clone(),
                             mind: jf.mind,
                             content: jf.content,
@@ -505,7 +512,7 @@ impl InMemoryBackend {
                             created_at: jf.created_at,
                             version: jf.version,
                             superseded_by: jf.supersedes,
-                            source: jf.source,
+                            source: jf.source.filter(|source| !source.is_empty()),
                             content_hash: Some(content_hash),
                             last_accessed: None,
                             created_session: None,
@@ -516,6 +523,9 @@ impl InMemoryBackend {
                             layer: jf.layer,
                             tags: jf.tags,
                         };
+                        if let Some(operational) = jf.operational {
+                            operational.apply_to(&mut fact);
+                        }
                         Self::insert_fact(state, jf.id, fact)?;
                         stats.imported += 1;
                     }
@@ -1363,14 +1373,12 @@ impl MemoryBackend for InMemoryBackend {
         let mut lines = Vec::new();
 
         // Facts (sorted by id for determinism)
-        let mut facts: Vec<&Fact> = s
-            .facts
-            .values()
-            .filter(|f| f.mind == mind && f.status == FactStatus::Active)
-            .collect();
+        let mut facts: Vec<&Fact> = s.facts.values().filter(|f| f.mind == mind).collect();
         facts.sort_by(|a, b| a.id.cmp(&b.id));
         for fact in facts {
+            FactOperationalState::from(fact).validate()?;
             let record = JsonlRecord::Fact(JsonlFact {
+                operational: Some(Box::new(FactOperationalState::from(fact))),
                 id: fact.id.clone(),
                 mind: fact.mind.clone(),
                 content: fact.content.clone(),

@@ -636,12 +636,11 @@ pub enum JsonlRecord {
     Mind(MindRecord),
 }
 
-/// Minimal fact representation in the JSONL transport format.
-/// The JSONL contains a subset of the full Fact fields — DB-only fields
-/// (confidence, reinforcement_count, decay_rate, etc.) are NOT in the JSONL.
-/// These are reconstructed from defaults on import.
+/// Fact transport. Legacy records omit operational state; modern exports retain it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonlFact {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operational: Option<Box<FactOperationalState>>,
     pub id: String,
     pub mind: String,
     pub content: String,
@@ -671,6 +670,79 @@ pub struct JsonlFact {
     /// Searchable tags for domain classification.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+}
+
+/// Persisted operational state, transported without reinforcement or clock resets.
+/// Absence on a legacy record means unknown, not a request to reset existing state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FactOperationalState {
+    pub confidence: f64,
+    pub reinforcement_count: u32,
+    pub decay_rate: f64,
+    pub last_reinforced: String,
+    pub last_accessed: Option<String>,
+    pub created_session: Option<String>,
+    pub superseded_at: Option<String>,
+    pub archived_at: Option<String>,
+    pub jj_change_id: Option<String>,
+}
+
+impl From<&Fact> for FactOperationalState {
+    fn from(fact: &Fact) -> Self {
+        Self {
+            confidence: fact.confidence,
+            reinforcement_count: fact.reinforcement_count,
+            decay_rate: fact.decay_rate,
+            last_reinforced: fact.last_reinforced.clone(),
+            last_accessed: fact.last_accessed.clone(),
+            created_session: fact.created_session.clone(),
+            superseded_at: fact.superseded_at.clone(),
+            archived_at: fact.archived_at.clone(),
+            jj_change_id: fact.jj_change_id.clone(),
+        }
+    }
+}
+
+impl FactOperationalState {
+    pub fn validate(&self) -> crate::backend::Result<()> {
+        if !self.confidence.is_finite()
+            || !(0.0..=1.0).contains(&self.confidence)
+            || !self.decay_rate.is_finite()
+            || self.decay_rate < 0.0
+        {
+            return Err(crate::MemoryError::InvalidMutation(
+                "invalid fact operational numeric state".into(),
+            ));
+        }
+        for time in [
+            Some(&self.last_reinforced),
+            self.last_accessed.as_ref(),
+            self.superseded_at.as_ref(),
+            self.archived_at.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if chrono::DateTime::parse_from_rfc3339(time).is_err() {
+                return Err(crate::MemoryError::InvalidMutation(
+                    "invalid fact operational timestamp".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn apply_to(self, fact: &mut Fact) {
+        fact.confidence = self.confidence;
+        fact.reinforcement_count = self.reinforcement_count;
+        fact.decay_rate = self.decay_rate;
+        fact.last_reinforced = self.last_reinforced;
+        fact.last_accessed = self.last_accessed;
+        fact.created_session = self.created_session;
+        fact.superseded_at = self.superseded_at;
+        fact.archived_at = self.archived_at;
+        fact.jj_change_id = self.jj_change_id;
+    }
 }
 
 /// Mind record in the JSONL transport.
@@ -703,6 +775,7 @@ mod tests {
     #[test]
     fn jsonl_fact_round_trip() {
         let fact = JsonlFact {
+            operational: None,
             id: "abc123".into(),
             mind: "default".into(),
             content: "Some architecture fact".into(),

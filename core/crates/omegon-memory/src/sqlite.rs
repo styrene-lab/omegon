@@ -924,13 +924,15 @@ impl SqliteBackend {
                 tracing::warn!(section = %section_str, "unknown section in DB — defaulting to Architecture");
                 Section::Architecture
             });
-        let status = serde_json::from_value::<FactStatus>(serde_json::Value::String(
-            status_str.clone(),
-        ))
-        .unwrap_or_else(|_| {
-            tracing::warn!(status = %status_str, "unknown status in DB — defaulting to Active");
-            FactStatus::Active
-        });
+        let status =
+            serde_json::from_value::<FactStatus>(serde_json::Value::String(status_str.clone()))
+                .map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        row.as_ref().column_index("status").unwrap_or(0),
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?;
 
         Ok(Fact {
             id: row.get("id")?,
@@ -950,7 +952,7 @@ impl SqliteBackend {
             created_at: row.get("created_at")?,
             version: row.get::<_, i64>("version")? as u64,
             superseded_by: row.get::<_, Option<String>>("supersedes")?,
-            source: row.get("source")?,
+            source: row.get::<_, Option<String>>("source")?.filter(|source| !source.is_empty()),
             content_hash: Some(row.get::<_, String>("content_hash")?),
             last_accessed: row.get("last_accessed")?,
             created_session: row.get("created_session")?,
@@ -1042,6 +1044,9 @@ impl SqliteBackend {
             }
             match serde_json::from_str::<JsonlRecord>(trimmed) {
                 Ok(JsonlRecord::Fact(jf)) => {
+                    if let Some(operational) = &jf.operational {
+                        operational.validate()?;
+                    }
                     let incoming_version = persisted_lamport_version(jf.version)?;
                     self.ensure_mind(tx, &jf.mind)
                         .map_err(|error| MemoryError::Storage(error.into()))?;
@@ -1073,7 +1078,7 @@ impl SqliteBackend {
                         tx.execute(
                             "UPDATE facts SET mind = ?1, content = ?2, section = ?3, status = ?4, source = ?5, content_hash = ?6, supersedes = ?7, decay_profile = ?8, version = ?9, persona_id = ?10, layer = ?11, tags = ?12 WHERE id = ?13",
                             params![jf.mind, jf.content, section.trim_matches('"'),
-                                status.trim_matches('"'), jf.source.as_deref().unwrap_or("manual"),
+                                status.trim_matches('"'), jf.source.as_deref().unwrap_or(""),
                                 content_hash, jf.supersedes, profile.trim_matches('"'), incoming_version,
                                 jf.persona_id, jf.layer, tags, jf.id],
                         ).map_err(|error| MemoryError::Storage(error.into()))?;
@@ -1083,11 +1088,21 @@ impl SqliteBackend {
                             "INSERT INTO facts (id, mind, section, content, status, created_at, source, content_hash, confidence, last_reinforced, reinforcement_count, decay_rate, decay_profile, version, supersedes, persona_id, layer, tags) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,1.0,?6,1,0.05,?9,?10,?11,?12,?13,?14)",
                             params![jf.id, jf.mind, section.trim_matches('"'), jf.content,
                                 status.trim_matches('"'), jf.created_at,
-                                jf.source.as_deref().unwrap_or("manual"), content_hash,
+                                jf.source.as_deref().unwrap_or(""), content_hash,
                                 profile.trim_matches('"'), incoming_version, jf.supersedes,
                                 jf.persona_id, jf.layer, tags],
                         ).map_err(|error| MemoryError::Storage(error.into()))?;
                         stats.imported += 1;
+                    }
+                    tx.execute(
+                        "UPDATE facts SET created_at=?1 WHERE id=?2",
+                        params![jf.created_at, jf.id],
+                    )
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                    if let Some(op) = jf.operational {
+                        tx.execute("UPDATE facts SET confidence=?1, reinforcement_count=?2, decay_rate=?3, last_reinforced=?4, last_accessed=?5, created_session=?6, superseded_at=?7, archived_at=?8, jj_change_id=?9 WHERE id=?10",
+                            params![op.confidence,op.reinforcement_count,op.decay_rate,op.last_reinforced,op.last_accessed,op.created_session,op.superseded_at,op.archived_at,op.jj_change_id,jf.id])
+                            .map_err(|error| MemoryError::Storage(error.into()))?;
                     }
                 }
                 Ok(JsonlRecord::Episode(episode)) => {
@@ -2566,15 +2581,17 @@ impl MemoryBackend for SqliteBackend {
 
         // Facts
         let mut stmt = conn
-            .prepare("SELECT * FROM facts WHERE mind = ?1 AND status = 'active' ORDER BY id")
+            .prepare("SELECT * FROM facts WHERE mind = ?1 ORDER BY id")
             .map_err(|e| MemoryError::Storage(e.into()))?;
         let facts: Vec<Fact> = stmt
             .query_map(params![mind], Self::row_to_fact)
             .map_err(|e| MemoryError::Storage(e.into()))?
-            .filter_map(|r| r.map_err(|e| tracing::debug!("row deser: {e}")).ok())
-            .collect();
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| MemoryError::Storage(error.into()))?;
         for f in &facts {
+            FactOperationalState::from(f).validate()?;
             let record = JsonlRecord::Fact(JsonlFact {
+                operational: Some(Box::new(FactOperationalState::from(f))),
                 id: f.id.clone(),
                 mind: f.mind.clone(),
                 content: f.content.clone(),
