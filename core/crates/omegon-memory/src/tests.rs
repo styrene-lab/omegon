@@ -51,6 +51,7 @@ async fn test_page_snapshot_excludes_late_old_version_import(b: &dyn MemoryBacke
         .unwrap();
     assert_eq!(first.total, 3);
     let late = JsonlRecord::Fact(JsonlFact {
+        lifecycle_inference: None,
         operational: None,
         id: "late-old-version-import".into(),
         mind: "page-snapshot".into(),
@@ -925,6 +926,7 @@ async fn test_mutation_replay_and_conflict(b: &dyn MemoryBackend) {
     ));
 
     let jsonl = serde_json::to_string(&JsonlRecord::Fact(JsonlFact {
+        lifecycle_inference: None,
         operational: None,
         id: "operation-jsonl-fact".into(),
         mind: "operation-jsonl".into(),
@@ -1202,6 +1204,7 @@ async fn test_duplicate_target_and_nonfinite_embedding_rejected(b: &dyn MemoryBa
 
 async fn test_jsonl_batch_rollback(b: &dyn MemoryBackend) {
     let fact = JsonlRecord::Fact(JsonlFact {
+        lifecycle_inference: None,
         operational: None,
         id: "rollback-fact".into(),
         mind: "jsonl-rollback".into(),
@@ -1239,6 +1242,7 @@ async fn test_jsonl_batch_rollback(b: &dyn MemoryBackend) {
 async fn test_jsonl_import_advances_lamport_clock(b: &dyn MemoryBackend) {
     let imported = JsonlRecord::Fact(JsonlFact {
         id: "lamport-high-water".into(),
+        lifecycle_inference: None,
         operational: None,
         mind: "lamport-high-water".into(),
         content: "Imported high version".into(),
@@ -1267,6 +1271,7 @@ async fn test_jsonl_import_advances_lamport_clock(b: &dyn MemoryBackend) {
 async fn test_jsonl_rejects_unpersistable_lamport_version(b: &dyn MemoryBackend) {
     let imported = JsonlRecord::Fact(JsonlFact {
         id: "lamport-overflow".into(),
+        lifecycle_inference: None,
         operational: None,
         mind: "lamport-overflow".into(),
         content: "Outside SQLite integer domain".into(),
@@ -1296,6 +1301,7 @@ async fn test_deterministic_fts_fallback(b: &dyn MemoryBackend) {
         .map(|index| {
             let id = format!("deterministic-{index:02}");
             JsonlRecord::Fact(JsonlFact {
+                lifecycle_inference: None,
                 operational: None,
                 id: id.clone(),
                 mind: "deterministic-fts".into(),

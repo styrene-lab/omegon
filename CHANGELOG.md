@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Inferred lifecycle summaries now persist as pending candidates with declared artifact references and proposed supersession intent. They are excluded from recall, ambient/pinned context, indexing, and vault publication. Schema v11 preserves candidate attribution and replay receipts; supported v5–v10 stores migrate through the existing backup workflow. JSONL transport cannot promote a retained inference to active knowledge.
+
 - Memory JSONL exports now retain archived, dormant, and superseded facts alongside active facts, including persisted confidence, reinforcement timestamps/counts, and source-session metadata. Modern imports preserve this state without reinforcement; legacy updates retain existing operational metadata. Unknown imported sources remain unknown, and corrupt fact rows fail export instead of disappearing from history.
 
 - Memory retrieval now requires model/revision/preprocessing identity and source fingerprints for vector comparison. Schema v10 preserves legacy vectors as unverified until repair. Recall reports named scores and index degradation, labels directional conflicts, and avoids obsolete supersession expansion. Embedding backfill honors `--cwd`, skips ready vectors, uses version-checked writes, and reports unavailable/incomplete repair as an error.

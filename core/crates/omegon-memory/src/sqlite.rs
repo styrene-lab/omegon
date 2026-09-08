@@ -10,10 +10,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-pub const MEMORY_SCHEMA_VERSION: i64 = 10;
+pub const MEMORY_SCHEMA_VERSION: i64 = 11;
 pub const PRIMENSUS_MIND: &str = "primensus";
 pub const LEGACY_MIND: &str = "legacy";
-pub const LEGACY_MEMORY_SCHEMA_VERSIONS: std::ops::RangeInclusive<i64> = 5..=9;
+pub const LEGACY_MEMORY_SCHEMA_VERSIONS: std::ops::RangeInclusive<i64> = 5..=10;
 use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -94,7 +94,7 @@ impl SqliteBackend {
         )?;
         if !LEGACY_MEMORY_SCHEMA_VERSIONS.contains(&source_version) {
             anyhow::bail!(
-                "memory migration only supports schema v5 through v9 sources; found v{source_version}"
+                "memory migration only supports schema v5 through v10 sources; found v{source_version}"
             );
         }
         let integrity_check: String =
@@ -142,6 +142,7 @@ impl SqliteBackend {
                     "ALTER TABLE episodes ADD COLUMN formation TEXT; -- if absent".into(),
                     "ALTER TABLE facts_vec ADD COLUMN space TEXT; -- if absent".into(),
                     "ALTER TABLE facts_vec ADD COLUMN source_hash TEXT; -- if absent".into(),
+                    "ALTER TABLE facts ADD COLUMN lifecycle_inference TEXT; -- if absent".into(),
                     format!(
                         "INSERT INTO schema_version (version, applied_at) VALUES ({MEMORY_SCHEMA_VERSION}, datetime('now'))"
                     ),
@@ -153,6 +154,7 @@ impl SqliteBackend {
                     "ALTER TABLE episodes ADD COLUMN formation TEXT; -- if absent".into(),
                     "ALTER TABLE facts_vec ADD COLUMN space TEXT; -- if absent".into(),
                     "ALTER TABLE facts_vec ADD COLUMN source_hash TEXT; -- if absent".into(),
+                    "ALTER TABLE facts ADD COLUMN lifecycle_inference TEXT; -- if absent".into(),
                     format!(
                         "INSERT INTO schema_version (version, applied_at) VALUES ({MEMORY_SCHEMA_VERSION}, datetime('now'))"
                     ),
@@ -450,6 +452,7 @@ impl SqliteBackend {
             Self::add_column_if_missing(&transaction, "episodes", "formation", "TEXT")?;
             Self::add_column_if_missing(&transaction, "facts_vec", "space", "TEXT")?;
             Self::add_column_if_missing(&transaction, "facts_vec", "source_hash", "TEXT")?;
+            Self::add_column_if_missing(&transaction, "facts", "lifecycle_inference", "TEXT")?;
             transaction.execute_batch(
                 "CREATE TABLE IF NOT EXISTS memory_operation_receipts (
                     operation_id TEXT PRIMARY KEY,
@@ -710,6 +713,7 @@ impl SqliteBackend {
             VALUES ('primensus', 'Authoritative ambient memory', datetime('now'));
 
             CREATE TABLE IF NOT EXISTS facts (
+                lifecycle_inference TEXT,
                 id                  TEXT PRIMARY KEY,
                 mind                TEXT NOT NULL DEFAULT 'primensus',
                 section             TEXT NOT NULL,
@@ -935,6 +939,15 @@ impl SqliteBackend {
                 })?;
 
         Ok(Fact {
+            lifecycle_inference: {
+                let inference = row.get::<_, Option<String>>("lifecycle_inference")?.map(|value| {
+                let inference: LifecycleInference = serde_json::from_str(&value).map_err(|error| rusqlite::Error::FromSqlConversionFailure(0,rusqlite::types::Type::Text,Box::new(error)))?;
+                validate_inference_status(&status,Some(&inference)).map_err(|error| rusqlite::Error::FromSqlConversionFailure(0,rusqlite::types::Type::Text,Box::new(error)))?;
+                Ok::<_,rusqlite::Error>(Box::new(inference))
+                }).transpose()?;
+                validate_inference_status(&status, inference.as_deref()).map_err(|error| rusqlite::Error::FromSqlConversionFailure(0,rusqlite::types::Type::Text,Box::new(error)))?;
+                inference
+            },
             id: row.get("id")?,
             mind: row.get("mind")?,
             content: row.get("content")?,
@@ -1044,6 +1057,7 @@ impl SqliteBackend {
             }
             match serde_json::from_str::<JsonlRecord>(trimmed) {
                 Ok(JsonlRecord::Fact(jf)) => {
+                    validate_inference_status(&jf.status, jf.lifecycle_inference.as_deref())?;
                     if let Some(operational) = &jf.operational {
                         operational.validate()?;
                     }
@@ -1065,6 +1079,19 @@ impl SqliteBackend {
                     }
                     let section = serde_json::to_string(&jf.section)
                         .map_err(|error| MemoryError::InvalidMutation(error.to_string()))?;
+                    let existing_inference: Option<Option<String>> = tx
+                        .query_row(
+                            "SELECT lifecycle_inference FROM facts WHERE id=?1",
+                            [&jf.id],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .map_err(|error| MemoryError::Storage(error.into()))?;
+                    if existing_inference.flatten().is_some() && jf.status != FactStatus::Pending {
+                        return Err(MemoryError::InvalidMutation(
+                            "transport cannot confirm lifecycle inference".into(),
+                        ));
+                    }
                     let profile = serde_json::to_string(&jf.decay_profile)
                         .map_err(|error| MemoryError::InvalidMutation(error.to_string()))?;
                     let status = serde_json::to_string(&jf.status)
@@ -1104,6 +1131,17 @@ impl SqliteBackend {
                             params![op.confidence,op.reinforcement_count,op.decay_rate,op.last_reinforced,op.last_accessed,op.created_session,op.superseded_at,op.archived_at,op.jj_change_id,jf.id])
                             .map_err(|error| MemoryError::Storage(error.into()))?;
                     }
+                    let inference = jf
+                        .lifecycle_inference
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()
+                        .map_err(|error| MemoryError::Storage(error.into()))?;
+                    tx.execute(
+                        "UPDATE facts SET lifecycle_inference=?1 WHERE id=?2",
+                        params![inference, jf.id],
+                    )
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
                 }
                 Ok(JsonlRecord::Episode(episode)) => {
                     if let Some(formation) = &episode.formation {
@@ -1240,18 +1278,23 @@ impl MemoryBackend for SqliteBackend {
             });
         }
 
+        let inference = match &mutation {
+            MemoryMutation::StoreLifecycleInference { inference, .. } => Some(inference.clone()),
+            _ => None,
+        };
         let effect = match mutation {
             MemoryMutation::ImportJsonl { jsonl } => {
                 jsonl_import_effect(self.import_jsonl_transaction(&transaction, &jsonl)?)
             }
-            MemoryMutation::StoreFact { request } => {
+            MemoryMutation::StoreFact { request }
+            | MemoryMutation::StoreLifecycleInference { request, .. } => {
                 self.ensure_mind(&transaction, &request.mind)
                     .map_err(|error| MemoryError::Storage(error.into()))?;
                 let content_hash = hash::content_hash(&request.content);
                 let existing_id: Option<String> = transaction
                     .query_row(
-                        "SELECT id FROM facts WHERE mind = ?1 AND content_hash = ?2 AND status = 'active'",
-                        params![request.mind, content_hash],
+                        "SELECT id FROM facts WHERE mind = ?1 AND content_hash = ?2 AND status = 'active' AND ?3=0",
+                        params![request.mind, content_hash, inference.is_some()],
                         |row| row.get(0),
                     )
                     .optional()
@@ -1274,11 +1317,17 @@ impl MemoryBackend for SqliteBackend {
                         .map_err(|error| MemoryError::InvalidMutation(error.to_string()))?;
                     let profile = serde_json::to_string(&request.decay_profile)
                         .map_err(|error| MemoryError::InvalidMutation(error.to_string()))?;
+                    let pending = inference.is_some();
+                    let encoded = inference
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()
+                        .map_err(|error| MemoryError::Storage(error.into()))?;
                     transaction.execute(
-                        "INSERT INTO facts (id, mind, section, content, status, created_at, source, content_hash, confidence, last_reinforced, reinforcement_count, decay_rate, decay_profile, version) VALUES (?1,?2,?3,?4,'active',?5,?6,?7,1.0,?5,1,0.05,?8,?9)",
+                        "INSERT INTO facts (id, mind, section, content, status, created_at, source, content_hash, confidence, last_reinforced, reinforcement_count, decay_rate, decay_profile, version, lifecycle_inference) VALUES (?1,?2,?3,?4,?10,?5,?6,?7,?11,?5,?11,0.05,?8,?9,?12)",
                         params![fact_id, request.mind, section.trim_matches('"'), request.content,
                             timestamp, request.source.as_deref().unwrap_or("manual"), content_hash,
-                            profile.trim_matches('"'), version as i64],
+                            profile.trim_matches('"'), version as i64, if pending {"pending"} else {"active"}, if pending {0} else {1}, encoded],
                     ).map_err(|error| MemoryError::Storage(error.into()))?;
                     MemoryMutationEffect::FactStored {
                         fact_id,
@@ -1449,7 +1498,12 @@ impl MemoryBackend for SqliteBackend {
                 model_name,
                 embedding,
             } => {
-                Self::check_fact_precondition(&transaction, &fact)?;
+                if Self::check_fact_precondition(&transaction, &fact)?.status == FactStatus::Pending
+                {
+                    return Err(MemoryError::InvalidMutation(
+                        "pending candidates cannot be indexed".into(),
+                    ));
+                }
                 let dims = embedding.len() as u32;
                 let recorded_dims: Option<u32> = transaction
                     .query_row(
@@ -2174,7 +2228,7 @@ impl MemoryBackend for SqliteBackend {
 
         let fact_exists: bool = transaction
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM facts WHERE id = ?1)",
+                "SELECT EXISTS(SELECT 1 FROM facts WHERE id = ?1 AND status != 'pending')",
                 params![fact_id],
                 |row| row.get(0),
             )
@@ -2591,6 +2645,7 @@ impl MemoryBackend for SqliteBackend {
         for f in &facts {
             FactOperationalState::from(f).validate()?;
             let record = JsonlRecord::Fact(JsonlFact {
+                lifecycle_inference: f.lifecycle_inference.clone(),
                 operational: Some(Box::new(FactOperationalState::from(f))),
                 id: f.id.clone(),
                 mind: f.mind.clone(),
@@ -2808,7 +2863,11 @@ mod tests {
             params![version],
         )
         .unwrap();
-        conn.execute_batch("ALTER TABLE facts_vec DROP COLUMN space; ALTER TABLE facts_vec DROP COLUMN source_hash;").unwrap();
+        conn.execute_batch("ALTER TABLE facts DROP COLUMN lifecycle_inference;")
+            .unwrap();
+        if version < 10 {
+            conn.execute_batch("ALTER TABLE facts_vec DROP COLUMN space; ALTER TABLE facts_vec DROP COLUMN source_hash;").unwrap();
+        }
         if version < 9 {
             conn.execute_batch("ALTER TABLE episodes DROP COLUMN formation;")
                 .unwrap();

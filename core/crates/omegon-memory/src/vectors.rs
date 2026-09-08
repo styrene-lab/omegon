@@ -174,6 +174,7 @@ mod tests {
 
     fn stub_fact(id: &str) -> Fact {
         Fact {
+            lifecycle_inference: None,
             id: id.into(),
             mind: "test".into(),
             content: format!("fact {id}"),

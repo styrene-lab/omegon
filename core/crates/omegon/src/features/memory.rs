@@ -1274,6 +1274,49 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 let authority = args["authority"].as_str().unwrap_or("inferred");
                 let source_kind = args["source_kind"].as_str().unwrap_or("unknown");
 
+                if !matches!(authority, "explicit" | "inferred") {
+                    anyhow::bail!("invalid lifecycle authority");
+                }
+                if authority == "inferred" {
+                    let reference = |key: &str| -> anyhow::Result<Option<String>> {
+                        match args.get(key) {
+                            None | Some(Value::Null) => Ok(None),
+                            Some(Value::String(value)) => Ok(Some(value.clone())),
+                            _ => anyhow::bail!("invalid lifecycle reference field {key}"),
+                        }
+                    };
+                    let outcome = self
+                        .apply_mutation(
+                            self.tool_operation_id(call_id, "lifecycle")?,
+                            MemoryMutation::StoreLifecycleInference {
+                                request: StoreFact {
+                                    mind: self.mind.clone(),
+                                    content,
+                                    section,
+                                    decay_profile: DecayProfileName::Standard,
+                                    source: Some(format!("lifecycle:{source_kind}")),
+                                },
+                                inference: Box::new(omegon_memory::LifecycleInference {
+                                    source_kind: source_kind.into(),
+                                    artifact_ref_type: reference("artifact_ref_type")?,
+                                    artifact_ref_path: reference("artifact_ref_path")?,
+                                    artifact_ref_sub: reference("artifact_ref_sub")?,
+                                    proposed_supersedes: reference("supersedes")?,
+                                }),
+                            },
+                            cancel,
+                        )
+                        .await?;
+                    let MemoryMutationEffect::FactStored { fact_id, .. } = outcome.effect else {
+                        anyhow::bail!(
+                            "managed memory returned an unexpected lifecycle candidate effect"
+                        );
+                    };
+                    return Ok(ToolResult {content:vec![ContentBlock::Text {
+                        text:"Retained lifecycle inference pending confirmation; excluded from established knowledge.".into(),
+                    }],details:serde_json::json!({"id":fact_id,"status":"pending","replayed":outcome.replayed})});
+                }
+
                 let outcome = self
                     .apply_mutation(
                         self.tool_operation_id(call_id, "lifecycle")?,
@@ -2297,6 +2340,32 @@ mod tests {
             .unwrap_err();
 
         assert!(err.to_string().contains("invalid memory section 'Notes'"));
+    }
+
+    #[tokio::test]
+    async fn lifecycle_inference_is_pending_and_not_recalled_as_knowledge() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        let result = feature.execute("memory_ingest_lifecycle", "inferred", serde_json::json!({
+            "source_kind":"design-tree", "authority":"inferred", "section":"Decisions",
+            "content":"zircon inferred success", "artifact_ref_type":"design",
+            "artifact_ref_path":"docs/design/zircon.md", "artifact_ref_sub":"unverified-summary"
+        }), CancellationToken::new()).await.unwrap();
+        let recall = feature
+            .execute(
+                "memory_recall",
+                "recall",
+                serde_json::json!({"query":"zircon"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert_eq!(result.details["status"], "pending");
+        assert_eq!(recall.details["count"], 0);
     }
 
     #[tokio::test]

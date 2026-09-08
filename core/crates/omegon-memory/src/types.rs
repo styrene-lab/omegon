@@ -45,6 +45,7 @@ impl Section {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FactStatus {
+    Pending,
     Active,
     Dormant,
     Archived,
@@ -56,6 +57,8 @@ pub enum FactStatus {
 /// A memory fact. Mirrors FactRecord in api-types.ts.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Fact {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle_inference: Option<Box<LifecycleInference>>,
     pub id: String,
     pub mind: String,
     pub content: String,
@@ -522,6 +525,10 @@ pub struct FactPrecondition {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MemoryMutation {
+    StoreLifecycleInference {
+        request: StoreFact,
+        inference: Box<LifecycleInference>,
+    },
     ImportJsonl {
         jsonl: String,
     },
@@ -640,6 +647,8 @@ pub enum JsonlRecord {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonlFact {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle_inference: Option<Box<LifecycleInference>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operational: Option<Box<FactOperationalState>>,
     pub id: String,
     pub mind: String,
@@ -670,6 +679,55 @@ pub struct JsonlFact {
     /// Searchable tags for domain classification.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+}
+
+/// Attribution supplied with an unconfirmed lifecycle summary, not verified evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LifecycleInference {
+    pub source_kind: String,
+    pub artifact_ref_type: Option<String>,
+    pub artifact_ref_path: Option<String>,
+    pub artifact_ref_sub: Option<String>,
+    /// Proposed correction only; admission must not apply it before confirmation.
+    pub proposed_supersedes: Option<String>,
+}
+
+impl LifecycleInference {
+    pub fn validate(&self) -> crate::backend::Result<()> {
+        for value in [
+            Some(&self.source_kind),
+            self.artifact_ref_type.as_ref(),
+            self.artifact_ref_path.as_ref(),
+            self.artifact_ref_sub.as_ref(),
+            self.proposed_supersedes.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if value.trim().is_empty() || value.len() > 2048 || value.chars().any(char::is_control)
+            {
+                return Err(crate::MemoryError::InvalidMutation(
+                    "invalid lifecycle inference reference".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn validate_inference_status(
+    status: &FactStatus,
+    inference: Option<&LifecycleInference>,
+) -> crate::backend::Result<()> {
+    if (*status == FactStatus::Pending) != inference.is_some() {
+        return Err(crate::MemoryError::InvalidMutation(
+            "lifecycle inferences must remain pending".into(),
+        ));
+    }
+    if let Some(inference) = inference {
+        inference.validate()?;
+    }
+    Ok(())
 }
 
 /// Persisted operational state, transported without reinforcement or clock resets.
@@ -775,6 +833,7 @@ mod tests {
     #[test]
     fn jsonl_fact_round_trip() {
         let fact = JsonlFact {
+            lifecycle_inference: None,
             operational: None,
             id: "abc123".into(),
             mind: "default".into(),

@@ -94,18 +94,24 @@ impl InMemoryBackend {
     }
 
     fn apply_to_state(state: &mut State, mutation: MemoryMutation) -> Result<MemoryMutationEffect> {
+        let inference = match &mutation {
+            MemoryMutation::StoreLifecycleInference { inference, .. } => Some(inference.clone()),
+            _ => None,
+        };
         match mutation {
             MemoryMutation::ImportJsonl { jsonl } => {
                 let stats = Self::import_jsonl_to_state(state, &jsonl)?;
                 Ok(jsonl_import_effect(stats))
             }
-            MemoryMutation::StoreFact { request } => {
+            MemoryMutation::StoreFact { request }
+            | MemoryMutation::StoreLifecycleInference { request, .. } => {
                 let content_hash = hash::content_hash(&request.content);
                 let existing_id = state
                     .facts
                     .iter()
                     .find(|(_, fact)| {
-                        fact.mind == request.mind
+                        inference.is_none()
+                            && fact.mind == request.mind
                             && fact.content_hash.as_deref() == Some(content_hash.as_str())
                             && fact.status == FactStatus::Active
                     })
@@ -135,9 +141,14 @@ impl InMemoryBackend {
                         mind: request.mind,
                         content: request.content,
                         section: request.section,
-                        status: FactStatus::Active,
-                        confidence: 1.0,
-                        reinforcement_count: 1,
+                        status: if inference.is_some() {
+                            FactStatus::Pending
+                        } else {
+                            FactStatus::Active
+                        },
+                        confidence: if inference.is_some() { 0.0 } else { 1.0 },
+                        reinforcement_count: if inference.is_some() { 0 } else { 1 },
+                        lifecycle_inference: inference,
                         decay_rate: 0.05,
                         decay_profile: request.decay_profile,
                         last_reinforced: timestamp.clone(),
@@ -257,6 +268,7 @@ impl InMemoryBackend {
                     replacement_id.clone(),
                     Fact {
                         id: replacement_id.clone(),
+                        lifecycle_inference: None,
                         mind: replacement.mind,
                         content_hash: Some(hash::content_hash(&replacement.content)),
                         content: replacement.content,
@@ -335,6 +347,15 @@ impl InMemoryBackend {
                 embedding,
             } => {
                 Self::check_fact_precondition(state, &fact)?;
+                if state
+                    .facts
+                    .get(&fact.id)
+                    .is_some_and(|fact| fact.status == FactStatus::Pending)
+                {
+                    return Err(MemoryError::InvalidMutation(
+                        "pending candidates cannot be indexed".into(),
+                    ));
+                }
                 if let Some(existing) = state
                     .embeddings
                     .iter()
@@ -463,6 +484,7 @@ impl InMemoryBackend {
             }
             match serde_json::from_str::<JsonlRecord>(trimmed) {
                 Ok(JsonlRecord::Fact(jf)) => {
+                    validate_inference_status(&jf.status, jf.lifecycle_inference.as_deref())?;
                     if let Some(operational) = &jf.operational {
                         operational.validate()?;
                     }
@@ -473,6 +495,13 @@ impl InMemoryBackend {
                         .unwrap_or_else(|| hash::content_hash(&jf.content));
                     if let Some(existing) = state.facts.get(&jf.id) {
                         if jf.version > existing.version {
+                            if existing.lifecycle_inference.is_some()
+                                && jf.status != FactStatus::Pending
+                            {
+                                return Err(MemoryError::InvalidMutation(
+                                    "transport cannot confirm lifecycle inference".into(),
+                                ));
+                            }
                             let mut updated = existing.clone();
                             updated.content = jf.content;
                             updated.section = jf.section;
@@ -486,6 +515,7 @@ impl InMemoryBackend {
                             updated.layer = jf.layer;
                             updated.tags = jf.tags;
                             updated.version = jf.version;
+                            updated.lifecycle_inference = jf.lifecycle_inference;
                             updated.created_at = jf.created_at;
                             if let Some(operational) = jf.operational {
                                 operational.apply_to(&mut updated);
@@ -499,6 +529,7 @@ impl InMemoryBackend {
                     } else {
                         state.version_clock = state.version_clock.max(jf.version);
                         let mut fact = Fact {
+                            lifecycle_inference: jf.lifecycle_inference,
                             id: jf.id.clone(),
                             mind: jf.mind,
                             content: jf.content,
@@ -676,6 +707,7 @@ impl MemoryBackend for InMemoryBackend {
 
         let version = Self::next_version(&mut s)?;
         let fact = Fact {
+            lifecycle_inference: None,
             id: gen_id(),
             mind: req.mind,
             content: req.content,
@@ -874,6 +906,7 @@ impl MemoryBackend for InMemoryBackend {
         let new_id = gen_id();
         let ch = hash::content_hash(&replacement.content);
         let new_fact = Fact {
+            lifecycle_inference: None,
             id: new_id.clone(),
             mind: replacement.mind,
             content: replacement.content,
@@ -1083,7 +1116,10 @@ impl MemoryBackend for InMemoryBackend {
     ) -> Result<()> {
         validate_embedding(embedding)?;
         let mut s = self.state.lock().unwrap();
-        if !s.facts.contains_key(fact_id) {
+        if s.facts
+            .get(fact_id)
+            .is_none_or(|fact| fact.status == FactStatus::Pending)
+        {
             return Err(MemoryError::FactNotFound(fact_id.into()));
         }
         if let Some(existing) = s
@@ -1378,6 +1414,7 @@ impl MemoryBackend for InMemoryBackend {
         for fact in facts {
             FactOperationalState::from(fact).validate()?;
             let record = JsonlRecord::Fact(JsonlFact {
+                lifecycle_inference: fact.lifecycle_inference.clone(),
                 operational: Some(Box::new(FactOperationalState::from(fact))),
                 id: fact.id.clone(),
                 mind: fact.mind.clone(),

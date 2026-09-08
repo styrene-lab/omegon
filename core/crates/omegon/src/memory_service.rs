@@ -2088,6 +2088,7 @@ mod tests {
 
     fn jsonl_fact(id: &str, content: &str) -> String {
         serde_json::to_string(&JsonlRecord::Fact(JsonlFact {
+            lifecycle_inference: None,
             operational: None,
             id: id.into(),
             mind: MIND.into(),

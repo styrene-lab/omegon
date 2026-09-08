@@ -162,6 +162,7 @@ mod tests {
 
     fn make_fact(section: Section, content: &str) -> Fact {
         Fact {
+            lifecycle_inference: None,
             id: content.into(),
             mind: "test".into(),
             content: content.into(),
