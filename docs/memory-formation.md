@@ -102,8 +102,57 @@ These references are attribution, not verified execution evidence.
 Pending candidates are retained in JSONL and can be inspected through the backend's
 pending-status inventory. They do not enter recall, pinned context, embedding indexes,
 or vault fact publication. Retrying the same operation replays its receipt.
-Candidate confirmation and validated explicit lifecycle admission are subsequent
-Wave 5 work; changing JSONL status cannot confirm a retained inference.
+Candidate confirmation remains subsequent Wave 5 work; changing JSONL status
+cannot confirm a retained inference.
+
+## Explicit lifecycle conclusions
+
+`authority: "explicit"` requires a matching structured artifact. The authority
+string alone is insufficient. Supported references are:
+
+| Source kind / reference type | Path | Section / subreference |
+|---|---|---|
+| `design-tree` / `design` | `docs/design/*.md` or a nested design path | `Decisions` / decision title |
+| `design-tree` / `design` | Same design scope | `Constraints` / `Implementation Notes/Constraints` |
+| `openspec` / `spec` | `openspec/baseline/**/*.md` or `openspec/archive/YYYY-MM-DD-name/specs/**/*.md` | `Specs` / requirement title |
+
+Design nodes must be decided, implementing, or implemented and parse without
+diagnostics. Decision status must be `decided` and include a rationale. Specification
+conclusions require an explicit `### Requirement:` heading. Proposal paths and open
+questions are excluded.
+
+For decisions, supply `content` as `Title: rationale`. For specifications, use
+`Title: requirement description`. For constraints, supply the constraint itself.
+Matching normalizes whitespace but preserves case. For example, a decision titled
+`Use transactions` with rationale `Keep corrections atomic.` uses:
+
+```json
+{
+  "source_kind": "design-tree",
+  "authority": "explicit",
+  "section": "Decisions",
+  "content": "Use transactions: Keep corrections atomic.",
+  "artifact_ref_type": "design",
+  "artifact_ref_path": "docs/design/zircon.md",
+  "artifact_ref_sub": "Use transactions"
+}
+```
+
+Artifact reads are limited to 1 MiB and traverse repository-relative directories
+without following symlinks. The stored source identifies the exact snapshot parsed.
+It does not assert that the file remains unchanged or that a test execution occurred.
+
+To correct an active fact, include `supersedes` and `supersedes_version`. Recall
+displays the fact's version. A version mismatch or cross-mind target rejects the
+whole correction. The response includes the replacement ID, version, and source
+attribution. Retrying against the same source snapshot replays the operation;
+missing or changed artifacts produce an error rather than a new write.
+
+Explicit attribution uses a versioned JSON envelope in `Fact.source`, decoded by
+`Fact::lifecycle_conclusion()`. It survives database reopen and JSONL transport
+without a schema change; the database remains v11. Without a correction target,
+exact content/source duplicates reuse existing memory. Different evidence remains separately attributed for later
+reconciliation.
 
 Inspect the project migration state with:
 

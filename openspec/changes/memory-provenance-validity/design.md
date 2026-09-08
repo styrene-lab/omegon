@@ -77,3 +77,29 @@ or vault fact materialization. Export/import retains the pending record and reje
 promotion by changing status or stripping metadata from an existing candidate.
 Candidate source corruption is an error. Versioned confirmation and validated
 explicit artifact admission remain open; this slice changes the inferred route.
+
+## Wave 5 explicit artifact admission slice
+
+Validate explicit claims in the host's artifact adapter. Use existing opsx parsers
+for decided design decisions, implementation constraints, and baseline/archived
+specification requirements. Match case-sensitive statement text after whitespace
+normalization. Reject proposal paths, open questions, unsupported source kinds,
+and missing or mismatched references before writing memory.
+
+Read a bounded immutable snapshot through the existing descriptor-relative filesystem
+helpers. Artifact paths are repository-relative and cannot traverse symlinks or `..`.
+The snapshot SHA256 identifies the bytes parsed; it is not a claim that the file
+will remain unchanged after admission or that an execution outcome was observed.
+
+`LifecycleConclusionSource` is a typed, version-prefixed JSON envelope in the existing
+portable `Fact.source` string. This retains wire/schema compatibility at v11 while
+distinguishing new artifact attribution from legacy free-form source labels. The
+envelope records artifact kind/path/id/subreference and artifact/statement hashes.
+Its presence is provenance, not permission to execute the referenced content.
+
+The domain lowers `StoreLifecycleConclusion` into existing atomic store/supersede
+mutations. A correction requires an explicit target version and the same mind.
+Receipts bind the conclusion and source snapshot to the operation identity. Without
+a correction target, exact content/source duplicates reuse the normal reinforcement path; differing evidence
+remains separately attributed for later reconciliation. Revalidation on tool retry
+requires the same artifact snapshot; missing/changed sources are explicit errors.
