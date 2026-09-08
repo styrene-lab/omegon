@@ -8,9 +8,12 @@ assembly, and skills. Do not create a second OpenSpec root inside a crate.
 Executable tests and synthetic fixtures live beside their owning code.
 
 This document is a navigation and dependency map, not a second specification.
-Each change owns its proposal, delta specifications, design, and unchecked TDD
-tasks. Specification validation does not establish a failing test or a passing
-implementation. No implementation is claimed by these corpora.
+Each change owns its proposal, delta specifications, design, and TDD tasks.
+Specification validation does not establish a failing test or a passing
+implementation. The initial Waves 0–2 shipping slice is accepted at `f6846622`;
+its verification records identify red/green evidence, same-executor adversarial
+review, and passing landing gates. The parent corpora remain implementing for
+their later-wave requirements.
 
 The [phased execution plan](memory-modernization-execution.md) defines wave entry
 criteria, TDD verification, adversarial review, and acceptance/handoff gates.

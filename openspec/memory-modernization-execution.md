@@ -9,8 +9,13 @@ The [corpus map](memory-modernization.md) owns effort estimates and dependencies
 The nine change corpora own requirements and implementation tasks. This plan orders
 their implementation slices and defines verification gates; it is not a second backlog.
 
-All waves are **planned**. No implementation, test, benchmark, or review gate is
-claimed complete. Preserve unrelated repository work during execution.
+The initial Waves 0–2 shipping slice is **accepted** at `f6846622`. Scoped evidence is recorded in
+[Wave 0](changes/memory-evaluation-corpus/verification-wave-0.md),
+[Wave 1](changes/memory-retrieval-contract/verification-wave-1.md), and
+[Wave 2](changes/memory-context-selection/verification-wave-2.md).
+The parent corpora retain their later-wave tasks. Later waves remain **planned**.
+Consult those records for gate outcomes rather
+than inferring completion from this plan. Preserve unrelated work during execution.
 
 ## Wave sequence
 
