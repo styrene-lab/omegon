@@ -58,3 +58,22 @@ Validate operational numeric bounds and RFC3339 timestamps before mutation. Reje
 semantic validation failures atomically with the import batch and its receipt.
 Existing malformed-line accounting remains in place. Export must propagate fact-row
 read errors instead of returning an apparently complete document with missing history.
+
+## Wave 5 inferred lifecycle candidate slice
+
+`StoreLifecycleInference` creates a fresh `Pending` fact with zero reinforcement
+and zero established-confidence prior. The operation receipt provides idempotency.
+Content deduplication against active facts must not reinforce those facts; candidate
+reconciliation across separate operation identities remains later work.
+
+Schema v11 adds nullable `facts.lifecycle_inference`. Its typed attribution preserves
+the caller's source kind, artifact type/path/subreference, and proposed supersession.
+These are declared references, not validated observations or execution evidence.
+`Fact.created_at` supplies recorded time. No workspace/revision applicability fields
+are frozen in this slice. The reference is stored as data and is not dereferenced.
+
+Inferences cannot enter current/historical recall, pinned context, vector indexing,
+or vault fact materialization. Export/import retains the pending record and rejects
+promotion by changing status or stripping metadata from an existing candidate.
+Candidate source corruption is an error. Versioned confirmation and validated
+explicit artifact admission remain open; this slice changes the inferred route.

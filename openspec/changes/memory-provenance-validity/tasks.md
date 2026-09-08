@@ -32,3 +32,11 @@
 - [x] RED/GREEN: Preserve all four fact statuses and operational metadata across SQLite/in-memory transport; retain unknown source labels.
 - [x] Verify legacy-update preservation, modern version-controlled replacement, idempotency, historical edge endpoints, reopen, and rejected-batch receipt rollback.
 - [x] Record the transport landing gate and same-executor adversarial review in verification-wave-5-transport.md.
+
+## 5. Wave 5 inferred lifecycle candidates
+<!-- specs: memory/lifecycle, memory/provenance -->
+
+- [x] RED/GREEN: Reproduce active ingestion of inferred lifecycle summaries at the live tool boundary; retain them as pending candidates.
+- [x] Add typed declared-artifact attribution and proposed supersession, preserving operation replay without reinforcing identical active facts.
+- [x] Verify schema-v10 migration, reopen, transport, index/context/vault exclusion, and failed-write rollback; record final gates in verification-wave-5-candidates.md.
+- [ ] Complete validated explicit admission, confirmation, and atomic correction handling in the next lifecycle slice.

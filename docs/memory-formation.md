@@ -71,8 +71,8 @@ from the bound payload. Episode dates come from retained evidence when available
 unknown dates are assigned by storage on the first write. Advisory statistics
 remain runtime diagnostics rather than evidence metadata.
 
-Formation envelopes remain wire version 1; the subsequent retrieval wave advances
-the database to schema v10 without changing that envelope.
+Formation envelopes remain wire version 1; the database schema evolves independently
+and is currently v11.
 Existing capture-policy v1 records and receipts are retained. The first v2 capture
 of an earlier source can create a new policy-versioned episode; repeats within v2
 are replay-safe.
@@ -85,11 +85,25 @@ produces an error rather than silently disappearing.
 ## Schema compatibility
 
 Schema v9 introduced the nullable formation column; schema v10 retains it and adds
-vector identity metadata. Initialized project stores on schemas v5–v9 migrate
+vector identity metadata. Schema v11 adds pending lifecycle-inference attribution.
+Initialized project stores on schemas v5–v10 migrate
 through the existing backup/verification workflow before startup opens
 them. Legacy episodes retain absent evidence as unknown. Separately managed stores
-must use the explicit migration workflow before opening with a v10 backend; older
-binaries cannot open a v10 store.
+must use the explicit migration workflow before opening with a v11 backend; older
+binaries cannot open a v11 store.
+
+## Inferred lifecycle summaries
+
+`memory_ingest_lifecycle` with `authority: "inferred"` retains a pending candidate.
+The response includes its ID and `status: "pending"`. Candidate metadata preserves
+declared artifact references and proposed supersession without applying a correction.
+These references are attribution, not verified execution evidence.
+
+Pending candidates are retained in JSONL and can be inspected through the backend's
+pending-status inventory. They do not enter recall, pinned context, embedding indexes,
+or vault fact publication. Retrying the same operation replays its receipt.
+Candidate confirmation and validated explicit lifecycle admission are subsequent
+Wave 5 work; changing JSONL status cannot confirm a retained inference.
 
 Inspect the project migration state with:
 

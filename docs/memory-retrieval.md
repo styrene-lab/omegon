@@ -67,7 +67,7 @@ successful operation receipt exists. Concurrent fact changes reject stale writes
 This command is an explicit repair path, not an automatic durable job scheduler.
 
 Schema v10 adds nullable space and source-fingerprint columns to fact vectors.
-The existing backup/verification migration supports v5–v9 stores and preserves
+The current schema-v11 backup/verification migration supports v5–v10 stores and preserves
 unknown identity on legacy vectors. Initialized project stores migrate before
 startup opens them. Separately managed stores require the explicit migration workflow.
 
