@@ -155,6 +155,82 @@ pub struct Episode {
     /// jj change ID that created this episode (permanent, survives rebase).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jj_change_id: Option<String>,
+    /// Bounded source-linked formation evidence. Candidates are not admitted facts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formation: Option<Box<EpisodeFormation>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum FormationSource {
+    Available {
+        session_id: String,
+        stream_id: String,
+        sequence: u64,
+        event_id: String,
+    },
+    Unavailable {
+        session_id: String,
+        reason: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceKind {
+    UserStatement,
+    AssistantReport,
+    ToolResult,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceOutcome {
+    Succeeded,
+    Failed,
+    Denied,
+    NotDispatched,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FormationEvidence {
+    pub event_id: String,
+    pub sequence: u64,
+    pub recorded_at: String,
+    pub kind: EvidenceKind,
+    pub excerpt: String,
+    pub truncated: bool,
+    pub outcome: Option<EvidenceOutcome>,
+}
+
+/// An unadmitted model inference supported by references into the bounded evidence set.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryCandidate {
+    pub content: String,
+    pub section: Section,
+    pub evidence_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum ExtractionOutcome {
+    Disabled,
+    Pending { model: String },
+    Complete { model: String },
+    Unavailable { model: String, reason: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EpisodeFormation {
+    pub version: u16,
+    pub source: FormationSource,
+    pub evidence: Vec<FormationEvidence>,
+    pub candidates: Vec<MemoryCandidate>,
+    pub extraction: ExtractionOutcome,
+    pub truncated: bool,
+    pub rejected_candidates: usize,
 }
 
 /// A directional relationship between two facts.
@@ -334,6 +410,8 @@ pub struct StoreEpisode {
     pub files_changed: Vec<String>,
     pub tags: Vec<String>,
     pub tool_calls_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formation: Option<Box<EpisodeFormation>>,
 }
 
 /// Stats from a JSONL import.
@@ -393,6 +471,10 @@ pub enum MemoryMutation {
     StoreEpisode {
         request: StoreEpisode,
     },
+    CompleteFormation {
+        episode_id: String,
+        formation: Box<EpisodeFormation>,
+    },
 }
 
 /// Compact durable effect recorded for operation replay. Fact content and
@@ -433,6 +515,9 @@ pub enum MemoryMutationEffect {
         edge_id: String,
     },
     EpisodeStored {
+        episode_id: String,
+    },
+    FormationCompleted {
         episode_id: String,
     },
 }

@@ -37,6 +37,12 @@ providerOrder: Listing<String>?
 /// fail explicitly when selected-provider credentials are unavailable.
 fallbackProviders: Listing<String>?
 
+/// Background memory extraction, independent of embedding discovery.
+memoryExtractionModel: String(length > 0)?
+
+/// False disables extraction inference while retaining evidence capture.
+memoryExtractionEnabled: Boolean?
+
 /// Default behavioral posture.
 defaultPosture: ("explorator"|"fabricator"|"architect"|"devastator")?
 

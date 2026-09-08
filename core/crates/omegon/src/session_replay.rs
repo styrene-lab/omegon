@@ -11,6 +11,9 @@ use crate::session_blob_store::{ContentRef, ProjectionClass};
 
 type Result<T> = std::result::Result<T, AuthorityError>;
 
+#[cfg(test)]
+pub(crate) use tests::open_joined_request as test_open_joined_request;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReplayEnd {
     EndOfStream,
@@ -562,7 +565,7 @@ mod tests {
         }
     }
 
-    fn open_joined_request(
+    pub(crate) fn open_joined_request(
         directory: &tempfile::TempDir,
     ) -> (SessionAuthority, ModelRequestPrepared, Uuid, Uuid) {
         let snapshot = directory.path().join("session.json");

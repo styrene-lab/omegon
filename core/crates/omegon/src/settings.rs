@@ -1295,6 +1295,13 @@ pub struct Profile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embed_model: Option<String>,
 
+    /// Independent background memory extraction model, routed by the host.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_extraction_model: Option<String>,
+    /// Disable automatic inference while retaining evidence capture and memory tools.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_extraction_enabled: Option<bool>,
+
     // ── Default posture ──
     /// Default posture name. Can be a built-in (explorator/fabricator/architect/devastator)
     /// or a custom posture defined in `.omegon/postures/<name>.pkl`.

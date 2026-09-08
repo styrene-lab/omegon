@@ -242,6 +242,7 @@ async fn memory_campaign_portable_round_trip_isolated_minds_and_releases_every_f
                 files_changed: vec!["src/memory_campaign.rs".into()],
                 tags: vec!["campaign".into(), "portable".into()],
                 tool_calls_count: Some(7),
+                formation: None,
             },
         },
     )
@@ -953,6 +954,7 @@ async fn memory_campaign_generations_rollback_transfer_and_shared_status_project
                 files_changed: Vec::new(),
                 tags: vec!["status".into()],
                 tool_calls_count: Some(1),
+                formation: None,
             },
         },
     )

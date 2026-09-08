@@ -10,10 +10,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-pub const MEMORY_SCHEMA_VERSION: i64 = 8;
+pub const MEMORY_SCHEMA_VERSION: i64 = 9;
 pub const PRIMENSUS_MIND: &str = "primensus";
 pub const LEGACY_MIND: &str = "legacy";
-pub const LEGACY_MEMORY_SCHEMA_VERSIONS: std::ops::RangeInclusive<i64> = 5..=7;
+pub const LEGACY_MEMORY_SCHEMA_VERSIONS: std::ops::RangeInclusive<i64> = 5..=8;
 use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -94,7 +94,7 @@ impl SqliteBackend {
         )?;
         if !LEGACY_MEMORY_SCHEMA_VERSIONS.contains(&source_version) {
             anyhow::bail!(
-                "memory migration only supports schema v5 through v7 sources; found v{source_version}"
+                "memory migration only supports schema v5 through v8 sources; found v{source_version}"
             );
         }
         let integrity_check: String =
@@ -139,6 +139,7 @@ impl SqliteBackend {
                     ),
                     format!("UPDATE facts SET mind = '{LEGACY_MIND}' WHERE mind = 'default'"),
                     format!("UPDATE episodes SET mind = '{LEGACY_MIND}' WHERE mind = 'default'"),
+                    "ALTER TABLE episodes ADD COLUMN formation TEXT; -- if absent".into(),
                     format!(
                         "INSERT INTO schema_version (version, applied_at) VALUES ({MEMORY_SCHEMA_VERSION}, datetime('now'))"
                     ),
@@ -147,6 +148,7 @@ impl SqliteBackend {
                 vec![
                     format!("UPDATE facts SET mind = '{PRIMENSUS_MIND}' WHERE mind = 'default'"),
                     format!("UPDATE episodes SET mind = '{PRIMENSUS_MIND}' WHERE mind = 'default'"),
+                    "ALTER TABLE episodes ADD COLUMN formation TEXT; -- if absent".into(),
                     format!(
                         "INSERT INTO schema_version (version, applied_at) VALUES ({MEMORY_SCHEMA_VERSION}, datetime('now'))"
                     ),
@@ -441,6 +443,7 @@ impl SqliteBackend {
                 "TEXT NOT NULL DEFAULT '[]'",
             )?;
             Self::add_column_if_missing(&transaction, "episodes", "tool_calls_count", "INTEGER")?;
+            Self::add_column_if_missing(&transaction, "episodes", "formation", "TEXT")?;
             transaction.execute_batch(
                 "CREATE TABLE IF NOT EXISTS memory_operation_receipts (
                     operation_id TEXT PRIMARY KEY,
@@ -783,6 +786,7 @@ impl SqliteBackend {
                 files_changed TEXT NOT NULL DEFAULT '[]',
                 tags TEXT NOT NULL DEFAULT '[]',
                 tool_calls_count INTEGER,
+                formation TEXT,
                 FOREIGN KEY (mind) REFERENCES minds(name) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_episodes_mind ON episodes(mind, date DESC);
@@ -845,6 +849,13 @@ impl SqliteBackend {
             CREATE TRIGGER IF NOT EXISTS episodes_fts_delete AFTER DELETE ON episodes BEGIN
                 INSERT INTO episodes_fts(episodes_fts, rowid, id, mind, title, narrative)
                 VALUES ('delete', OLD.rowid, OLD.id, OLD.mind, OLD.title, OLD.narrative);
+            END;
+            CREATE TRIGGER IF NOT EXISTS episodes_fts_update AFTER UPDATE ON episodes BEGIN
+                INSERT INTO episodes_fts(episodes_fts, rowid, id, mind, title, narrative)
+                VALUES ('delete', OLD.rowid, OLD.id, OLD.mind, OLD.title, OLD.narrative);
+                INSERT INTO episodes_fts(rowid, id, mind, title, narrative)
+                VALUES (NEW.rowid, NEW.id, NEW.mind, NEW.title, NEW.narrative);
+                DELETE FROM episodes_vec WHERE episode_id = NEW.id AND NEW.narrative != OLD.narrative;
             END;
 
             -- Schema version tracking (TS compat — factstore.ts checks this)
@@ -965,6 +976,27 @@ impl SqliteBackend {
             files_changed: json_vec(row, "files_changed")?,
             tags: json_vec(row, "tags")?,
             tool_calls_count: row.get("tool_calls_count")?,
+            formation: row
+                .get::<_, Option<String>>("formation")?
+                .map(|value| {
+                    let formation =
+                        serde_json::from_str::<EpisodeFormation>(&value).map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                0,
+                                rusqlite::types::Type::Text,
+                                Box::new(error),
+                            )
+                        })?;
+                    formation.validate().map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?;
+                    Ok::<_, rusqlite::Error>(Box::new(formation))
+                })
+                .transpose()?,
             jj_change_id: row.get("jj_change_id")?,
         })
     }
@@ -1051,17 +1083,42 @@ impl SqliteBackend {
                     }
                 }
                 Ok(JsonlRecord::Episode(episode)) => {
+                    if let Some(formation) = &episode.formation {
+                        formation.validate()?;
+                    }
+                    let prior = tx
+                        .query_row(
+                            "SELECT * FROM episodes WHERE id = ?1",
+                            params![episode.id],
+                            Self::row_to_episode,
+                        )
+                        .optional()
+                        .map_err(|error| MemoryError::Storage(error.into()))?;
+                    if let Some(prior) = prior
+                        && crate::formation::completes_import(&prior, &episode)?
+                    {
+                        let formation = episode.formation.as_ref().expect("completed formation");
+                        let encoded = serde_json::to_string(formation)
+                            .map_err(|error| MemoryError::Storage(error.into()))?;
+                        tx.execute(
+                            "UPDATE episodes SET formation = ?1, narrative = ?2 WHERE id = ?3",
+                            params![encoded, formation.narrative(), episode.id],
+                        )
+                        .map_err(|error| MemoryError::Storage(error.into()))?;
+                        stats.imported += 1;
+                        continue;
+                    }
                     self.ensure_mind(tx, &episode.mind)
                         .map_err(|error| MemoryError::Storage(error.into()))?;
                     let inserted = tx.execute(
-                        "INSERT OR IGNORE INTO episodes (id, mind, title, narrative, date, created_at, jj_change_id, affected_nodes, affected_changes, files_changed, tags, tool_calls_count) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+                        "INSERT OR IGNORE INTO episodes (id, mind, title, narrative, date, created_at, jj_change_id, affected_nodes, affected_changes, files_changed, tags, tool_calls_count, formation) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
                         params![episode.id, episode.mind, episode.title, episode.narrative,
                             episode.date, episode.created_at, episode.jj_change_id,
                             serde_json::to_string(&episode.affected_nodes).unwrap_or_else(|_| "[]".into()),
                             serde_json::to_string(&episode.affected_changes).unwrap_or_else(|_| "[]".into()),
                             serde_json::to_string(&episode.files_changed).unwrap_or_else(|_| "[]".into()),
                             serde_json::to_string(&episode.tags).unwrap_or_else(|_| "[]".into()),
-                            episode.tool_calls_count],
+                            episode.tool_calls_count, episode.formation.as_ref().map(serde_json::to_string).transpose().map_err(|error| MemoryError::Storage(error.into()))?],
                     ).map_err(|error| MemoryError::Storage(error.into()))?;
                     stats.imported += inserted;
                     stats.skipped += usize::from(inserted == 0);
@@ -1430,21 +1487,50 @@ impl MemoryBackend for SqliteBackend {
                 MemoryMutationEffect::EdgeCreated { edge_id }
             }
             MemoryMutation::StoreEpisode { request } => {
+                if let Some(formation) = &request.formation {
+                    formation.validate()?;
+                }
                 self.ensure_mind(&transaction, &request.mind)
                     .map_err(|error| MemoryError::Storage(error.into()))?;
                 let episode_id = gen_id();
                 let timestamp = now_iso();
                 let date = request.date.unwrap_or_else(|| timestamp[..10].to_string());
                 transaction.execute(
-                    "INSERT INTO episodes (id, mind, title, narrative, date, created_at, affected_nodes, affected_changes, files_changed, tags, tool_calls_count) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                    "INSERT INTO episodes (id, mind, title, narrative, date, created_at, affected_nodes, affected_changes, files_changed, tags, tool_calls_count, formation) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
                     params![episode_id, request.mind, request.title, request.narrative, date, timestamp,
                         serde_json::to_string(&request.affected_nodes).unwrap_or_else(|_| "[]".into()),
                         serde_json::to_string(&request.affected_changes).unwrap_or_else(|_| "[]".into()),
                         serde_json::to_string(&request.files_changed).unwrap_or_else(|_| "[]".into()),
                         serde_json::to_string(&request.tags).unwrap_or_else(|_| "[]".into()),
-                        request.tool_calls_count],
+                        request.tool_calls_count, request.formation.as_ref().map(serde_json::to_string).transpose().map_err(|error| MemoryError::Storage(error.into()))?],
                 ).map_err(|error| MemoryError::Storage(error.into()))?;
                 MemoryMutationEffect::EpisodeStored { episode_id }
+            }
+            MemoryMutation::CompleteFormation {
+                episode_id,
+                formation,
+            } => {
+                let episode = transaction
+                    .query_row(
+                        "SELECT * FROM episodes WHERE id = ?1",
+                        params![episode_id],
+                        Self::row_to_episode,
+                    )
+                    .optional()
+                    .map_err(|error| MemoryError::Storage(error.into()))?
+                    .ok_or_else(|| {
+                        MemoryError::InvalidMutation("formation episode not found".into())
+                    })?;
+                crate::formation::validate_completion(episode.formation.as_deref(), &formation)?;
+                let encoded = serde_json::to_string(&formation)
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                transaction
+                    .execute(
+                        "UPDATE episodes SET formation = ?1, narrative = ?2 WHERE id = ?3",
+                        params![encoded, formation.narrative(), episode_id],
+                    )
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                MemoryMutationEffect::FormationCompleted { episode_id }
             }
         };
 
@@ -2311,6 +2397,9 @@ impl MemoryBackend for SqliteBackend {
     }
 
     async fn store_episode(&self, req: StoreEpisode) -> Result<Episode> {
+        if let Some(formation) = &req.formation {
+            formation.validate()?;
+        }
         let mut conn = self.conn.lock().unwrap();
         let transaction = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2322,13 +2411,13 @@ impl MemoryBackend for SqliteBackend {
         let date = req.date.unwrap_or_else(|| ts[..10].to_string());
 
         transaction.execute(
-            "INSERT INTO episodes (id, mind, title, narrative, date, created_at, affected_nodes, affected_changes, files_changed, tags, tool_calls_count) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+            "INSERT INTO episodes (id, mind, title, narrative, date, created_at, affected_nodes, affected_changes, files_changed, tags, tool_calls_count, formation) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
             params![id, req.mind, req.title, req.narrative, date, ts,
                 serde_json::to_string(&req.affected_nodes).unwrap_or_else(|_| "[]".into()),
                 serde_json::to_string(&req.affected_changes).unwrap_or_else(|_| "[]".into()),
                 serde_json::to_string(&req.files_changed).unwrap_or_else(|_| "[]".into()),
                 serde_json::to_string(&req.tags).unwrap_or_else(|_| "[]".into()),
-                req.tool_calls_count],
+                req.tool_calls_count, req.formation.as_ref().map(serde_json::to_string).transpose().map_err(|error| MemoryError::Storage(error.into()))?],
         ).map_err(|e| MemoryError::Storage(e.into()))?;
 
         let episode = Episode {
@@ -2343,6 +2432,7 @@ impl MemoryBackend for SqliteBackend {
             files_changed: req.files_changed,
             tags: req.tags,
             tool_calls_count: req.tool_calls_count,
+            formation: req.formation,
             jj_change_id: None,
         };
         transaction
@@ -2360,8 +2450,8 @@ impl MemoryBackend for SqliteBackend {
         let episodes = stmt
             .query_map(params![mind, k as i64], Self::row_to_episode)
             .map_err(|e| MemoryError::Storage(e.into()))?
-            .filter_map(|r| r.map_err(|e| tracing::debug!("row deser: {e}")).ok())
-            .collect();
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| MemoryError::Storage(error.into()))?;
         Ok(episodes)
     }
 
@@ -2385,8 +2475,8 @@ impl MemoryBackend for SqliteBackend {
         let episodes = stmt
             .query_map(params![fts_query, mind, k as i64], Self::row_to_episode)
             .map_err(|e| MemoryError::Storage(e.into()))?
-            .filter_map(|r| r.map_err(|e| tracing::debug!("row deser: {e}")).ok())
-            .collect();
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| MemoryError::Storage(error.into()))?;
         Ok(episodes)
     }
 
@@ -2453,8 +2543,8 @@ impl MemoryBackend for SqliteBackend {
         let episodes: Vec<Episode> = stmt
             .query_map(params![mind], Self::row_to_episode)
             .map_err(|e| MemoryError::Storage(e.into()))?
-            .filter_map(|r| r.map_err(|e| tracing::debug!("row deser: {e}")).ok())
-            .collect();
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| MemoryError::Storage(error.into()))?;
         for ep in &episodes {
             lines.push(serde_json::to_string(&JsonlRecord::Episode(ep.clone())).unwrap());
         }
@@ -2622,15 +2712,19 @@ mod tests {
             params![version],
         )
         .unwrap();
-        conn.execute_batch(
-            "DROP TABLE memory_operation_receipts;
+        conn.execute_batch("ALTER TABLE episodes DROP COLUMN formation;")
+            .unwrap();
+        if version < 8 {
+            conn.execute_batch(
+                "DROP TABLE memory_operation_receipts;
              ALTER TABLE episodes DROP COLUMN affected_nodes;
              ALTER TABLE episodes DROP COLUMN affected_changes;
              ALTER TABLE episodes DROP COLUMN files_changed;
              ALTER TABLE episodes DROP COLUMN tags;
              ALTER TABLE episodes DROP COLUMN tool_calls_count;",
-        )
-        .unwrap();
+            )
+            .unwrap();
+        }
         if version == 5 {
             conn.execute_batch(
                 "DROP INDEX idx_facts_persona;
@@ -2690,6 +2784,7 @@ mod tests {
             };
             assert!(episode_columns.contains(&"affected_nodes".to_string()));
             assert!(episode_columns.contains(&"tool_calls_count".to_string()));
+            assert!(episode_columns.contains(&"formation".to_string()));
             let migrated_mind: String = migrated
                 .query_row(
                     "SELECT mind FROM facts WHERE id = 'legacy-fact'",

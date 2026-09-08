@@ -427,7 +427,7 @@ pub(crate) fn ensure_project_memory_store_ready(
             Ok(Some(result))
         }
         version => anyhow::bail!(
-            "unsupported memory schema v{version} at {}; run `omegon memory migrate --status --path {}` and restore a supported v5-v7 backup or upgrade Omegon",
+            "unsupported memory schema v{version} at {}; run `omegon memory migrate --status --path {}` and restore a supported v5-v8 backup or upgrade Omegon",
             db_path.display(),
             db_path.display()
         ),
@@ -764,12 +764,13 @@ impl AgentSetup {
         }
         let mut memory_feature =
             features::memory::MemoryFeature::new(memory_binding.clone(), mind.clone())
-                .with_status_root(project_root.clone());
-        if let Some(ref service) = embed_service {
-            memory_feature = memory_feature
-                .with_embed_service(service.clone())
-                .with_extraction_model("anthropic:claude-haiku-4-5-20251001".into());
-        }
+                .with_status_root(project_root.clone())
+                .with_session_binding(deferred_session_view.clone());
+        memory_feature = memory_feature.with_capabilities(
+            &crate::settings::Profile::load(&cwd),
+            is_child,
+            embed_service.clone(),
+        );
         bus.register(Box::new(memory_feature));
         bus.register_internal_tool(crate::tool_registry::memory::MEMORY_STORE, "memory");
 

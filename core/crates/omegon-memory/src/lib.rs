@@ -21,6 +21,7 @@
 pub mod backend;
 pub mod decay;
 pub mod embedding;
+pub mod formation;
 pub mod hash;
 pub mod inmemory;
 pub mod maintenance;

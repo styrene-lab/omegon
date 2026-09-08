@@ -384,6 +384,9 @@ impl InMemoryBackend {
                 Ok(MemoryMutationEffect::EdgeCreated { edge_id })
             }
             MemoryMutation::StoreEpisode { request } => {
+                if let Some(formation) = &request.formation {
+                    formation.validate()?;
+                }
                 let episode_id = gen_id();
                 let timestamp = now_iso();
                 state.episodes.push(Episode {
@@ -398,9 +401,26 @@ impl InMemoryBackend {
                     files_changed: request.files_changed,
                     tags: request.tags,
                     tool_calls_count: request.tool_calls_count,
+                    formation: request.formation,
                     jj_change_id: None,
                 });
                 Ok(MemoryMutationEffect::EpisodeStored { episode_id })
+            }
+            MemoryMutation::CompleteFormation {
+                episode_id,
+                formation,
+            } => {
+                let episode = state
+                    .episodes
+                    .iter_mut()
+                    .find(|episode| episode.id == episode_id)
+                    .ok_or_else(|| {
+                        MemoryError::InvalidMutation("formation episode not found".into())
+                    })?;
+                crate::formation::validate_completion(episode.formation.as_deref(), &formation)?;
+                episode.narrative = formation.narrative();
+                episode.formation = Some(formation);
+                Ok(MemoryMutationEffect::FormationCompleted { episode_id })
             }
         }
     }
@@ -472,8 +492,25 @@ impl InMemoryBackend {
                     }
                 }
                 Ok(JsonlRecord::Episode(ep)) => {
-                    if state.episodes.iter().any(|existing| existing.id == ep.id) {
-                        stats.skipped += 1;
+                    if let Some(formation) = &ep.formation {
+                        formation.validate()?;
+                    }
+                    if let Some(existing) = state
+                        .episodes
+                        .iter_mut()
+                        .find(|existing| existing.id == ep.id)
+                    {
+                        if crate::formation::completes_import(existing, &ep)? {
+                            existing.formation = ep.formation;
+                            existing.narrative = existing
+                                .formation
+                                .as_ref()
+                                .expect("completed formation")
+                                .narrative();
+                            stats.imported += 1;
+                        } else {
+                            stats.skipped += 1;
+                        }
                     } else {
                         state.episodes.push(ep);
                         stats.imported += 1;
@@ -1188,6 +1225,9 @@ impl MemoryBackend for InMemoryBackend {
     }
 
     async fn store_episode(&self, req: StoreEpisode) -> Result<Episode> {
+        if let Some(formation) = &req.formation {
+            formation.validate()?;
+        }
         let mut s = self.state.lock().unwrap();
         let episode = Episode {
             id: gen_id(),
@@ -1201,6 +1241,7 @@ impl MemoryBackend for InMemoryBackend {
             files_changed: req.files_changed,
             tags: req.tags,
             tool_calls_count: req.tool_calls_count,
+            formation: req.formation,
             jj_change_id: None,
         };
         s.episodes.push(episode.clone());

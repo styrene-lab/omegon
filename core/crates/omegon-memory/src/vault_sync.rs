@@ -1953,6 +1953,7 @@ mod tests {
                     files_changed: vec![],
                     tags: vec![],
                     tool_calls_count: Some(calls),
+                    formation: None,
                 })
                 .await
                 .unwrap();

@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Session memory now captures bounded, attributed semantic evidence before extraction. Extraction is independently configurable with `memoryExtractionModel` and `memoryExtractionEnabled`; generated candidates remain pending inferences. Memory schema v9 preserves formation evidence and extraction outcomes, with verified migration from v5–v8 and atomic completion, search updates, and stale episode-vector invalidation.
+
 - Memory archive search now returns labeled historical facts, and section filters apply before lexical, vector, and graph result limits. Ambient memory uses task-matched evidence, avoids duplicate pins and oversized-fact starvation, and clears stale injections when a task has no matches. SQLite search failures remain errors instead of appearing as empty results.
 
 - Inline menus and inspectors borrow a clean screen instead of unexpectedly exposing the resumed transcript and fullscreen workspace behind them.

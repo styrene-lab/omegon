@@ -705,6 +705,7 @@ async fn test_episodes(b: &dyn MemoryBackend) {
         files_changed: vec!["core/crates/omegon-memory/src/lib.rs".into()],
         tags: vec!["architecture".into()],
         tool_calls_count: Some(42),
+        formation: None,
     })
     .await
     .unwrap();
@@ -1063,6 +1064,7 @@ async fn test_mutation_replay_and_conflict(b: &dyn MemoryBackend) {
             files_changed: vec![],
             tags: vec![],
             tool_calls_count: None,
+            formation: None,
         },
     };
     let episode = b
@@ -1298,6 +1300,7 @@ async fn test_episode_metadata_round_trip(b: &dyn MemoryBackend) {
             files_changed: vec!["src/lib.rs".into()],
             tags: vec!["test".into()],
             tool_calls_count: Some(3),
+            formation: None,
         })
         .await
         .unwrap();
@@ -1322,6 +1325,7 @@ async fn test_episode_metadata_round_trip(b: &dyn MemoryBackend) {
             files_changed: vec![],
             tags: vec![],
             tool_calls_count: None,
+            formation: None,
         })
         .await
         .unwrap();

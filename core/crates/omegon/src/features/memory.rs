@@ -90,6 +90,8 @@ impl std::fmt::Display for MemoryFeatureInvokeError {
 
 impl std::error::Error for MemoryFeatureInvokeError {}
 
+mod formation;
+
 /// Memory feature that provides all memory_* tools and context injection.
 pub struct MemoryFeature {
     /// Renderer for context injection
@@ -113,9 +115,9 @@ pub struct MemoryFeature {
     context_dirty: AtomicBool,
     /// Boot-captured managed owner for every durable memory operation.
     memory_binding: crate::memory_service::MemoryBinding,
-    /// Model for session-end fact extraction. When set, SessionEnd uses
-    /// quick_completion to extract novel facts from the session summary.
-    extraction_model: Option<String>,
+    /// Host-routed extraction of pending candidates from attributed session evidence.
+    extractor: Option<Arc<dyn formation::Extractor>>,
+    session_binding: Option<crate::session_consumers::DeferredSessionViewBinding>,
     session_id: Mutex<Option<String>>,
     session_end_tasks: Arc<Mutex<SessionEndTaskState>>,
     status_root: std::path::PathBuf,
@@ -133,7 +135,8 @@ impl MemoryFeature {
             last_context_turn: Mutex::new(None),
             context_dirty: AtomicBool::new(true), // force initial render
             memory_binding,
-            extraction_model: None,
+            extractor: None,
+            session_binding: None,
             session_id: Mutex::new(None),
             session_end_tasks: Arc::new(Mutex::new(SessionEndTaskState::default())),
             status_root: std::env::current_dir().unwrap_or_default(),
@@ -141,7 +144,38 @@ impl MemoryFeature {
     }
 
     pub fn with_extraction_model(mut self, model: String) -> Self {
-        self.extraction_model = Some(model);
+        self.extractor = Some(Arc::new(formation::ModelExtractor(model)));
+        self
+    }
+
+    pub(crate) fn with_capabilities(
+        mut self,
+        profile: &crate::settings::Profile,
+        child: bool,
+        embeddings: Option<Arc<dyn EmbeddingService>>,
+    ) -> Self {
+        self.extractor = None;
+        if let Some(service) = embeddings {
+            self = self.with_embed_service(service);
+        }
+        if !child && profile.memory_extraction_enabled != Some(false) {
+            let model = profile
+                .memory_extraction_model
+                .as_deref()
+                .unwrap_or(formation::DEFAULT_EXTRACTION_MODEL)
+                .trim();
+            if !model.is_empty() {
+                self = self.with_extraction_model(model.into());
+            }
+        }
+        self
+    }
+
+    pub(crate) fn with_session_binding(
+        mut self,
+        binding: crate::session_consumers::DeferredSessionViewBinding,
+    ) -> Self {
+        self.session_binding = Some(binding);
         self
     }
 
@@ -264,55 +298,6 @@ impl MemoryFeature {
     }
 }
 
-/// Spawn a non-blocking embedding generation task for a newly stored fact.
-fn parse_extracted_facts(text: &str) -> Vec<String> {
-    let text = text.trim();
-    if text.eq_ignore_ascii_case("NONE") || text.is_empty() {
-        return Vec::new();
-    }
-    text.lines()
-        .map(|line| {
-            let trimmed = line.trim();
-            // Strip leading bullets/numbers: "1. ", "- ", "* ", "• "
-            let stripped = trimmed
-                .strip_prefix("- ")
-                .or_else(|| trimmed.strip_prefix("* "))
-                .or_else(|| trimmed.strip_prefix("• "))
-                .or_else(|| {
-                    // "1. ", "2. ", etc.
-                    let dot = trimmed.find(". ")?;
-                    if dot <= 3 && trimmed[..dot].chars().all(|c| c.is_ascii_digit()) {
-                        Some(&trimmed[dot + 2..])
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(trimmed)
-                .trim();
-            stripped.to_string()
-        })
-        .filter(|s| s.len() >= 10)
-        .take(100)
-        .collect()
-}
-
-async fn extract_facts(model: &str, summary: &str) -> anyhow::Result<Vec<String>> {
-    let prompt = format!(
-        "Extract discrete, reusable facts from this session summary. \
-         Each fact should be a single sentence that would be useful context \
-         in a future conversation. Output one fact per line, no numbering, \
-         no bullets. Only include facts that are specific and actionable — \
-         skip generic observations. If there are no extractable facts, \
-         respond with exactly: NONE\n\n{summary}"
-    );
-
-    let result = crate::providers::quick_completion(model, &prompt)
-        .await
-        .map_err(|e| anyhow::anyhow!("extraction LLM call failed: {e}"))?;
-
-    Ok(parse_extracted_facts(&result.text))
-}
-
 async fn persist_embedding(
     embed_svc: &Arc<dyn EmbeddingService>,
     binding: &crate::memory_service::MemoryBinding,
@@ -354,10 +339,8 @@ async fn persist_embedding(
 struct SessionEndPipelineInput {
     mind: String,
     memory_binding: crate::memory_service::MemoryBinding,
-    extraction_model: Option<String>,
-    embed_service: Option<Arc<dyn EmbeddingService>>,
-    prompt_text: String,
-    outcome_text: String,
+    extractor: Option<Arc<dyn formation::Extractor>>,
+    evidence: omegon_memory::EpisodeFormation,
     session_id: String,
     status_root: std::path::PathBuf,
     turns: u32,
@@ -367,13 +350,26 @@ struct SessionEndPipelineInput {
 
 async fn run_session_end_pipeline(input: SessionEndPipelineInput) {
     const EPISODE_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-    const EXTRACTION_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-    const FACT_WRITE_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-    const EMBEDDING_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
     const VAULT_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
     let now = chrono::Utc::now();
     let session_key = format!("{:x}", Sha256::digest(input.session_id.as_bytes()));
+    let source_key = format!(
+        "{:x}",
+        Sha256::digest(
+            serde_json::to_vec(&(
+                &input.evidence.source,
+                input.extractor.as_ref().map(|extractor| extractor.model())
+            ))
+            .expect("source serialization")
+        )
+    );
+    let mut evidence = input.evidence;
+    if let Some(extractor) = &input.extractor {
+        evidence.extraction = omegon_memory::ExtractionOutcome::Pending {
+            model: extractor.model().into(),
+        };
+    }
 
     let episode_cancellation = tokio_util::sync::CancellationToken::new();
     let episode =
@@ -381,164 +377,78 @@ async fn run_session_end_pipeline(input: SessionEndPipelineInput) {
             .memory_binding
             .invoke(crate::memory_service::MemoryRequestV1::ApplyMutation {
                 scope: crate::memory_service::MemoryScopeV1::Project,
-                operation_id: format!("session:{session_key}:episode"),
+                operation_id: format!("session:{session_key}:formation-v1:{source_key}"),
                 mutation: MemoryMutation::StoreEpisode {
                     request: StoreEpisode {
                         mind: input.mind.clone(),
                         title: format!(
-                            "Session {}: {}t {}tc",
+                            "Session {}: {}t {}tc ({:.0}s)",
                             now.format("%Y-%m-%d"),
                             input.turns,
-                            input.tool_calls
+                            input.tool_calls,
+                            input.duration_secs
                         ),
-                        narrative: format!(
-                            "Session on {date}: {turns} turns, {tools} tool calls, {duration:.0}s. \
-                         Auto-recorded by harness at session end.",
-                            date = now.format("%Y-%m-%d"),
-                            turns = input.turns,
-                            tools = input.tool_calls,
-                            duration = input.duration_secs,
-                        ),
+                        narrative: evidence.narrative(),
                         date: Some(now.format("%Y-%m-%d").to_string()),
                         affected_nodes: vec![],
                         affected_changes: vec![],
                         files_changed: vec![],
                         tags: vec!["auto".into()],
                         tool_calls_count: Some(input.tool_calls),
+                        formation: Some(Box::new(evidence.clone())),
                     },
                 },
                 cancellation: episode_cancellation.clone(),
             });
-    match tokio::time::timeout(EPISODE_PHASE_TIMEOUT, episode).await {
-        Ok(Err(error)) => tracing::warn!(?error, "session episode storage failed"),
+    let stored = match tokio::time::timeout(EPISODE_PHASE_TIMEOUT, episode).await {
+        Ok(Ok(crate::memory_service::MemoryResponseV1 {
+            payload: crate::memory_service::MemoryPayloadV1::Mutation(outcome),
+            ..
+        })) => Some(outcome),
+        Ok(Err(error)) => {
+            tracing::warn!(?error, "session episode storage failed");
+            None
+        }
         Err(_) => {
             episode_cancellation.cancel();
             tracing::warn!("session episode storage timed out");
+            None
         }
-        _ => {}
-    }
-
-    let extracted_facts = if let Some(model) = input.extraction_model.as_deref()
-        && (!input.prompt_text.is_empty() || !input.outcome_text.is_empty())
-    {
-        let summary = format!(
-            "User asked: {}\n\nOutcome: {}",
-            if input.prompt_text.is_empty() {
-                "(no prompt recorded)"
-            } else {
-                &input.prompt_text
-            },
-            if input.outcome_text.is_empty() {
-                "(no outcome recorded)"
-            } else {
-                &input.outcome_text
-            },
-        );
-        match tokio::time::timeout(EXTRACTION_PHASE_TIMEOUT, extract_facts(model, &summary)).await {
-            Ok(Ok(facts)) => facts,
-            Ok(Err(error)) => {
-                tracing::debug!(%error, "session-end fact extraction failed");
-                Vec::new()
-            }
-            Err(_) => {
-                tracing::warn!("session-end fact extraction timed out");
-                Vec::new()
-            }
-        }
-    } else {
-        Vec::new()
+        _ => None,
     };
-
-    let fact_write_cancellation = tokio_util::sync::CancellationToken::new();
-    let fact_writes = async {
-        let mut stored = Vec::new();
-        for (index, content) in extracted_facts.into_iter().enumerate() {
-            let response = input
+    let Some(stored) = stored else {
+        return;
+    };
+    if !stored.replayed
+        && input.extractor.is_some()
+        && let MemoryMutationEffect::EpisodeStored { episode_id } = stored.effect
+    {
+        let completed = formation::extract_candidates(evidence, input.extractor.as_ref()).await;
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        let completion =
+            input
                 .memory_binding
                 .invoke(crate::memory_service::MemoryRequestV1::ApplyMutation {
                     scope: crate::memory_service::MemoryScopeV1::Project,
-                    operation_id: format!("session:{session_key}:fact:{index}"),
-                    mutation: MemoryMutation::StoreFact {
-                        request: StoreFact {
-                            mind: input.mind.clone(),
-                            content: content.clone(),
-                            section: Section::Architecture,
-                            source: Some("session-extraction".into()),
-                            decay_profile: DecayProfileName::Standard,
-                        },
+                    operation_id: format!(
+                        "session:{session_key}:formation-v1:{source_key}:complete"
+                    ),
+                    mutation: MemoryMutation::CompleteFormation {
+                        episode_id,
+                        formation: Box::new(completed),
                     },
-                    cancellation: fact_write_cancellation.clone(),
-                })
-                .await;
-            match response {
-                Ok(crate::memory_service::MemoryResponseV1 {
-                    payload: crate::memory_service::MemoryPayloadV1::Mutation(outcome),
-                    ..
-                }) => {
-                    if let MemoryMutationEffect::FactStored {
-                        fact_id,
-                        version,
-                        action: StoreAction::Stored,
-                    } = outcome.effect
-                    {
-                        stored.push((
-                            FactPrecondition {
-                                id: fact_id,
-                                expected_version: version,
-                            },
-                            content,
-                        ));
-                    }
-                }
-                Ok(_) => tracing::debug!("session fact store returned an unexpected response"),
-                Err(error) => tracing::debug!(?error, "failed to store extracted fact"),
+                    cancellation: cancellation.clone(),
+                });
+        match tokio::time::timeout(EPISODE_PHASE_TIMEOUT, completion).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => tracing::warn!(
+                ?error,
+                "formation completion failed; source remains durable"
+            ),
+            Err(_) => {
+                cancellation.cancel();
+                tracing::warn!("formation completion timed out; source remains durable");
             }
-        }
-        stored
-    };
-    let stored_facts = match tokio::time::timeout(FACT_WRITE_PHASE_TIMEOUT, fact_writes).await {
-        Ok(stored) => stored,
-        Err(_) => {
-            fact_write_cancellation.cancel();
-            tracing::warn!("session-end managed fact writes timed out");
-            Vec::new()
-        }
-    };
-
-    if let Some(service) = input.embed_service {
-        let embedding_cancellation = tokio_util::sync::CancellationToken::new();
-        let mut embeddings = tokio::task::JoinSet::new();
-        for (index, (fact, content)) in stored_facts.into_iter().enumerate() {
-            let service = service.clone();
-            let binding = input.memory_binding.clone();
-            let cancellation = embedding_cancellation.clone();
-            let operation_id = format!("session:{session_key}:embedding:{index}");
-            embeddings.spawn(async move {
-                persist_embedding(
-                    &service,
-                    &binding,
-                    fact,
-                    content,
-                    operation_id,
-                    cancellation,
-                )
-                .await;
-            });
-        }
-        if tokio::time::timeout(EMBEDDING_PHASE_TIMEOUT, async {
-            while let Some(result) = embeddings.join_next().await {
-                if let Err(error) = result {
-                    tracing::warn!(%error, "session-end embedding task failed");
-                }
-            }
-        })
-        .await
-        .is_err()
-        {
-            embedding_cancellation.cancel();
-            embeddings.abort_all();
-            while embeddings.join_next().await.is_some() {}
-            tracing::warn!("session-end managed embeddings timed out");
         }
     }
 
@@ -1422,15 +1332,15 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 turns,
                 tool_calls,
                 duration_secs,
-                initial_prompt,
-                outcome_summary,
-            } if *turns > 0 => {
+                ..
+            } if *turns > 0 && self.memory_binding.available() => {
                 let mind = self.mind.clone();
                 let memory_binding = self.memory_binding.clone();
-                let extraction_model = self.extraction_model.clone();
-                let embed_svc = self.embed_service.clone();
-                let prompt_text = initial_prompt.clone().unwrap_or_default();
-                let outcome_text = outcome_summary.clone().unwrap_or_default();
+                let extractor = self.extractor.clone();
+                let session_binding = self.session_binding.clone();
+                let target = session_binding
+                    .as_ref()
+                    .and_then(|binding| binding.snapshot());
                 let Some(session_id) = self.session_id.lock().unwrap().clone() else {
                     self.session_end_tasks
                         .lock()
@@ -1457,10 +1367,8 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                                     run_session_end_pipeline(SessionEndPipelineInput {
                                         mind,
                                         memory_binding,
-                                        extraction_model,
-                                        embed_service: embed_svc,
-                                        prompt_text,
-                                        outcome_text,
+                                        extractor,
+                                        evidence: formation::capture(session_binding.as_ref(), target.as_ref(), &session_id),
                                         session_id,
                                         status_root,
                                         turns: t,
@@ -1735,6 +1643,159 @@ mod tests {
         let replacement = second.expect("explicit empty replacement must retire prior live memory");
         assert_eq!(replacement.source, "memory");
         assert!(replacement.content.is_empty());
+    }
+
+    #[test]
+    fn wave3_extraction_is_configured_without_embeddings() {
+        let feature = MemoryFeature::new(Default::default(), "wave3".into()).with_capabilities(
+            &Default::default(),
+            false,
+            None,
+        );
+        assert!(
+            feature.extractor.is_some(),
+            "embedding discovery must not disable extraction"
+        );
+        assert!(feature.embed_service.is_none());
+    }
+
+    #[test]
+    fn wave3_profile_override_disable_and_child_policy_are_independent() {
+        let mut profile: crate::settings::Profile = serde_json::from_value(serde_json::json!({
+            "memoryExtractionModel":"fixture:cheap", "memoryExtractionEnabled":true
+        }))
+        .unwrap();
+        let feature = MemoryFeature::new(Default::default(), "wave3".into())
+            .with_capabilities(&profile, false, None);
+        assert_eq!(feature.extractor.unwrap().model(), "fixture:cheap");
+        profile.memory_extraction_enabled = Some(false);
+        let disabled = MemoryFeature::new(Default::default(), "wave3".into())
+            .with_extraction_model("previous".into())
+            .with_capabilities(&profile, false, None);
+        assert!(disabled.extractor.is_none());
+        profile.memory_extraction_enabled = Some(true);
+        let child = MemoryFeature::new(Default::default(), "wave3".into())
+            .with_capabilities(&profile, true, None);
+        assert!(child.extractor.is_none());
+    }
+
+    #[tokio::test]
+    async fn wave3_pipeline_persists_pending_candidates_without_creating_facts() {
+        struct Fake;
+        #[async_trait]
+        impl formation::Extractor for Fake {
+            fn model(&self) -> &str {
+                "fixture-model"
+            }
+            async fn extract(&self, _: &str) -> anyhow::Result<String> {
+                Ok(r#"[{"content":"Migration must be atomic.","section":"Constraints","evidence_ids":["event-4"]}]"#.into())
+            }
+        }
+        let (feature, mut bus, dir) = managed_feature().await;
+        for _ in 0..2 {
+            run_session_end_pipeline(SessionEndPipelineInput {
+                mind: "test".into(),
+                memory_binding: feature.memory_binding.clone(),
+                extractor: Some(Arc::new(Fake)),
+                evidence: formation::sample_evidence(),
+                session_id: "synthetic-session".into(),
+                status_root: dir.path().into(),
+                turns: 2,
+                tool_calls: 1,
+                duration_secs: 1.0,
+            })
+            .await;
+        }
+        let payload = feature
+            .invoke(crate::memory_service::MemoryRequestV1::ListEpisodes {
+                scope: crate::memory_service::MemoryScopeV1::Project,
+                mind: "test".into(),
+                limit: 10,
+                cancellation: CancellationToken::new(),
+            })
+            .await
+            .unwrap();
+        let crate::memory_service::MemoryPayloadV1::Episodes(episodes) = payload else {
+            panic!("episodes");
+        };
+        assert_eq!(episodes.len(), 1);
+        assert_eq!(
+            episodes[0].formation.as_ref().unwrap().candidates[0].section,
+            Section::Constraints
+        );
+        let payload = feature
+            .invoke(crate::memory_service::MemoryRequestV1::Stats {
+                scope: crate::memory_service::MemoryScopeV1::Project,
+                mind: "test".into(),
+                cancellation: CancellationToken::new(),
+            })
+            .await
+            .unwrap();
+        let crate::memory_service::MemoryPayloadV1::Stats(stats) = payload else {
+            panic!("stats");
+        };
+        assert_eq!(stats.total_facts, 0);
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
+    async fn wave3_cancellation_keeps_source_and_pending_extraction_durable() {
+        struct Waiting(Arc<tokio::sync::Notify>);
+        #[async_trait]
+        impl formation::Extractor for Waiting {
+            fn model(&self) -> &str {
+                "fixture-waiting"
+            }
+            async fn extract(&self, _: &str) -> anyhow::Result<String> {
+                self.0.notify_one();
+                std::future::pending().await
+            }
+        }
+        let (feature, mut bus, dir) = managed_feature().await;
+        let started = Arc::new(tokio::sync::Notify::new());
+        let task = tokio::spawn(run_session_end_pipeline(SessionEndPipelineInput {
+            mind: "test".into(),
+            memory_binding: feature.memory_binding.clone(),
+            extractor: Some(Arc::new(Waiting(started.clone()))),
+            evidence: formation::sample_evidence(),
+            session_id: "synthetic-session".into(),
+            status_root: dir.path().into(),
+            turns: 1,
+            tool_calls: 0,
+            duration_secs: 1.0,
+        }));
+        tokio::time::timeout(std::time::Duration::from_secs(5), started.notified())
+            .await
+            .unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        let payload = feature
+            .invoke(crate::memory_service::MemoryRequestV1::ListEpisodes {
+                scope: crate::memory_service::MemoryScopeV1::Project,
+                mind: "test".into(),
+                limit: 1,
+                cancellation: CancellationToken::new(),
+            })
+            .await
+            .unwrap();
+        let crate::memory_service::MemoryPayloadV1::Episodes(episodes) = payload else {
+            panic!("episodes");
+        };
+        let evidence = episodes[0].formation.as_ref().unwrap();
+        assert_eq!(evidence.evidence.len(), 1);
+        assert!(matches!(
+            evidence.extraction,
+            omegon_memory::ExtractionOutcome::Pending { .. }
+        ));
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
     }
 
     #[tokio::test]
@@ -2621,8 +2682,8 @@ mod tests {
             turns: 1,
             tool_calls: 2,
             duration_secs: 3.0,
-            initial_prompt: Some("test".into()),
-            outcome_summary: Some("done".into()),
+            initial_prompt: Some("uncommitted-advisory-prompt".into()),
+            outcome_summary: Some("uncommitted-advisory-outcome".into()),
         });
         assert!(start.elapsed() < std::time::Duration::from_millis(100));
         let mut episode_count = 0;
@@ -2641,6 +2702,11 @@ mod tests {
             };
             episode_count = episodes.len();
             if episode_count == 1 {
+                assert!(!episodes[0].narrative.contains("uncommitted-advisory"));
+                assert!(matches!(
+                    episodes[0].formation.as_ref().unwrap().source,
+                    omegon_memory::FormationSource::Unavailable { .. }
+                ));
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -2655,71 +2721,9 @@ mod tests {
     }
 
     #[test]
-    fn session_end_pipeline_has_ordered_independent_phase_budgets() {
-        let source = include_str!("memory.rs");
-        let pipeline = source
-            .split("async fn run_session_end_pipeline")
-            .nth(1)
-            .and_then(|tail| tail.split("impl Feature for MemoryFeature").next())
-            .expect("session-end pipeline source");
-        let episode = pipeline.find("EPISODE_PHASE_TIMEOUT").unwrap();
-        let extraction = pipeline.find("EXTRACTION_PHASE_TIMEOUT").unwrap();
-        let fact_write = pipeline.find("FACT_WRITE_PHASE_TIMEOUT").unwrap();
-        let embedding = pipeline.find("EMBEDDING_PHASE_TIMEOUT").unwrap();
-        let vault = pipeline.find("VAULT_PHASE_TIMEOUT").unwrap();
-        let vault_request = pipeline
-            .find("MemoryRequestV1::VaultSessionEnd")
-            .expect("vault session-end request");
-
-        assert!(episode < extraction);
-        assert!(extraction < fact_write);
-        assert!(fact_write < embedding);
-        assert!(embedding < vault);
-        assert!(vault < vault_request);
-        assert!(pipeline.contains("embeddings.abort_all()"));
-        assert!(pipeline.contains("vault_cancellation.cancel()"));
-        assert!(!pipeline.contains("Duration::from_secs(75)"));
-    }
-
-    #[test]
     fn feature_retains_only_managed_binding_and_mind() {
         let feature = MemoryFeature::new(Default::default(), "test".into());
         assert_eq!(feature.mind(), "test");
         assert!(!feature.memory_binding.available());
-    }
-
-    #[test]
-    fn parse_extracted_facts_plain_lines() {
-        let text = "Wilson prefers terse responses.\nThe project uses Rust with tokio async runtime.\nShort.";
-        let facts = parse_extracted_facts(text);
-        assert_eq!(facts.len(), 2);
-        assert_eq!(facts[0], "Wilson prefers terse responses.");
-        assert_eq!(facts[1], "The project uses Rust with tokio async runtime.");
-    }
-
-    #[test]
-    fn parse_extracted_facts_strips_bullets_and_numbers() {
-        let text = "1. The API key is stored in the vault.\n2. Deployments happen on Fridays.\n- CI runs on every push.\n* The database is PostgreSQL.";
-        let facts = parse_extracted_facts(text);
-        assert_eq!(facts.len(), 4);
-        assert_eq!(facts[0], "The API key is stored in the vault.");
-        assert_eq!(facts[1], "Deployments happen on Fridays.");
-        assert_eq!(facts[2], "CI runs on every push.");
-        assert_eq!(facts[3], "The database is PostgreSQL.");
-    }
-
-    #[test]
-    fn parse_extracted_facts_none_response() {
-        assert!(parse_extracted_facts("NONE").is_empty());
-        assert!(parse_extracted_facts("none").is_empty());
-        assert!(parse_extracted_facts("  NONE  ").is_empty());
-        assert!(parse_extracted_facts("").is_empty());
-    }
-
-    #[test]
-    fn parse_extracted_facts_filters_short_lines() {
-        let text = "Good fact that meets the minimum length.\nToo short\n\nAnother valid fact for the memory system.";
-        let facts = parse_extracted_facts(text);
-        assert_eq!(facts.len(), 2);
     }
 }
