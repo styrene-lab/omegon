@@ -22,6 +22,35 @@ And extraction unavailability is distinguishable from an empty extraction result
 
 ## ADDED Requirements
 
+### Requirement: Extraction models use independently configurable host routing
+
+Parent sessions SHALL configure extraction independently of embedding discovery.
+The shipped Rust extraction default SHALL remain explicit, with profile overrides
+for model selection and disabling automatic extraction. Child sessions SHALL retain
+their existing automatic-extraction-disabled behavior.
+
+#### Scenario: Profile selects an extraction model without embeddings
+Given a parent profile selects an extraction model and embeddings are unavailable
+When memory capabilities are configured
+Then the configured extractor uses that model through existing host completion routing
+And no embedding probe result changes the extraction selection
+
+#### Scenario: Operator disables extraction
+Given automatic memory extraction is disabled in the profile
+When a session ends
+Then no extraction inference is requested
+And evidence capture and ordinary memory tools remain usable
+
+### Requirement: Embedding selection follows the configured host integration
+
+Embedding model and endpoint selection SHALL follow the existing profile/environment
+configuration and supported local fallback rather than impose a new cloud provider.
+
+#### Scenario: Existing embedding configuration remains authoritative
+Given the profile specifies an embedding model and endpoint
+When memory capabilities are configured
+Then embedding discovery uses those values independently of the extraction model
+
 ### Requirement: Memory capability status is component-specific and read-only
 
 Readiness inspection SHALL report each configured capability without initiating
@@ -50,3 +79,20 @@ Given a committed fact has retryable pending indexing and the selected embedding
 When bounded indexing repair executes
 Then the fact receives a compatible vector
 And the fact is not stored or reinforced again
+
+## REMOVED Requirements
+
+### Requirement: Default memory extraction uses a cheap GPT cloud model
+
+The historical extension-specific default conflicts with the shipped Rust runtime.
+Replace it with the independently configurable host-routing requirement above.
+
+### Requirement: Semantic retrieval uses cloud embeddings by default
+
+The Rust host already supports configured remote and local embedding integrations.
+Preserve that policy rather than require a new cloud integration for this repair.
+
+### Requirement: Concrete default memory models are explicit and configurable
+
+Replace historical concrete GPT/embedding defaults with the explicit Rust default
+and independently configurable host integrations specified above.

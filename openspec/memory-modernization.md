@@ -15,6 +15,10 @@ its verification records identify red/green evidence, same-executor adversarial
 review, and passing landing gates. The parent corpora remain implementing for
 their later-wave requirements.
 
+Wave 3's independent extraction and evidence-backed formation slice is accepted
+at `f90e793e`;
+see its [verification record](changes/memory-evidence-capture/verification-wave-3.md).
+
 The [phased execution plan](memory-modernization-execution.md) defines wave entry
 criteria, TDD verification, adversarial review, and acceptance/handoff gates.
 

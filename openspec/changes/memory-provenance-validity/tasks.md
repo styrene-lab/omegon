@@ -1,6 +1,8 @@
 ## 1. Evidence and applicability vocabulary
 <!-- specs: memory/provenance -->
 
+- [x] Introduce the minimal typed episode formation vocabulary: source frontier, attributed excerpts, observed tool outcomes, pending candidates, and extraction state.
+- [x] Preserve the source evidence across atomic completion; an assistant report cannot carry a tool outcome and generated candidates are not active facts.
 - [ ] Resolve canonical workspace/revision descriptors and evidence retention behavior before freezing schema fields.
 - [ ] RED: Add observed-versus-inferred, imported-authority, platform applicability, historical validity, and unavailable-source tests.
 - [ ] GREEN: Implement domain evidence/applicability types and retrieval inspection using host-owned source identities.
@@ -16,6 +18,9 @@
 ## 3. Persistence and verification
 <!-- specs: memory/provenance, memory/lifecycle -->
 
+- [x] Add nullable episode formation storage in schema v9, supported v5–v8 migration, legacy unknown preservation, and JSONL/reopen fixtures.
+- [x] Verify migration rollback and atomic completion of episode metadata, search index, vector invalidation, and receipts.
+- [x] Complete the scoped Wave 3 landing gate linked from ../memory-evidence-capture/verification-wave-3.md.
 - [ ] RED: Add supported legacy DB and JSONL fixtures plus failed-migration, reopen, and vault round-trip cases.
 - [ ] GREEN: Implement migration and schema-contract updates preserving legacy unknowns and operational metadata.
 - [ ] Verify vault idempotency/path boundaries and both backends; record scenario mappings and red/green outcomes.

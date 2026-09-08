@@ -13,7 +13,10 @@ The initial Waves 0–2 shipping slice is **accepted** at `f6846622`. Scoped evi
 [Wave 0](changes/memory-evaluation-corpus/verification-wave-0.md),
 [Wave 1](changes/memory-retrieval-contract/verification-wave-1.md), and
 [Wave 2](changes/memory-context-selection/verification-wave-2.md).
-The parent corpora retain their later-wave tasks. Later waves remain **planned**.
+The parent corpora retain their later-wave tasks. The Wave 3 slice is **accepted**
+at `f90e793e`, with
+[formation evidence and gate results](changes/memory-evidence-capture/verification-wave-3.md).
+Waves 4–8 remain **planned**.
 Consult those records for gate outcomes rather
 than inferring completion from this plan. Preserve unrelated work during execution.
 
