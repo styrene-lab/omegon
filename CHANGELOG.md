@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Memory archive search now returns labeled historical facts, and section filters apply before lexical, vector, and graph result limits. Ambient memory uses task-matched evidence, avoids duplicate pins and oversized-fact starvation, and clears stale injections when a task has no matches. SQLite search failures remain errors instead of appearing as empty results.
+
 - Inline menus and inspectors borrow a clean screen instead of unexpectedly exposing the resumed transcript and fullscreen workspace behind them.
 
 - A shared live action area now identifies thinking, response streaming, and running tools in inline and fullscreen. Inline activity stays below the response tail and above input, clears on authoritative completion, and honors the activity visibility setting.

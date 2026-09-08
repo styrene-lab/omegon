@@ -903,14 +903,25 @@ impl MemoryBackend for InMemoryBackend {
     }
 
     async fn fts_search(&self, mind: &str, query: &str, k: usize) -> Result<Vec<ScoredFact>> {
+        self.fts_search_filtered(mind, query, k, &SearchFilter::default())
+            .await
+    }
+
+    async fn fts_search_filtered(
+        &self,
+        mind: &str,
+        query: &str,
+        k: usize,
+        filter: &SearchFilter,
+    ) -> Result<Vec<ScoredFact>> {
         let s = self.state.lock().unwrap();
-        let query_lower = query.to_lowercase();
+        let query_lower = query.replace('"', " ").to_lowercase();
         let terms: Vec<&str> = query_lower.split_whitespace().collect();
 
         let mut results: Vec<ScoredFact> = s
             .facts
             .values()
-            .filter(|f| f.mind == mind && f.status == FactStatus::Active)
+            .filter(|f| f.mind == mind && filter.matches(f))
             .filter_map(|f| {
                 let content_lower = f.content.to_lowercase();
                 let matches = terms.iter().filter(|t| content_lower.contains(**t)).count();
@@ -918,7 +929,7 @@ impl MemoryBackend for InMemoryBackend {
                     return None;
                 }
                 let relevance = matches as f64 / terms.len().max(1) as f64;
-                let score = crate::decay::ambient_score(relevance, f)?;
+                let score = filter.score(relevance, f)?;
                 Some(ScoredFact {
                     fact: f.clone(),
                     similarity: relevance,
@@ -1007,12 +1018,32 @@ impl MemoryBackend for InMemoryBackend {
         min_similarity: f32,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> Result<Vec<ScoredFact>> {
+        self.vector_search_filtered_cancellable(
+            mind,
+            embedding,
+            k,
+            min_similarity,
+            &SearchFilter::default(),
+            cancelled,
+        )
+        .await
+    }
+
+    async fn vector_search_filtered_cancellable(
+        &self,
+        mind: &str,
+        embedding: &[f32],
+        k: usize,
+        min_similarity: f32,
+        filter: &SearchFilter,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<Vec<ScoredFact>> {
         let state = self.state.lock().unwrap();
         let mut matching = state.embeddings.iter().filter(|entry| {
             state
                 .facts
                 .get(&entry.fact_id)
-                .is_some_and(|fact| fact.mind == mind && fact.status == FactStatus::Active)
+                .is_some_and(|fact| fact.mind == mind && filter.matches(fact))
         });
         let Some(first) = matching.next() else {
             return Err(MemoryError::NoEmbeddings);
@@ -1036,7 +1067,7 @@ impl MemoryBackend for InMemoryBackend {
             let Some(fact) = state.facts.get(&entry.fact_id).cloned() else {
                 continue;
             };
-            let Some(score) = crate::decay::ambient_score(similarity as f64, &fact) else {
+            let Some(score) = filter.score(similarity as f64, &fact) else {
                 continue;
             };
             results.push(ScoredFact {

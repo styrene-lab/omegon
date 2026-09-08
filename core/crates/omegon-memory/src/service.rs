@@ -47,8 +47,27 @@ pub async fn expand_edges(
 pub async fn expand_edges_cancellable(
     backend: &dyn MemoryBackend,
     mind: &str,
+    results: Vec<ScoredFact>,
+    limit: usize,
+    cancelled: &dyn Fn() -> bool,
+) -> Option<Vec<ScoredFact>> {
+    expand_edges_filtered_cancellable(
+        backend,
+        mind,
+        results,
+        limit,
+        &crate::SearchFilter::default(),
+        cancelled,
+    )
+    .await
+}
+
+pub async fn expand_edges_filtered_cancellable(
+    backend: &dyn MemoryBackend,
+    mind: &str,
     mut results: Vec<ScoredFact>,
     limit: usize,
+    filter: &crate::SearchFilter,
     cancelled: &dyn Fn() -> bool,
 ) -> Option<Vec<ScoredFact>> {
     use std::collections::{BTreeMap, HashSet};
@@ -56,6 +75,8 @@ pub async fn expand_edges_cancellable(
     const MAX_SEEDS: usize = 1_000;
     const MAX_EDGES_PER_SEED: usize = 64;
     const MAX_NEIGHBOR_LOADS: usize = 4_096;
+
+    results.retain(|result| result.fact.mind == mind && filter.score(1.0, &result.fact).is_some());
 
     results.sort_by(|left, right| {
         right
@@ -108,6 +129,12 @@ pub async fn expand_edges_cancellable(
             return None;
         }
         if let Ok(Some(fact)) = backend.get_fact(&neighbor_id).await {
+            if fact.mind != mind {
+                continue;
+            }
+            let Some(score) = filter.score(score, &fact) else {
+                continue;
+            };
             results.push(ScoredFact {
                 similarity: score,
                 score,
@@ -123,6 +150,30 @@ pub async fn expand_edges_cancellable(
     });
     results.truncate(limit);
     Some(results)
+}
+
+/// Shared early context policy: explicit task matches, otherwise eligible current
+/// inventory. Presentation preserves this ranking instead of imposing section order.
+pub async fn context_facts(
+    backend: &dyn MemoryBackend,
+    mind: &str,
+    query: Option<&str>,
+    limit: usize,
+) -> crate::backend::Result<Vec<crate::Fact>> {
+    if let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) {
+        return Ok(backend
+            .fts_search(mind, query, limit)
+            .await?
+            .into_iter()
+            .map(|result| result.fact)
+            .collect());
+    }
+    let mut facts = backend
+        .list_facts(mind, crate::FactFilter::default())
+        .await?;
+    facts.retain(|fact| crate::decay::ambient_score(1.0, fact).is_some());
+    facts.truncate(limit);
+    Ok(facts)
 }
 
 #[cfg(test)]

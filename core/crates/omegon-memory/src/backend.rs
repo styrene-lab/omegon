@@ -187,6 +187,23 @@ pub trait MemoryBackend: Send + Sync {
     /// Full-text search via FTS5. Returns facts ranked by FTS5 relevance × decay confidence.
     async fn fts_search(&self, mind: &str, query: &str, k: usize) -> Result<Vec<ScoredFact>>;
 
+    /// Apply population and section eligibility before candidate limits.
+    /// Legacy external backends reject unsupported filters rather than leaking results.
+    async fn fts_search_filtered(
+        &self,
+        mind: &str,
+        query: &str,
+        k: usize,
+        filter: &SearchFilter,
+    ) -> Result<Vec<ScoredFact>> {
+        if filter != &SearchFilter::default() {
+            return Err(MemoryError::InvalidMutation(
+                "backend does not support filtered search".into(),
+            ));
+        }
+        self.fts_search(mind, query, k).await
+    }
+
     /// Vector similarity search. Returns facts ranked by cosine similarity × decay confidence.
     /// Returns `Err(EmbeddingDimensionMismatch)` if query dims don't match stored model.
     /// Returns `Err(NoEmbeddings)` if no vectors exist for this mind.
@@ -218,6 +235,26 @@ pub trait MemoryBackend: Send + Sync {
             return Err(MemoryError::Cancelled);
         }
         Ok(results)
+    }
+
+    /// Filter vector candidates before limits, with cooperative cancellation.
+    #[allow(clippy::too_many_arguments)]
+    async fn vector_search_filtered_cancellable(
+        &self,
+        mind: &str,
+        embedding: &[f32],
+        k: usize,
+        min_similarity: f32,
+        filter: &SearchFilter,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<Vec<ScoredFact>> {
+        if filter != &SearchFilter::default() {
+            return Err(MemoryError::InvalidMutation(
+                "backend does not support filtered vectors".into(),
+            ));
+        }
+        self.vector_search_cancellable(mind, embedding, k, min_similarity, cancelled)
+            .await
     }
 
     /// Store an embedding vector for a fact. Registers the model in embedding_metadata

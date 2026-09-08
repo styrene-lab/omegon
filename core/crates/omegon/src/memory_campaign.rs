@@ -361,6 +361,7 @@ async fn memory_campaign_portable_round_trip_isolated_minds_and_releases_every_f
 
     let search = |mind: &str, query: &str, query_vector| MemoryRequestV1::HybridSearch {
         scope: MemoryScopeV1::Project,
+        filter: Default::default(),
         mind: mind.into(),
         query: query.into(),
         query_vector,

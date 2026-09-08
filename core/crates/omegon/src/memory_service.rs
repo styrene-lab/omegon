@@ -219,6 +219,8 @@ pub(crate) enum MemoryRequestV1 {
         scope: MemoryScopeV1,
         mind: String,
         query: String,
+        #[serde(default)]
+        filter: omegon_memory::SearchFilter,
         query_vector: Option<Vec<f32>>,
         limit: usize,
         fetch_limit: usize,
@@ -229,6 +231,8 @@ pub(crate) enum MemoryRequestV1 {
     ContextSnapshot {
         scope: MemoryScopeV1,
         mind: String,
+        #[serde(default)]
+        query: Option<String>,
         working_memory: Vec<String>,
         fact_limit: usize,
         episode_limit: usize,
@@ -245,6 +249,8 @@ pub(crate) enum MemoryRequestV1 {
         scope: MemoryScopeV1,
         mind: String,
         query: String,
+        #[serde(default)]
+        filter: omegon_memory::SearchFilter,
         limit: usize,
         #[serde(skip, default)]
         cancellation: CancellationToken,
@@ -1509,13 +1515,16 @@ fn execute_request(
                 MemoryRequestV1::HybridSearch {
                     mind,
                     query,
+                    filter,
                     query_vector,
                     limit,
                     fetch_limit,
                     min_similarity,
                     ..
                 } => {
-                    let fts = backend.fts_search(&mind, &query, fetch_limit).await?;
+                    let fts = backend
+                        .fts_search_filtered(&mind, &query, fetch_limit, &filter)
+                        .await?;
                     if cancelled() {
                         return Err(MemoryError::Cancelled);
                     }
@@ -1524,11 +1533,12 @@ fn execute_request(
                             return Err(MemoryError::Cancelled);
                         }
                         match backend
-                            .vector_search_cancellable(
+                            .vector_search_filtered_cancellable(
                                 &mind,
                                 &vector,
                                 fetch_limit,
                                 min_similarity,
+                                &filter,
                                 cancelled,
                             )
                             .await
@@ -1551,11 +1561,12 @@ fn execute_request(
                     } else {
                         omegon_memory::rrf_merge(&fts, &vector, 60.0, fetch_limit)
                     };
-                    let results = omegon_memory::service::expand_edges_cancellable(
+                    let results = omegon_memory::service::expand_edges_filtered_cancellable(
                         backend,
                         &mind,
                         results,
                         fetch_limit,
+                        &filter,
                         cancelled,
                     )
                     .await
@@ -1567,17 +1578,32 @@ fn execute_request(
                 }
                 MemoryRequestV1::ContextSnapshot {
                     mind,
+                    query,
                     working_memory,
                     fact_limit,
                     episode_limit,
                     ..
                 } => {
-                    let mut facts = backend.list_facts(&mind, FactFilter::default()).await?;
-                    facts.truncate(fact_limit);
-                    let episodes = backend.list_episodes(&mind, episode_limit).await?;
+                    let facts = omegon_memory::service::context_facts(
+                        backend,
+                        &mind,
+                        query.as_deref(),
+                        fact_limit,
+                    )
+                    .await?;
+                    let episodes = if let Some(query) =
+                        query.as_deref().filter(|query| !query.trim().is_empty())
+                    {
+                        backend.search_episodes(&mind, query, episode_limit).await?
+                    } else {
+                        backend.list_episodes(&mind, episode_limit).await?
+                    };
                     let mut pins = Vec::with_capacity(working_memory.len());
                     for id in working_memory {
-                        if let Some(fact) = backend.get_fact(&id).await? {
+                        if let Some(fact) = backend.get_fact(&id).await?
+                            && fact.mind == mind
+                            && omegon_memory::decay::ambient_score(1.0, &fact).is_some()
+                        {
                             pins.push(fact);
                         }
                     }
@@ -1604,9 +1630,13 @@ fn execute_request(
                     }))
                 }
                 MemoryRequestV1::FtsSearch {
-                    mind, query, limit, ..
+                    mind,
+                    query,
+                    limit,
+                    filter,
+                    ..
                 } => backend
-                    .fts_search(&mind, &query, limit)
+                    .fts_search_filtered(&mind, &query, limit, &filter)
                     .await
                     .map(MemoryPayloadV1::ScoredFacts),
                 MemoryRequestV1::VectorSearch {
@@ -2181,6 +2211,7 @@ mod tests {
                 mind: MIND.into(),
                 query: "OAuth authentication".into(),
                 query_vector: Some(vec![1.0, 0.0]),
+                filter: Default::default(),
                 limit: 2,
                 fetch_limit: 4,
                 min_similarity: 0.1,
@@ -2199,6 +2230,7 @@ mod tests {
                 mind: MIND.into(),
                 query: "OAuth authentication".into(),
                 query_vector: None,
+                filter: Default::default(),
                 limit: 1,
                 fetch_limit: 2,
                 min_similarity: 0.1,
@@ -2214,6 +2246,7 @@ mod tests {
         let context = handle
             .invoke(MemoryRequestV1::ContextSnapshot {
                 scope: MemoryScopeV1::Project,
+                query: None,
                 mind: MIND.into(),
                 working_memory: vec![second_id.clone(), first_id.clone()],
                 fact_limit: 10,
@@ -2724,6 +2757,32 @@ mod tests {
 
     #[test]
     fn version_one_dtos_serialize_and_every_backend_error_maps_typed() {
+        for kind in ["fts_search", "hybrid_search"] {
+            let legacy = serde_json::json!({
+                "kind": kind, "scope": "project", "mind": MIND,
+                "query": "zircon", "limit": 1, "fetch_limit": 2,
+                "query_vector": null, "min_similarity": 0.1
+            });
+            let decoded: MemoryRequestV1 = serde_json::from_value(legacy).unwrap();
+            let filter = match &decoded {
+                MemoryRequestV1::FtsSearch { filter, .. }
+                | MemoryRequestV1::HybridSearch { filter, .. } => filter,
+                _ => panic!("expected search request"),
+            };
+            assert_eq!(filter, &omegon_memory::SearchFilter::default());
+            let encoded = serde_json::to_value(decoded).unwrap();
+            assert_eq!(encoded["filter"]["intent"], "current");
+        }
+        let legacy_context: MemoryRequestV1 = serde_json::from_value(serde_json::json!({
+            "kind":"context_snapshot", "scope":"project", "mind":MIND,
+            "working_memory":[], "fact_limit":10, "episode_limit":1
+        }))
+        .unwrap();
+        assert!(matches!(
+            legacy_context,
+            MemoryRequestV1::ContextSnapshot { query: None, .. }
+        ));
+
         let encoded = serde_json::to_value(MemoryRequestV1::VectorSearch {
             scope: MemoryScopeV1::Global,
             mind: MIND.into(),
@@ -3034,6 +3093,7 @@ mod tests {
         let error = handle
             .invoke(MemoryRequestV1::FtsSearch {
                 scope: MemoryScopeV1::Project,
+                filter: Default::default(),
                 mind: MIND.into(),
                 query: "bounded".into(),
                 limit: MAX_RESULT_LIMIT + 1,

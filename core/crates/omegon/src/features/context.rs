@@ -562,6 +562,7 @@ impl ContextProvider {
             .memory_binding
             .invoke(crate::memory_service::MemoryRequestV1::FtsSearch {
                 scope: crate::memory_service::MemoryScopeV1::Project,
+                filter: Default::default(),
                 mind: self.memory_mind.clone(),
                 query: query.into(),
                 limit: max_items,

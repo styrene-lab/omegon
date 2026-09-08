@@ -1895,26 +1895,55 @@ impl MemoryBackend for SqliteBackend {
     }
 
     async fn fts_search(&self, mind: &str, query: &str, k: usize) -> Result<Vec<ScoredFact>> {
+        self.fts_search_filtered(mind, query, k, &SearchFilter::default())
+            .await
+    }
+
+    async fn fts_search_filtered(
+        &self,
+        mind: &str,
+        query: &str,
+        k: usize,
+        filter: &SearchFilter,
+    ) -> Result<Vec<ScoredFact>> {
         let conn = self.conn.lock().unwrap();
         // Use FTS5 OR mode for broader matching
         let fts_query = query
             .split_whitespace()
-            .map(|w| format!("\"{w}\""))
+            .map(|w| format!("\"{}\"", w.replace('"', "\"\"")))
             .collect::<Vec<_>>()
             .join(" OR ");
+
+        if fts_query.is_empty() || k == 0 {
+            return Ok(Vec::new());
+        }
+        let section = filter.section.as_ref().map(|section| {
+            serde_json::to_string(section)
+                .unwrap_or_default()
+                .trim_matches('"')
+                .to_string()
+        });
 
         let mut stmt = conn
             .prepare(
                 "SELECT f.*, rank FROM facts_fts fts \
              JOIN facts f ON f.id = fts.id \
-             WHERE facts_fts MATCH ?1 AND fts.mind = ?2 AND f.status = 'active' \
+             WHERE facts_fts MATCH ?1 AND f.mind = ?2 \
+             AND ((?4 = 0 AND f.status = 'active') OR (?4 = 1 AND f.status IN ('archived','dormant','superseded'))) \
+             AND (?5 IS NULL OR f.section = ?5) \
              ORDER BY rank, f.id LIMIT ?3",
             )
             .map_err(|e| MemoryError::Storage(e.into()))?;
 
         let mut results: Vec<ScoredFact> = stmt
             .query_map(
-                params![fts_query, mind, (k.saturating_mul(8).max(k)) as i64],
+                params![
+                    fts_query,
+                    mind,
+                    i64::try_from(k.saturating_mul(8)).unwrap_or(i64::MAX),
+                    filter.intent == SearchIntent::Historical,
+                    section
+                ],
                 |row| {
                     let fact = Self::row_to_fact(row)?;
                     let rank: f64 = row.get("rank")?;
@@ -1922,9 +1951,11 @@ impl MemoryBackend for SqliteBackend {
                 },
             )
             .map_err(|e| MemoryError::Storage(e.into()))?
-            .filter_map(|r| r.map_err(|e| tracing::debug!("row deser: {e}")).ok())
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| MemoryError::Storage(error.into()))?
+            .into_iter()
             .filter_map(|(fact, relevance)| {
-                let score = crate::decay::ambient_score(relevance, &fact)?;
+                let score = filter.score(relevance, &fact)?;
                 Some(ScoredFact {
                     fact,
                     similarity: relevance,
@@ -2031,16 +2062,48 @@ impl MemoryBackend for SqliteBackend {
         min_similarity: f32,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> Result<Vec<ScoredFact>> {
+        self.vector_search_filtered_cancellable(
+            mind,
+            embedding,
+            k,
+            min_similarity,
+            &SearchFilter::default(),
+            cancelled,
+        )
+        .await
+    }
+
+    async fn vector_search_filtered_cancellable(
+        &self,
+        mind: &str,
+        embedding: &[f32],
+        k: usize,
+        min_similarity: f32,
+        filter: &SearchFilter,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<Vec<ScoredFact>> {
         let conn = self.conn.lock().unwrap();
+        let section = filter.section.as_ref().map(|section| {
+            serde_json::to_string(section)
+                .unwrap_or_default()
+                .trim_matches('"')
+                .to_string()
+        });
         let mut statement = conn
             .prepare(
                 "SELECT fv.embedding, fv.model_name, fv.dims, f.* FROM facts_vec fv \
                  JOIN facts f ON f.id = fv.fact_id \
-                 WHERE f.mind = ?1 AND f.status = 'active' ORDER BY fv.fact_id",
+                  WHERE f.mind = ?1 \
+                  AND ((?2 = 0 AND f.status = 'active') OR (?2 = 1 AND f.status IN ('archived','dormant','superseded'))) \
+                  AND (?3 IS NULL OR f.section = ?3) ORDER BY fv.fact_id",
             )
             .map_err(|error| MemoryError::Storage(error.into()))?;
         let mut rows = statement
-            .query(params![mind])
+            .query(params![
+                mind,
+                filter.intent == SearchIntent::Historical,
+                section
+            ])
             .map_err(|error| MemoryError::Storage(error.into()))?;
         let mut found = false;
         let mut results = Vec::new();
@@ -2073,7 +2136,7 @@ impl MemoryBackend for SqliteBackend {
             if similarity < min_similarity {
                 continue;
             }
-            let Some(score) = crate::decay::ambient_score(similarity as f64, &fact) else {
+            let Some(score) = filter.score(similarity as f64, &fact) else {
                 continue;
             };
             results.push(ScoredFact {

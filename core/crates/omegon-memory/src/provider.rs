@@ -238,7 +238,7 @@ fn tool_defs() -> Vec<ToolDefinition> {
         ToolDefinition {
             name: "memory_search_archive".into(),
             label: "memory_search_archive".into(),
-            description: "Search archived project memories from previous months.".into(),
+            description: "Search archived, dormant, and superseded project facts. Results are historical evidence, not current guidance.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "required": ["query"],
@@ -301,12 +301,19 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ToolProvider
             }
             "memory_recall" => {
                 let query = args["query"].as_str().unwrap_or("").to_string();
-                let k = args["k"].as_u64().unwrap_or(10) as usize;
+                let k = args["k"].as_u64().unwrap_or(10).min(10_000) as usize;
+                let filter = SearchFilter {
+                    section: args["section"]
+                        .as_str()
+                        .map(Self::parse_section_arg)
+                        .transpose()?,
+                    ..Default::default()
+                };
 
                 // Use FTS search (vector search requires embeddings which may not be available)
                 let results = self
                     .backend
-                    .fts_search(&self.mind, &query, k)
+                    .fts_search_filtered(&self.mind, &query, k, &filter)
                     .await
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
 
@@ -325,7 +332,7 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ToolProvider
                     let section = section.trim_matches('"');
                     // Truncate very long facts in recall results
                     let content = if sf.fact.content.len() > 200 {
-                        format!("{}…", &sf.fact.content[..197])
+                        format!("{}…", sf.fact.content.chars().take(197).collect::<String>())
                     } else {
                         sf.fact.content.clone()
                     };
@@ -578,15 +585,15 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ToolProvider
             }
             "memory_search_archive" => {
                 let query = args["query"].as_str().unwrap_or("").to_string();
-                // Search archived facts using FTS
+                let filter = SearchFilter {
+                    intent: SearchIntent::Historical,
+                    section: None,
+                };
                 let results = self
                     .backend
-                    .fts_search(&self.mind, &query, 20)
+                    .fts_search_filtered(&self.mind, &query, 20, &filter)
                     .await
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
-                // Filter to only archived facts (fts_search returns all, we filter)
-                // Note: current FTS searches active facts. For true archive search,
-                // we'd need a separate query. For now, return FTS results as-is.
                 if results.is_empty() {
                     return Ok(ToolResult {
                         content: vec![ContentBlock::Text {
@@ -598,7 +605,10 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ToolProvider
                 let mut lines = Vec::new();
                 for scored in &results {
                     let f = &scored.fact;
-                    lines.push(format!("[{}] ({:?}) {}", f.id, f.section, f.content));
+                    lines.push(format!(
+                        "[{}] ({:?}, {:?}) {}",
+                        f.id, f.section, f.status, f.content
+                    ));
                 }
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text {
@@ -617,7 +627,7 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ToolProvider
 impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ContextProvider
     for MemoryProvider<B, R>
 {
-    fn provide_context(&self, _signals: &ContextSignals<'_>) -> Option<ContextInjection> {
+    fn provide_context(&self, signals: &ContextSignals<'_>) -> Option<ContextInjection> {
         // Run async in a blocking context since ContextProvider is sync
         let mind = self.mind.clone();
         let wm_ids = self.working_memory.lock().unwrap().clone();
@@ -633,22 +643,40 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ContextProvider
             scope
                 .spawn(|| {
                     handle.block_on(async {
-                        let facts = backend
-                            .list_facts(&mind, FactFilter::default())
-                            .await
-                            .ok()?;
-                        let episodes = backend.list_episodes(&mind, 1).await.ok()?;
+                        let facts = crate::service::context_facts(
+                            backend,
+                            &mind,
+                            Some(signals.user_prompt),
+                            10_000,
+                        )
+                        .await
+                        .ok()?;
+                        let episodes = if signals.user_prompt.trim().is_empty() {
+                            backend.list_episodes(&mind, 1).await.ok()?
+                        } else {
+                            backend
+                                .search_episodes(&mind, signals.user_prompt, 1)
+                                .await
+                                .ok()?
+                        };
 
                         // Resolve working memory facts
                         let mut wm_facts = Vec::new();
                         for id in &wm_ids {
-                            if let Ok(Some(f)) = backend.get_fact(id).await {
+                            if let Ok(Some(f)) = backend.get_fact(id).await
+                                && f.mind == mind
+                                && crate::decay::ambient_score(1.0, &f).is_some()
+                            {
                                 wm_facts.push(f);
                             }
                         }
 
-                        let rendered =
-                            renderer.render_context(&facts, &episodes, &wm_facts, 12_000);
+                        let rendered = renderer.render_context(
+                            &facts,
+                            &episodes,
+                            &wm_facts,
+                            signals.context_budget_tokens.saturating_mul(4),
+                        );
                         if rendered.markdown.is_empty() {
                             return None;
                         }

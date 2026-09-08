@@ -225,6 +225,50 @@ pub struct FactFilter {
     pub status: Option<FactStatus>,
 }
 
+/// Retrieval population. Historical evidence remains searchable regardless of decay.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchIntent {
+    #[default]
+    Current,
+    Historical,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchFilter {
+    #[serde(default)]
+    pub intent: SearchIntent,
+    #[serde(default)]
+    pub section: Option<Section>,
+}
+
+impl SearchFilter {
+    pub fn matches(&self, fact: &Fact) -> bool {
+        let status_matches = match self.intent {
+            SearchIntent::Current => fact.status == FactStatus::Active,
+            SearchIntent::Historical => matches!(
+                fact.status,
+                FactStatus::Archived | FactStatus::Dormant | FactStatus::Superseded
+            ),
+        };
+        status_matches
+            && self
+                .section
+                .as_ref()
+                .is_none_or(|section| section == &fact.section)
+    }
+
+    pub fn score(&self, relevance: f64, fact: &Fact) -> Option<f64> {
+        if !self.matches(fact) {
+            return None;
+        }
+        match self.intent {
+            SearchIntent::Current => crate::decay::ambient_score(relevance, fact),
+            SearchIntent::Historical => Some(relevance),
+        }
+    }
+}
+
 /// One bounded keyset page over facts present at the first page's Lamport
 /// watermark. Facts inserted after that watermark are intentionally deferred
 /// to a later scan; status changes may remove facts but cannot duplicate them.

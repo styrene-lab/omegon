@@ -44,112 +44,54 @@ impl ContextRenderer for MarkdownRenderer {
             }
         };
 
-        // Working memory first (highest priority)
-        if !working_memory.is_empty() {
-            let mut block = "## Working Memory (pinned)".to_string();
-            let mut included = 0;
-            for f in working_memory {
-                let line = format!("- [{}] {}", f.id, f.content);
-                let candidate = format!("{block}\n{line}");
-                if char_count
-                    .saturating_add(2)
-                    .saturating_add(candidate.chars().count())
-                    > max_chars
-                {
-                    budget_exhausted = true;
-                    break;
-                }
-                block = candidate;
-                included += 1;
-            }
-            if included > 0 && append_block(&mut markdown, &mut char_count, &block) {
-                facts_injected += included;
-            }
-        }
-
-        // Group facts by section
-        let sections = [
-            Section::Architecture,
-            Section::Decisions,
-            Section::Constraints,
-            Section::KnownIssues,
-            Section::PatternsConventions,
-            Section::Specs,
-            Section::RecentWork,
-        ];
-
-        let section_descriptions = [
-            "_System structure, component relationships, key abstractions_",
-            "_Choices made and their rationale_",
-            "_Requirements, limitations, environment details_",
-            "_Bugs, flaky tests, workarounds_",
-            "_Code style, project conventions, common approaches_",
-            "_Active specifications and design contracts_",
-            "_Recent session activity_",
-        ];
-
-        for (section, desc) in sections.iter().zip(section_descriptions.iter()) {
-            if budget_exhausted {
-                break;
-            }
-            let section_facts: Vec<&Fact> = facts
-                .iter()
-                .filter(|f| &f.section == section && f.status == FactStatus::Active)
-                .collect();
-            if section_facts.is_empty() {
+        // Preserve the domain selector's ordering. Section presentation must not
+        // promote irrelevant Architecture facts ahead of a ranked constraint.
+        let mut included_ids = std::collections::HashSet::new();
+        let mut previous_heading = String::new();
+        for (fact, pinned) in working_memory
+            .iter()
+            .map(|fact| (fact, true))
+            .chain(facts.iter().map(|fact| (fact, false)))
+        {
+            if fact.status != FactStatus::Active || included_ids.contains(&fact.id) {
                 continue;
             }
-
-            let mut block = format!(
-                "## {}\n{}",
-                serde_json::to_string(section)
+            let heading = if pinned {
+                "Working Memory (pinned)".to_string()
+            } else {
+                serde_json::to_string(&fact.section)
                     .unwrap_or_default()
-                    .trim_matches('"'),
-                desc
-            );
-            let mut included = 0;
-            for f in section_facts {
-                let line = format!("- {}", f.content);
-                let candidate = format!("{block}\n{line}");
-                if char_count
-                    .saturating_add(2)
-                    .saturating_add(candidate.chars().count())
-                    > max_chars
-                {
-                    budget_exhausted = true;
-                    break;
-                }
-                block = candidate;
-                included += 1;
-            }
-            if included > 0 && append_block(&mut markdown, &mut char_count, &block) {
-                facts_injected += included;
-            }
-            if budget_exhausted {
-                break;
+                    .trim_matches('"')
+                    .to_string()
+            };
+            let line = format!("- [{}] {}", fact.id, fact.content);
+            let block = if heading == previous_heading {
+                line
+            } else {
+                format!("## {heading}\n{line}")
+            };
+            if append_block(&mut markdown, &mut char_count, &block) {
+                previous_heading = heading;
+                included_ids.insert(&fact.id);
+                facts_injected += 1;
+            } else {
+                budget_exhausted = true;
             }
         }
 
         // Episodes
         let mut episodes_injected = 0;
-        if !episodes.is_empty() && !budget_exhausted {
-            let mut block = "## Recent Sessions".to_string();
-            for ep in episodes {
-                let line = format!("### {}: {}\n{}", ep.date, ep.title, ep.narrative);
-                let candidate = format!("{block}\n{line}");
-                if char_count
-                    .saturating_add(2)
-                    .saturating_add(candidate.chars().count())
-                    > max_chars
-                {
-                    budget_exhausted = true;
-                    break;
-                }
-                block = candidate;
+        for ep in episodes {
+            let heading = if episodes_injected == 0 {
+                "## Recent Sessions\n"
+            } else {
+                ""
+            };
+            let block = format!("{heading}### {}: {}\n{}", ep.date, ep.title, ep.narrative);
+            if append_block(&mut markdown, &mut char_count, &block) {
                 episodes_injected += 1;
-            }
-            if episodes_injected > 0 {
-                append_block(&mut markdown, &mut char_count, &block);
+            } else {
+                budget_exhausted = true;
             }
         }
 
@@ -174,7 +116,7 @@ mod tests {
 
     fn make_fact(section: Section, content: &str) -> Fact {
         Fact {
-            id: "test".into(),
+            id: content.into(),
             mind: "test".into(),
             content: content.into(),
             section,

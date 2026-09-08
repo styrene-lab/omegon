@@ -178,6 +178,23 @@ impl MemoryFeature {
         &self.mind
     }
 
+    /// Replace an earlier injection when selection becomes empty. Returning None
+    /// means "keep the live TTL", not "clear memory", to the context assembler.
+    fn clear_memory_context(&self) -> Option<ContextInjection> {
+        let mut last_hash = self.last_context_hash.lock().unwrap();
+        if *last_hash == 0 {
+            return None;
+        }
+        *last_hash = 0;
+        *self.last_context_turn.lock().unwrap() = None;
+        Some(ContextInjection {
+            source: "memory".into(),
+            content: String::new(),
+            priority: 200,
+            ttl_turns: 1,
+        })
+    }
+
     fn tool_operation_id(&self, call_id: &str, operation: &str) -> anyhow::Result<String> {
         let session = self
             .session_id
@@ -765,7 +782,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_SEARCH_ARCHIVE.into(),
                 label: "memory_search_archive".into(),
-                description: "Search archived project memories from previous months.".into(),
+                description: "Search archived, dormant, and superseded project facts. Results are historical evidence, not current guidance.".into(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "required": ["query"],
@@ -885,6 +902,13 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     .unwrap_or(10_000)
                     .min(10_000);
                 let fetch_k = k.saturating_mul(2).min(10_000); // over-fetch for RRF merge headroom
+                let filter = omegon_memory::SearchFilter {
+                    section: args["section"]
+                        .as_str()
+                        .map(Self::parse_section_arg)
+                        .transpose()?,
+                    ..Default::default()
+                };
 
                 let query_vector = if let Some(ref embed_svc) = self.embed_service {
                     match embed_svc.embed(&query).await {
@@ -903,6 +927,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         mind: self.mind.clone(),
                         query,
                         query_vector,
+                        filter,
                         limit: k,
                         fetch_limit: fetch_k,
                         min_similarity: 0.1,
@@ -1259,14 +1284,16 @@ Also use it when you notice a gap — if you're unsure whether something was alr
             }
             crate::tool_registry::memory::MEMORY_SEARCH_ARCHIVE => {
                 let query = args["query"].as_str().unwrap_or("").to_string();
-                // Search archived facts using FTS - for now this searches all facts,
-                // we'd need to update the backend to filter for archived specifically
                 let crate::memory_service::MemoryPayloadV1::ScoredFacts(results) = self
                     .invoke(crate::memory_service::MemoryRequestV1::FtsSearch {
                         scope: crate::memory_service::MemoryScopeV1::Project,
                         mind: self.mind.clone(),
                         query,
                         limit: 20,
+                        filter: omegon_memory::SearchFilter {
+                            intent: omegon_memory::SearchIntent::Historical,
+                            section: None,
+                        },
                         cancellation: cancel,
                     })
                     .await?
@@ -1284,7 +1311,10 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 let mut lines = Vec::new();
                 for scored in &results {
                     let f = &scored.fact;
-                    lines.push(format!("[{}] ({:?}) {}", f.id, f.section, f.content));
+                    lines.push(format!(
+                        "[{}] ({:?}, {:?}) {}",
+                        f.id, f.section, f.status, f.content
+                    ));
                 }
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text {
@@ -1507,11 +1537,11 @@ Also use it when you notice a gap — if you're unsure whether something was alr
         let binding = self.memory_binding.clone();
         let renderer = &self.renderer;
         let turn_number = signals.turn_number;
-        // ContextSignals budgets are tokens. Four characters per token is a
-        // conservative upper bound used throughout prompt assembly.
+        // Preserve the host's current character-budget estimate. Exact token
+        // accounting is owned by the later shared-selection work.
         let context_budget_chars = signals.context_budget_tokens.saturating_mul(4);
         if context_budget_chars == 0 {
-            return None;
+            return self.clear_memory_context();
         }
 
         std::thread::scope(|scope| {
@@ -1526,6 +1556,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                             .invoke(crate::memory_service::MemoryRequestV1::ContextSnapshot {
                                 scope: crate::memory_service::MemoryScopeV1::Project,
                                 mind,
+                                query: Some(signals.user_prompt.to_string()),
                                 working_memory: wm_ids,
                                 fact_limit: 10_000,
                                 episode_limit: 1,
@@ -1546,7 +1577,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                             context_budget_chars,
                         );
                         if rendered.markdown.is_empty() {
-                            return None;
+                            return self.clear_memory_context();
                         }
 
                         // Hash the rendered content to detect changes
@@ -1618,6 +1649,92 @@ mod tests {
             cwd: dir.path().to_path_buf(),
         });
         (feature, bus, dir)
+    }
+
+    #[tokio::test]
+    async fn initial_wave_live_tool_contracts() {
+        let (mut feature, mut bus, _dir) = managed_feature().await;
+        feature.mind = "wave".into();
+        feature
+            .apply_mutation(
+                "wave-fixture".into(),
+                MemoryMutation::ImportJsonl {
+                    jsonl: include_str!("../../../omegon-memory/tests/fixtures/retrieval.jsonl")
+                        .into(),
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let archived = feature
+            .execute(
+                "memory_search_archive",
+                "archive-check",
+                serde_json::json!({"query":"zircon"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let recalled = feature
+            .execute(
+                "memory_recall",
+                "section-check",
+                serde_json::json!({"query":"zircon", "section":"Constraints", "k":1}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        let archive_text = archived.content[0].as_text().unwrap();
+        let recall_text = recalled.content[0].as_text().unwrap();
+        assert!(
+            archive_text.contains("[obsolete]") && !archive_text.contains("[current]"),
+            "{archive_text}"
+        );
+        assert!(recall_text.contains("[constraint]"), "{recall_text}");
+    }
+
+    #[tokio::test]
+    async fn initial_wave_empty_task_selection_replaces_live_ttl() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        feature
+            .execute(
+                "memory_store",
+                "ttl-fact",
+                serde_json::json!({
+                    "section":"Constraints", "content":"zircon requires atomic migration"
+                }),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let signals = ContextSignals {
+            user_prompt: "atomic migration",
+            recent_tools: &[],
+            recent_files: &[],
+            lifecycle_phase: &LifecyclePhase::Idle,
+            turn_number: 1,
+            context_budget_tokens: 200,
+        };
+        let first = feature.provide_context(&signals);
+        let second = feature.provide_context(&ContextSignals {
+            user_prompt: "unrelatedquartz",
+            turn_number: 2,
+            ..signals
+        });
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert!(first.unwrap().content.contains("atomic migration"));
+        let replacement = second.expect("explicit empty replacement must retire prior live memory");
+        assert_eq!(replacement.source, "memory");
+        assert!(replacement.content.is_empty());
     }
 
     #[tokio::test]
@@ -2401,6 +2518,10 @@ mod tests {
             context_budget_tokens: 1,
             ..signals
         };
+        let cleared = feature
+            .provide_context(&tiny_signals)
+            .expect("smaller budget must retire the previous live injection");
+        assert!(cleared.content.is_empty());
         assert!(feature.provide_context(&tiny_signals).is_none());
 
         feature
