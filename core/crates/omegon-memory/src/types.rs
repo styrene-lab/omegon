@@ -525,6 +525,11 @@ pub struct FactPrecondition {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MemoryMutation {
+    StoreLifecycleConclusion {
+        request: StoreFact,
+        source: Box<crate::lifecycle::LifecycleConclusionSource>,
+        supersedes: Option<FactPrecondition>,
+    },
     StoreLifecycleInference {
         request: StoreFact,
         inference: Box<LifecycleInference>,
@@ -679,6 +684,26 @@ pub struct JsonlFact {
     /// Searchable tags for domain classification.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+}
+
+/// Supported classes of explicit structured lifecycle conclusion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LifecycleConclusionKind {
+    Decision,
+    Constraint,
+    Specification,
+}
+
+/// Portable attribution to the exact artifact snapshot parsed by the host.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LifecycleConclusionSource {
+    pub kind: LifecycleConclusionKind,
+    pub artifact_path: String,
+    pub artifact_id: Option<String>,
+    pub artifact_sub: String,
+    pub artifact_sha256: String,
+    pub statement_sha256: String,
 }
 
 /// Attribution supplied with an unconfirmed lifecycle summary, not verified evidence.

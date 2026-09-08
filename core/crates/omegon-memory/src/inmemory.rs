@@ -94,11 +94,15 @@ impl InMemoryBackend {
     }
 
     fn apply_to_state(state: &mut State, mutation: MemoryMutation) -> Result<MemoryMutationEffect> {
+        let mutation = crate::lifecycle::lower(mutation)?;
         let inference = match &mutation {
             MemoryMutation::StoreLifecycleInference { inference, .. } => Some(inference.clone()),
             _ => None,
         };
         match mutation {
+            MemoryMutation::StoreLifecycleConclusion { .. } => Err(MemoryError::InvalidMutation(
+                "unlowered lifecycle conclusion".into(),
+            )),
             MemoryMutation::ImportJsonl { jsonl } => {
                 let stats = Self::import_jsonl_to_state(state, &jsonl)?;
                 Ok(jsonl_import_effect(stats))
@@ -109,13 +113,18 @@ impl InMemoryBackend {
                 let existing_id = state
                     .facts
                     .iter()
-                    .find(|(_, fact)| {
+                    .filter(|(_, fact)| {
                         inference.is_none()
                             && fact.mind == request.mind
                             && fact.content_hash.as_deref() == Some(content_hash.as_str())
                             && fact.status == FactStatus::Active
+                            && (!crate::lifecycle::requires_exact_source(request.source.as_deref())
+                                || (fact.content == request.content
+                                    && fact.source == request.source
+                                    && fact.section == request.section))
                     })
-                    .map(|(id, _)| id.clone());
+                    .map(|(id, _)| id.clone())
+                    .min();
                 let version = Self::next_version(state)?;
                 if let Some(fact_id) = existing_id {
                     let fact = state.facts.get_mut(&fact_id).ok_or_else(|| {
@@ -246,6 +255,15 @@ impl InMemoryBackend {
             }
             MemoryMutation::SupersedeFact { fact, replacement } => {
                 Self::check_fact_precondition(state, &fact)?;
+                if state
+                    .facts
+                    .get(&fact.id)
+                    .is_some_and(|existing| existing.mind != replacement.mind)
+                {
+                    return Err(MemoryError::InvalidMutation(
+                        "supersession must remain in the same mind".into(),
+                    ));
+                }
                 if state
                     .facts
                     .get(&fact.id)

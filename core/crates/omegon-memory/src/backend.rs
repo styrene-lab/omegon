@@ -64,6 +64,12 @@ pub(crate) fn mutation_payload_hash(mutation: &MemoryMutation) -> Result<String>
 }
 
 fn validate_mutation(mutation: &MemoryMutation) -> Result<()> {
+    if let MemoryMutation::StoreLifecycleConclusion {
+        request, source, ..
+    } = mutation
+    {
+        source.validate(&request.content, &request.section)?;
+    }
     if let MemoryMutation::StoreLifecycleInference { request, inference } = mutation {
         inference.validate()?;
         if request.content.trim().is_empty() || request.content.len() > 65_536 {

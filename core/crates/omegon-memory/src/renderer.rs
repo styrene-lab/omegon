@@ -22,6 +22,7 @@ pub fn recall_score_label(result: &ScoredFact) -> String {
     if labels.is_empty() {
         labels.push(format!("legacy rank={:.4e}", result.score));
     }
+    labels.insert(0, format!("version={}", result.fact.version));
     for evidence in &result.graph_evidence {
         labels.push(format!(
             "{:?}: {} {} {}",

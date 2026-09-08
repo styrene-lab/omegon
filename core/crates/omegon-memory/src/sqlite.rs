@@ -1278,11 +1278,17 @@ impl MemoryBackend for SqliteBackend {
             });
         }
 
+        let mutation = crate::lifecycle::lower(mutation)?;
         let inference = match &mutation {
             MemoryMutation::StoreLifecycleInference { inference, .. } => Some(inference.clone()),
             _ => None,
         };
         let effect = match mutation {
+            MemoryMutation::StoreLifecycleConclusion { .. } => {
+                return Err(MemoryError::InvalidMutation(
+                    "unlowered lifecycle conclusion".into(),
+                ));
+            }
             MemoryMutation::ImportJsonl { jsonl } => {
                 jsonl_import_effect(self.import_jsonl_transaction(&transaction, &jsonl)?)
             }
@@ -1293,8 +1299,9 @@ impl MemoryBackend for SqliteBackend {
                 let content_hash = hash::content_hash(&request.content);
                 let existing_id: Option<String> = transaction
                     .query_row(
-                        "SELECT id FROM facts WHERE mind = ?1 AND content_hash = ?2 AND status = 'active' AND ?3=0",
-                        params![request.mind, content_hash, inference.is_some()],
+                        "SELECT id FROM facts WHERE mind = ?1 AND content_hash = ?2 AND status = 'active' AND ?3=0 AND (?4=0 OR (content=?5 AND source=?6 AND section=?7)) ORDER BY id LIMIT 1",
+                        params![request.mind, content_hash, inference.is_some(), crate::lifecycle::requires_exact_source(request.source.as_deref()),request.content,request.source,
+                            serde_json::to_string(&request.section).unwrap().trim_matches('"')],
                         |row| row.get(0),
                     )
                     .optional()
@@ -1413,6 +1420,11 @@ impl MemoryBackend for SqliteBackend {
             }
             MemoryMutation::SupersedeFact { fact, replacement } => {
                 let existing = Self::check_fact_precondition(&transaction, &fact)?;
+                if existing.mind != replacement.mind {
+                    return Err(MemoryError::InvalidMutation(
+                        "supersession must remain in the same mind".into(),
+                    ));
+                }
                 if existing.status != FactStatus::Active {
                     return Err(MemoryError::FactNotFound(fact.id));
                 }

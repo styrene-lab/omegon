@@ -91,6 +91,7 @@ impl std::fmt::Display for MemoryFeatureInvokeError {
 impl std::error::Error for MemoryFeatureInvokeError {}
 
 mod formation;
+mod lifecycle;
 
 /// Memory feature that provides all memory_* tools and context injection.
 pub struct MemoryFeature {
@@ -730,7 +731,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_INGEST_LIFECYCLE.into(),
                 label: "memory_ingest_lifecycle".into(),
-                description: "Internal tool for lifecycle candidate ingestion. Used by design-tree, openspec, and cleave extensions.".into(),
+                description: "Ingest lifecycle conclusions. Inferred summaries remain pending. Explicit conclusions require a matching decided design artifact or baseline/archived spec; provide artifact_ref_type, artifact_ref_path, and artifact_ref_sub.".into(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "required": ["source_kind", "authority", "section", "content"],
@@ -740,9 +741,10 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         "section": { "type": "string" },
                         "content": { "type": "string" },
                         "supersedes": { "type": "string" },
+                        "supersedes_version": { "type": "integer", "minimum": 0, "description": "Required with supersedes; expected target fact version." },
                         "artifact_ref_type": { "type": "string" },
                         "artifact_ref_path": { "type": "string" },
-                        "artifact_ref_sub": { "type": "string" }
+                        "artifact_ref_sub": { "type": "string", "description": "Decision/requirement title, or Implementation Notes/Constraints for an exact constraint. Explicit decision/spec content uses Title: statement." }
                     }
                 }),
                 capabilities: vec![omegon_traits::ToolCapability::StateChanging],
@@ -1317,10 +1319,47 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     }],details:serde_json::json!({"id":fact_id,"status":"pending","replayed":outcome.replayed})});
                 }
 
+                let path = args["artifact_ref_path"]
+                    .as_str()
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("explicit lifecycle admission requires artifact_ref_path")
+                    })?
+                    .to_string();
+                let reference_type = args["artifact_ref_type"]
+                    .as_str()
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("explicit lifecycle admission requires artifact_ref_type")
+                    })?
+                    .to_string();
+                let sub = args["artifact_ref_sub"]
+                    .as_str()
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("explicit lifecycle admission requires artifact_ref_sub")
+                    })?
+                    .to_string();
+                let supersedes = match args.get("supersedes") {
+                    None | Some(Value::Null) => None,
+                    Some(Value::String(id)) if !id.trim().is_empty() => Some(FactPrecondition {
+                        id: id.clone(),
+                        expected_version: args["supersedes_version"].as_u64().ok_or_else(|| {
+                            anyhow::anyhow!("supersedes requires supersedes_version")
+                        })?,
+                    }),
+                    _ => anyhow::bail!("invalid supersedes target"),
+                };
+                let root = self.status_root.clone();
+                let source_kind_owned = source_kind.to_string();
+                let section_for_validation = section.clone();
+                let validated = tokio::select! {
+                    _ = cancel.cancelled() => return Err(MemoryFeatureInvokeError(ManagedServiceCallError::Cancelled).into()),
+                    result = tokio::task::spawn_blocking(move || lifecycle::validate(&root,&path,&source_kind_owned,&reference_type,&sub,&section_for_validation,&content)) => result??,
+                };
+                let content = validated.content;
+                let conclusion_source = validated.source;
                 let outcome = self
                     .apply_mutation(
                         self.tool_operation_id(call_id, "lifecycle")?,
-                        MemoryMutation::StoreFact {
+                        MemoryMutation::StoreLifecycleConclusion {
                             request: StoreFact {
                                 mind: self.mind.clone(),
                                 content: content.clone(),
@@ -1328,17 +1367,26 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                                 decay_profile: DecayProfileName::Standard,
                                 source: Some(format!("lifecycle:{source_kind}")),
                             },
+                            source: Box::new(conclusion_source.clone()),
+                            supersedes,
                         },
                         cancel.clone(),
                     )
                     .await?;
-                let MemoryMutationEffect::FactStored {
-                    fact_id,
-                    version,
-                    action,
-                } = outcome.effect
-                else {
-                    anyhow::bail!("managed memory returned an unexpected lifecycle store effect");
+                let (fact_id, version, action) = match outcome.effect {
+                    MemoryMutationEffect::FactStored {
+                        fact_id,
+                        version,
+                        action,
+                    } => (fact_id, version, action),
+                    MemoryMutationEffect::FactSuperseded { replacement, .. } => (
+                        replacement.id,
+                        replacement.expected_version,
+                        StoreAction::Stored,
+                    ),
+                    _ => anyhow::bail!(
+                        "managed memory returned an unexpected lifecycle store effect"
+                    ),
                 };
 
                 // Auto-embed newly ingested lifecycle facts
@@ -1374,7 +1422,8 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 self.refresh_status().await;
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text { text: msg }],
-                    details: serde_json::json!({ "action": format!("{:?}", action), "id": fact_id }),
+                    details: serde_json::json!({ "action": format!("{:?}", action), "id": fact_id, "version":version,
+                        "status":"active", "source":conclusion_source, "replayed":outcome.replayed }),
                 })
             }
             _ => anyhow::bail!("Unknown memory tool: {tool_name}"),
@@ -2340,6 +2389,93 @@ mod tests {
             .unwrap_err();
 
         assert!(err.to_string().contains("invalid memory section 'Notes'"));
+    }
+
+    #[tokio::test]
+    async fn lifecycle_explicit_claim_requires_artifact_evidence() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        let result = feature
+            .execute(
+                "memory_ingest_lifecycle",
+                "unsupported",
+                serde_json::json!({
+                    "source_kind":"design-tree", "authority":"explicit", "section":"Decisions",
+                    "content":"zircon tests passed"
+                }),
+                CancellationToken::new(),
+            )
+            .await;
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert!(
+            result.is_err(),
+            "the authority string alone cannot establish explicit evidence"
+        );
+    }
+
+    #[tokio::test]
+    async fn lifecycle_explicit_tool_corrects_with_artifact_attribution_and_replay() {
+        let (feature, mut bus, dir) = managed_feature().await;
+        std::fs::create_dir_all(dir.path().join("docs/design")).unwrap();
+        std::fs::write(
+            dir.path().join("docs/design/zircon.md"),
+            lifecycle::TEST_DESIGN,
+        )
+        .unwrap();
+        let stored = feature
+            .execute(
+                "memory_store",
+                "old",
+                serde_json::json!({"section":"Decisions","content":"old zircon decision"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let old_id = stored.details["id"].as_str().unwrap().to_string();
+        let old = feature
+            .get_fact(old_id.clone(), CancellationToken::new())
+            .await
+            .unwrap()
+            .unwrap();
+        let args = serde_json::json!({"source_kind":"design-tree","authority":"explicit","section":"Decisions",
+            "content":"Use transactions: Keep corrections atomic.","artifact_ref_type":"design",
+            "artifact_ref_path":"docs/design/zircon.md","artifact_ref_sub":"Use transactions",
+            "supersedes":old_id,"supersedes_version":old.version});
+        let result = feature
+            .execute(
+                "memory_ingest_lifecycle",
+                "correct",
+                args.clone(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let replay = feature
+            .execute(
+                "memory_ingest_lifecycle",
+                "correct",
+                args,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let original = feature
+            .get_fact(old.id, CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert!(original.is_none());
+        assert_eq!(result.details["id"], replay.details["id"]);
+        assert_eq!(replay.details["replayed"], true);
+        assert_eq!(result.details["source"]["artifact_id"], "zircon");
+        assert!(result.details["version"].is_u64());
     }
 
     #[tokio::test]
