@@ -100,6 +100,71 @@ impl InMemoryBackend {
             _ => None,
         };
         match mutation {
+            MemoryMutation::ConfirmLifecycleCandidate {
+                candidate,
+                snapshot_hash,
+                session_id,
+                request_id,
+                surface,
+                supersedes,
+            } => {
+                Self::check_fact_precondition(state, &candidate)?;
+                let mut fact = state
+                    .facts
+                    .get(&candidate.id)
+                    .cloned()
+                    .ok_or_else(|| MemoryError::FactNotFound(candidate.id.clone()))?;
+                if let Some(target) = &supersedes {
+                    Self::check_fact_precondition(state, target)?;
+                    if state
+                        .facts
+                        .get(&target.id)
+                        .is_none_or(|old| old.mind != fact.mind || old.status != FactStatus::Active)
+                    {
+                        return Err(MemoryError::InvalidMutation(
+                            "confirmation correction requires an active fact in the same mind"
+                                .into(),
+                        ));
+                    }
+                }
+                crate::lifecycle::confirm_candidate(
+                    &mut fact,
+                    &snapshot_hash,
+                    session_id,
+                    request_id,
+                    surface,
+                    supersedes.as_ref(),
+                )?;
+                let mut original = None;
+                if let Some(target) = supersedes {
+                    let version = Self::next_version(state)?;
+                    let old = state.facts.get_mut(&target.id).unwrap();
+                    old.status = FactStatus::Superseded;
+                    old.version = version;
+                    old.superseded_at = Some(fact.last_reinforced.clone());
+                    original = Some(FactPrecondition {
+                        id: target.id,
+                        expected_version: version,
+                    });
+                }
+                let version = Self::next_version(state)?;
+                fact.version = version;
+                Self::insert_fact(state, candidate.id.clone(), fact)?;
+                Ok(match original {
+                    Some(original) => MemoryMutationEffect::FactSuperseded {
+                        original,
+                        replacement: FactPrecondition {
+                            id: candidate.id,
+                            expected_version: version,
+                        },
+                    },
+                    None => MemoryMutationEffect::FactStored {
+                        fact_id: candidate.id,
+                        version,
+                        action: StoreAction::Stored,
+                    },
+                })
+            }
             MemoryMutation::StoreLifecycleConclusion { .. } => Err(MemoryError::InvalidMutation(
                 "unlowered lifecycle conclusion".into(),
             )),
@@ -502,7 +567,11 @@ impl InMemoryBackend {
             }
             match serde_json::from_str::<JsonlRecord>(trimmed) {
                 Ok(JsonlRecord::Fact(jf)) => {
-                    validate_inference_status(&jf.status, jf.lifecycle_inference.as_deref())?;
+                    validate_inference_status(
+                        &jf.status,
+                        jf.lifecycle_inference.as_deref(),
+                        &jf.content,
+                    )?;
                     if let Some(operational) = &jf.operational {
                         operational.validate()?;
                     }
@@ -513,13 +582,11 @@ impl InMemoryBackend {
                         .unwrap_or_else(|| hash::content_hash(&jf.content));
                     if let Some(existing) = state.facts.get(&jf.id) {
                         if jf.version > existing.version {
-                            if existing.lifecycle_inference.is_some()
-                                && jf.status != FactStatus::Pending
-                            {
-                                return Err(MemoryError::InvalidMutation(
-                                    "transport cannot confirm lifecycle inference".into(),
-                                ));
-                            }
+                            validate_inference_import(
+                                existing.lifecycle_inference.as_deref(),
+                                jf.lifecycle_inference.as_deref(),
+                                &jf.status,
+                            )?;
                             let mut updated = existing.clone();
                             updated.content = jf.content;
                             updated.section = jf.section;
@@ -632,6 +699,16 @@ impl Default for InMemoryBackend {
 
 #[async_trait]
 impl MemoryBackend for InMemoryBackend {
+    async fn get_pending_fact(&self, mind: &str, id: &str) -> Result<Option<Fact>> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .facts
+            .get(id)
+            .filter(|fact| fact.mind == mind && fact.status == FactStatus::Pending)
+            .cloned())
+    }
     async fn mutation_receipt(
         &self,
         operation_id: &str,

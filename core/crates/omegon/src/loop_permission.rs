@@ -121,6 +121,51 @@ impl LoopInvocationFrontend {
             Err(error) => error,
         };
 
+        if let Some(confirmation) =
+            error
+                .downcast_ref::<crate::features::memory::confirmation::MemoryConfirmationRequired>()
+        {
+            let approved = self
+                .approve_memory_candidate(
+                    confirmation,
+                    request.visible_call_id,
+                    request.events,
+                    request.cancel.clone(),
+                )
+                .await;
+            request.permission_log.push(PermissionRecord {
+                tool_name: "memory_confirm".into(),
+                path: format!("memory snapshot {}", confirmation.request.snapshot_hash),
+                decision: if approved.is_some() {
+                    "allow_once"
+                } else {
+                    "deny"
+                }
+                .into(),
+                kind: omegon_traits::PermissionRequestKind::Policy,
+                persistence: omegon_traits::PermissionPersistence::None,
+                grant_path: None,
+            });
+            let Some(args) = approved else {
+                return LoopToolPresentation::Resolved(omegon_traits::ToolResult {content:vec![ContentBlock::Text {text:"Candidate confirmation was denied, cancelled, or unavailable; memory was not changed.".into()}],details:serde_json::json!({"status":"not_confirmed"})},false);
+            };
+            let call_id = format!("{}:operator-confirmation", request.visible_call_id);
+            return match invocations
+                .dispatch_internal(LoopInternalInvocationRequest {
+                    name: crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION,
+                    call_id: &call_id,
+                    args,
+                    cancel: request.cancel,
+                    principal: "kernel:memory-confirmation",
+                    authority_scope: Some(request.invocation_scope),
+                })
+                .await
+            {
+                Ok(result) => LoopToolPresentation::Resolved(result, false),
+                Err(error) => LoopToolPresentation::Resolved(error_result(error), true),
+            };
+        }
+
         if error
             .downcast_ref::<crate::tools::OperatorWaitRequired>()
             .is_some()
@@ -240,6 +285,36 @@ impl LoopInvocationFrontend {
             Ok(result) => LoopToolPresentation::Resolved(result, false),
             Err(error) => LoopToolPresentation::Resolved(error_result(error), true),
         }
+    }
+
+    async fn approve_memory_candidate(
+        &self,
+        confirmation: &crate::features::memory::confirmation::MemoryConfirmationRequired,
+        call_id: &str,
+        events: &tokio::sync::broadcast::Sender<AgentEvent>,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Option<serde_json::Value> {
+        let response = tokio::time::timeout(
+            Duration::from_secs(120),
+            self.permission_response(
+                call_id,
+                "memory_confirm",
+                confirmation.prompt.clone(),
+                events,
+                cancel.clone(),
+                omegon_traits::PermissionRequestKind::Policy,
+                omegon_traits::PermissionPersistence::None,
+                None,
+            ),
+        )
+        .await
+        .ok()?;
+        if cancel.is_cancelled() || response != omegon_traits::PermissionResponse::Allow {
+            return None;
+        }
+        Some(
+            serde_json::json!({"request":confirmation.request,"surface":if self.host.is_some() {"acp"} else {"native_event"}}),
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -384,14 +459,23 @@ pub(crate) async fn wait_for_permission_response(
     rx: std::sync::mpsc::Receiver<omegon_traits::PermissionResponse>,
     cancel: tokio_util::sync::CancellationToken,
 ) -> omegon_traits::PermissionResponse {
-    let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::task::spawn_blocking(move || {
-        let _ = notify_tx.send(rx.recv());
-    });
-    tokio::select! {
-        _ = cancel.cancelled() => omegon_traits::PermissionResponse::Deny,
-        response = notify_rx.recv() => response.and_then(Result::ok)
-            .unwrap_or(omegon_traits::PermissionResponse::Deny),
+    // The frontend contract uses std::mpsc. Keep the receiver in this future so
+    // cancellation/timeout drops it, rather than leaving a blocking recv task alive.
+    loop {
+        if cancel.is_cancelled() {
+            return omegon_traits::PermissionResponse::Deny;
+        }
+        match rx.try_recv() {
+            Ok(response) => return response,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                return omegon_traits::PermissionResponse::Deny;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+        tokio::select! {
+            _ = cancel.cancelled() => return omegon_traits::PermissionResponse::Deny,
+            _ = tokio::time::sleep(Duration::from_millis(20)) => {}
+        }
     }
 }
 
@@ -482,6 +566,140 @@ mod tests {
         assert_eq!(
             response.await,
             omegon_traits::PermissionResponse::AllowSession
+        );
+    }
+
+    fn memory_review() -> crate::features::memory::confirmation::MemoryConfirmationRequired {
+        crate::features::memory::confirmation::MemoryConfirmationRequired {
+            prompt: "Review the exact candidate".into(),
+            request: crate::features::memory::confirmation::ConfirmationRequest {
+                candidate: omegon_memory::FactPrecondition {
+                    id: "candidate".into(),
+                    expected_version: 7,
+                },
+                snapshot_hash: "a".repeat(64),
+                session_id: "session".into(),
+                request_id: "review".into(),
+                supersedes: None,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_permission_wait_releases_receiver_while_frontend_retains_sender() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let cancel = tokio_util::sync::CancellationToken::new();
+        cancel.cancel();
+        assert_eq!(
+            wait_for_permission_response(receiver, cancel).await,
+            omegon_traits::PermissionResponse::Deny
+        );
+        assert!(
+            sender
+                .send(omegon_traits::PermissionResponse::Allow)
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn dropped_permission_wait_releases_receiver_without_an_operator_response() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let mut wait = Box::pin(wait_for_permission_response(
+            receiver,
+            tokio_util::sync::CancellationToken::new(),
+        ));
+        assert!(futures::poll!(&mut wait).is_pending());
+        drop(wait);
+        assert!(
+            sender
+                .send(omegon_traits::PermissionResponse::Allow)
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn memory_confirmation_requires_current_single_request_operator_response() {
+        for decision in [
+            omegon_traits::PermissionResponse::Allow,
+            omegon_traits::PermissionResponse::Deny,
+            omegon_traits::PermissionResponse::AllowSession,
+        ] {
+            let frontend = LoopInvocationFrontend::default();
+            let (events, mut receiver) = tokio::sync::broadcast::channel(4);
+            let review = memory_review();
+            let (approved, ()) = tokio::join!(
+                frontend.approve_memory_candidate(
+                    &review,
+                    "call",
+                    &events,
+                    tokio_util::sync::CancellationToken::new()
+                ),
+                async {
+                    let AgentEvent::PermissionRequest {
+                        kind,
+                        persistence,
+                        respond,
+                        ..
+                    } = receiver.recv().await.unwrap()
+                    else {
+                        panic!("expected operator request");
+                    };
+                    assert_eq!(kind, omegon_traits::PermissionRequestKind::Policy);
+                    assert_eq!(persistence, omegon_traits::PermissionPersistence::None);
+                    respond
+                        .lock()
+                        .unwrap()
+                        .take()
+                        .unwrap()
+                        .send(decision)
+                        .unwrap();
+                }
+            );
+            assert_eq!(
+                approved.is_some(),
+                decision == omegon_traits::PermissionResponse::Allow
+            );
+            if let Some(approved) = approved {
+                assert_eq!(approved["surface"], "native_event");
+                assert_eq!(approved["request"]["candidate"]["expected_version"], 7);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn memory_confirmation_acp_and_cancellation_preserve_authority_boundary() {
+        let (frontend, mut receiver) = acp_frontend();
+        let (events, _) = tokio::sync::broadcast::channel(4);
+        let review = memory_review();
+        let (approved, ()) = tokio::join!(
+            frontend.approve_memory_candidate(
+                &review,
+                "call",
+                &events,
+                tokio_util::sync::CancellationToken::new()
+            ),
+            async {
+                let crate::host_context::HostProxyRequest::RequestPermission { reply, .. } =
+                    receiver.recv().await.unwrap()
+                else {
+                    panic!("expected host approval");
+                };
+                reply
+                    .send(Ok(RequestPermissionOutcome::Selected(
+                        SelectedPermissionOutcome::new(PermissionOptionId::new("allow_once")),
+                    )))
+                    .unwrap();
+            }
+        );
+        assert_eq!(approved.unwrap()["surface"], "acp");
+        let cancel = tokio_util::sync::CancellationToken::new();
+        cancel.cancel();
+        let local = LoopInvocationFrontend::default();
+        assert!(
+            local
+                .approve_memory_candidate(&review, "cancelled", &events, cancel)
+                .await
+                .is_none()
         );
     }
 

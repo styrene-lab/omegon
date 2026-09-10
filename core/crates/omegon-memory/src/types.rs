@@ -525,6 +525,14 @@ pub struct FactPrecondition {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MemoryMutation {
+    ConfirmLifecycleCandidate {
+        candidate: FactPrecondition,
+        snapshot_hash: String,
+        session_id: String,
+        request_id: String,
+        surface: ConfirmationSurface,
+        supersedes: Option<FactPrecondition>,
+    },
     StoreLifecycleConclusion {
         request: StoreFact,
         source: Box<crate::lifecycle::LifecycleConclusionSource>,
@@ -709,6 +717,8 @@ pub struct LifecycleConclusionSource {
 /// Attribution supplied with an unconfirmed lifecycle summary, not verified evidence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LifecycleInference {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmation: Option<CandidateConfirmation>,
     pub source_kind: String,
     pub artifact_ref_type: Option<String>,
     pub artifact_ref_path: Option<String>,
@@ -719,6 +729,9 @@ pub struct LifecycleInference {
 
 impl LifecycleInference {
     pub fn validate(&self) -> crate::backend::Result<()> {
+        if let Some(confirmation) = &self.confirmation {
+            confirmation.validate()?;
+        }
         for value in [
             Some(&self.source_kind),
             self.artifact_ref_type.as_ref(),
@@ -743,14 +756,96 @@ impl LifecycleInference {
 pub(crate) fn validate_inference_status(
     status: &FactStatus,
     inference: Option<&LifecycleInference>,
+    content: &str,
 ) -> crate::backend::Result<()> {
-    if (*status == FactStatus::Pending) != inference.is_some() {
+    if (*status == FactStatus::Pending)
+        != inference.is_some_and(|inference| inference.confirmation.is_none())
+    {
         return Err(crate::MemoryError::InvalidMutation(
             "lifecycle inferences must remain pending".into(),
         ));
     }
     if let Some(inference) = inference {
         inference.validate()?;
+        if inference.confirmation.as_ref().is_some_and(|confirmation| {
+            confirmation.content_sha256 != crate::retrieval::raw_content_hash(content)
+        }) {
+            return Err(crate::MemoryError::InvalidMutation(
+                "confirmed content does not match operator review".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfirmationSurface {
+    /// Shared native agent-event approval channel; not a specific frontend identity.
+    NativeEvent,
+    Acp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CandidateConfirmation {
+    pub reviewed_version: u64,
+    pub snapshot_sha256: String,
+    pub session_id: String,
+    pub request_id: String,
+    pub surface: ConfirmationSurface,
+    pub confirmed_at: String,
+    pub content_sha256: String,
+}
+
+impl CandidateConfirmation {
+    pub fn validate(&self) -> crate::backend::Result<()> {
+        for value in [&self.session_id, &self.request_id] {
+            if value.is_empty() || value.len() > 2048 || value.chars().any(char::is_control) {
+                return Err(crate::MemoryError::InvalidMutation(
+                    "invalid confirmation provenance".into(),
+                ));
+            }
+        }
+        if self.reviewed_version > i64::MAX as u64
+            || self.snapshot_sha256.len() != 64
+            || !self
+                .snapshot_sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+            || chrono::DateTime::parse_from_rfc3339(&self.confirmed_at).is_err()
+            || self.content_sha256.len() != 64
+            || !self
+                .content_sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(crate::MemoryError::InvalidMutation(
+                "invalid confirmation timestamp or digest".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn validate_inference_import(
+    existing: Option<&LifecycleInference>,
+    incoming: Option<&LifecycleInference>,
+    status: &FactStatus,
+) -> crate::backend::Result<()> {
+    if let Some(existing) = existing {
+        if existing.confirmation.is_none()
+            && (*status != FactStatus::Pending
+                || incoming.is_some_and(|inference| inference.confirmation.is_some()))
+        {
+            return Err(crate::MemoryError::InvalidMutation(
+                "transport cannot confirm lifecycle inference".into(),
+            ));
+        }
+        if existing.confirmation.is_some() && incoming != Some(existing) {
+            return Err(crate::MemoryError::InvalidMutation(
+                "transport cannot rewrite operator confirmation attribution".into(),
+            ));
+        }
     }
     Ok(())
 }

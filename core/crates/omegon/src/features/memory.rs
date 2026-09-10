@@ -90,6 +90,7 @@ impl std::fmt::Display for MemoryFeatureInvokeError {
 
 impl std::error::Error for MemoryFeatureInvokeError {}
 
+pub(crate) mod confirmation;
 mod formation;
 mod lifecycle;
 
@@ -749,6 +750,12 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 }),
                 capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
+            ToolDefinition {
+                name: crate::tool_registry::memory::MEMORY_CONFIRM.into(),label:"memory_confirm".into(),
+                description:"Request operator review of a pending lifecycle candidate. Only an interactive operator response can confirm it; no approval flag is accepted.".into(),
+                parameters:serde_json::json!({"type":"object","required":["candidate_id"],"additionalProperties":false,"properties":{"candidate_id":{"type":"string"}}}),
+                capabilities:vec![omegon_traits::ToolCapability::StateChanging],
+            },
         ]
     }
 
@@ -1268,6 +1275,149 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     details: Value::Null,
                 })
             }
+            crate::tool_registry::memory::MEMORY_CONFIRM => {
+                let object = args
+                    .as_object()
+                    .ok_or_else(|| anyhow::anyhow!("invalid confirmation request"))?;
+                if object.len() != 1 {
+                    anyhow::bail!(
+                        "confirmation accepts only candidate_id; approval is supplied by the operator surface"
+                    );
+                }
+                let id = args["candidate_id"]
+                    .as_str()
+                    .filter(|id| !id.is_empty())
+                    .ok_or_else(|| anyhow::anyhow!("candidate_id is required"))?
+                    .to_string();
+                let request_id = self.tool_operation_id(call_id, "confirmation")?;
+                let session_id = self
+                    .session_id
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .ok_or_else(|| anyhow::anyhow!("memory session identity is unavailable"))?;
+                let payload = self
+                    .invoke(crate::memory_service::MemoryRequestV1::GetPendingFact {
+                        scope: crate::memory_service::MemoryScopeV1::Project,
+                        mind: self.mind.clone(),
+                        id: id.clone(),
+                        cancellation: cancel.clone(),
+                    })
+                    .await?;
+                let crate::memory_service::MemoryPayloadV1::Fact(candidate) = payload else {
+                    anyhow::bail!("unexpected candidate response");
+                };
+                let Some(candidate) = *candidate else {
+                    if let Some(fact) = self.get_fact(id.clone(), cancel).await?
+                        && fact.mind == self.mind
+                        && fact
+                            .lifecycle_inference
+                            .as_ref()
+                            .and_then(|inference| inference.confirmation.as_ref())
+                            .is_some_and(|confirmation| confirmation.request_id == request_id)
+                    {
+                        return Ok(ToolResult {
+                            content: vec![ContentBlock::Text {
+                                text: format!(
+                                    "Candidate [{id}] was already confirmed by this operator request."
+                                ),
+                            }],
+                            details: serde_json::json!({"id":id,"status":"active","replayed":true}),
+                        });
+                    }
+                    anyhow::bail!("pending candidate not found in this mind");
+                };
+                if candidate.content.len() > 65_536
+                    || candidate.id.len() > 2048
+                    || candidate.mind.len() > 2048
+                {
+                    anyhow::bail!("candidate exceeds operator review bounds");
+                }
+                let inference = candidate
+                    .lifecycle_inference
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("candidate attribution is unavailable"))?;
+                let mut correction = String::new();
+                let supersedes = if let Some(id) = &inference.proposed_supersedes {
+                    let target = self
+                        .get_fact(id.clone(), cancel.clone())
+                        .await?
+                        .filter(|fact| fact.mind == self.mind)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("correction target is not active in this mind")
+                        })?;
+                    if target.content.len() > 65_536 || target.id.len() > 2048 {
+                        anyhow::bail!("correction target exceeds operator review bounds");
+                    }
+                    correction = format!(
+                        "\nReplace [{}] version {}:\n{}",
+                        confirmation::readable(&target.id),
+                        target.version,
+                        confirmation::readable(&target.content)
+                    );
+                    Some(FactPrecondition {
+                        id: target.id,
+                        expected_version: target.version,
+                    })
+                } else {
+                    None
+                };
+                let attribution = serde_json::to_string(inference)?;
+                let prompt = format!(
+                    "Confirm this inference as project memory? This does not verify execution outcomes.\nMind: {}\nCandidate [{}] version {}:\n{}\nDeclared attribution: {}{}",
+                    confirmation::readable(&candidate.mind),
+                    confirmation::readable(&candidate.id),
+                    candidate.version,
+                    confirmation::readable(&candidate.content),
+                    attribution,
+                    correction
+                );
+                return Err(confirmation::MemoryConfirmationRequired {
+                    prompt,
+                    request: confirmation::ConfirmationRequest {
+                        snapshot_hash: omegon_memory::lifecycle::candidate_snapshot_hash(
+                            &candidate,
+                        )?,
+                        candidate: FactPrecondition {
+                            id: candidate.id,
+                            expected_version: candidate.version,
+                        },
+                        session_id,
+                        request_id,
+                        supersedes,
+                    },
+                }
+                .into());
+            }
+            crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION => {
+                let request: confirmation::ConfirmationRequest =
+                    serde_json::from_value(args["request"].clone())?;
+                let surface: omegon_memory::ConfirmationSurface =
+                    serde_json::from_value(args["surface"].clone())?;
+                let outcome = self
+                    .apply_mutation(
+                        request.request_id.clone(),
+                        MemoryMutation::ConfirmLifecycleCandidate {
+                            candidate: request.candidate,
+                            snapshot_hash: request.snapshot_hash,
+                            session_id: request.session_id,
+                            request_id: request.request_id,
+                            supersedes: request.supersedes,
+                            surface,
+                        },
+                        cancel,
+                    )
+                    .await?;
+                self.context_dirty.store(true, Ordering::Relaxed);
+                self.pending_status_refresh.store(true, Ordering::Relaxed);
+                self.refresh_status().await;
+                Ok(ToolResult {
+                    content: vec![ContentBlock::Text {
+                        text: "Operator-confirmed candidate admitted to active memory.".into(),
+                    }],
+                    details: serde_json::json!({"status":"active","outcome":outcome}),
+                })
+            }
             crate::tool_registry::memory::MEMORY_INGEST_LIFECYCLE => {
                 // Lifecycle fact ingestion — stores with source metadata
                 let content = args["content"].as_str().unwrap_or("").to_string();
@@ -1299,6 +1449,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                                     source: Some(format!("lifecycle:{source_kind}")),
                                 },
                                 inference: Box::new(omegon_memory::LifecycleInference {
+                                    confirmation: None,
                                     source_kind: source_kind.into(),
                                     artifact_ref_type: reference("artifact_ref_type")?,
                                     artifact_ref_path: reference("artifact_ref_path")?,
@@ -1447,6 +1598,8 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                             | crate::tool_registry::memory::MEMORY_FOCUS
                             | crate::tool_registry::memory::MEMORY_RELEASE
                             | crate::tool_registry::memory::MEMORY_INGEST_LIFECYCLE
+                            | crate::tool_registry::memory::MEMORY_CONFIRM
+                            | crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION
                     )
                     && self.pending_status_refresh.swap(false, Ordering::Relaxed) =>
             {
@@ -2174,10 +2327,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn feature_exposes_12_tools() {
+    async fn feature_exposes_public_memory_tools_without_internal_confirmation() {
         let feature = MemoryFeature::new(Default::default(), "test".into());
         let tools = feature.tools();
-        assert_eq!(tools.len(), 12, "Should have exactly 12 memory tools");
+        assert_eq!(tools.len(), 13, "public memory tool inventory");
 
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"memory_store"));
@@ -2192,6 +2345,8 @@ mod tests {
         assert!(names.contains(&"memory_compact"));
         assert!(names.contains(&"memory_search_archive"));
         assert!(names.contains(&"memory_ingest_lifecycle"));
+        assert!(names.contains(&"memory_confirm"));
+        assert!(!names.contains(&"memory_apply_confirmation"));
     }
 
     #[test]
@@ -2208,6 +2363,7 @@ mod tests {
             "memory_release",
             "memory_compact",
             "memory_ingest_lifecycle",
+            "memory_confirm",
         ] {
             let tool = tools.iter().find(|tool| tool.name == name).unwrap();
             assert!(
@@ -2502,6 +2658,176 @@ mod tests {
         );
         assert_eq!(result.details["status"], "pending");
         assert_eq!(recall.details["count"], 0);
+    }
+
+    #[tokio::test]
+    async fn confirmation_tool_cannot_accept_agent_approval_flags_or_expose_internal_commit() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        let candidate=feature.execute("memory_ingest_lifecycle","candidate",serde_json::json!({"source_kind":"design-tree","authority":"inferred","section":"Decisions","content":"zircon inference"}),CancellationToken::new()).await.unwrap();
+        let id = candidate.details["id"].as_str().unwrap();
+        assert!(
+            feature
+                .execute(
+                    "memory_confirm",
+                    "review",
+                    serde_json::json!({"candidate_id":id,"approved":true}),
+                    CancellationToken::new()
+                )
+                .await
+                .is_err()
+        );
+        let error = feature
+            .execute(
+                "memory_confirm",
+                "review",
+                serde_json::json!({"candidate_id":id}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        let review = error
+            .downcast::<confirmation::MemoryConfirmationRequired>()
+            .unwrap();
+        assert!(
+            feature
+                .get_fact(id.into(), CancellationToken::new())
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            !feature
+                .tools()
+                .iter()
+                .any(|tool| tool.name == crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION)
+        );
+        let mut public_bus = crate::bus::EventBus::new();
+        public_bus.register(Box::new(MemoryFeature::new(
+            Default::default(),
+            "test".into(),
+        )));
+        public_bus.register_internal_tool(
+            crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION,
+            "memory",
+        );
+        assert!(
+            public_bus
+                .execute_tool(
+                    crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION,
+                    "forged",
+                    serde_json::json!({}),
+                    CancellationToken::new()
+                )
+                .await
+                .is_err()
+        );
+        feature
+            .execute(
+                crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION,
+                "kernel",
+                serde_json::json!({"request":review.request,"surface":"native_event"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            feature
+                .get_fact(id.into(), CancellationToken::new())
+                .await
+                .unwrap()
+                .is_some()
+        );
+        let replay = feature
+            .execute(
+                "memory_confirm",
+                "review",
+                serde_json::json!({"candidate_id":id}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(replay.details["replayed"], true);
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
+    async fn confirmation_internal_dispatch_requires_runtime_principal() {
+        let dir = tempfile::tempdir().unwrap();
+        let binding = crate::memory_service::MemoryBinding::default();
+        let mut feature = MemoryFeature::new(binding.clone(), "test".into());
+        feature.on_event(&BusEvent::SessionStart {
+            session_id: "fixture-session".into(),
+            cwd: dir.path().into(),
+        });
+        let mut bus = crate::bus::EventBus::new();
+        bus.register(Box::new(feature));
+        bus.register_internal_tool(
+            crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION,
+            "memory",
+        );
+        let candidate =
+            crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
+                project_memory_root: dir.path().into(),
+                project_db_path: dir.path().join("facts.db"),
+                project_jsonl_path: dir.path().join("facts.jsonl"),
+                global_db_path: None,
+                vault: None,
+                startup_sync_enabled: false,
+            })
+            .await
+            .unwrap();
+        bus.stage_managed_generation("memory", candidate).unwrap();
+        bus.try_finalize_managed().await.unwrap();
+        binding.capture(&bus).unwrap();
+        let stored=bus.execute_tool("memory_ingest_lifecycle","candidate",serde_json::json!({"source_kind":"design-tree","authority":"inferred","section":"Decisions","content":"zircon inference"}),CancellationToken::new()).await.unwrap();
+        let error = bus
+            .execute_tool(
+                "memory_confirm",
+                "review",
+                serde_json::json!({"candidate_id":stored.details["id"]}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        let review = error
+            .downcast::<confirmation::MemoryConfirmationRequired>()
+            .unwrap();
+        let args = serde_json::json!({"request":review.request,"surface":"native_event"});
+        assert!(
+            bus.invoke_internal(
+                crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION,
+                "forged",
+                args.clone(),
+                CancellationToken::new(),
+                Default::default()
+            )
+            .await
+            .is_err()
+        );
+        let result = bus
+            .invoke_internal(
+                crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION,
+                "kernel",
+                args,
+                CancellationToken::new(),
+                crate::invocation_service::InvocationScope {
+                    principal: "kernel:memory-confirmation".into(),
+                    principal_class: omegon_traits::RuntimePrincipalClass::Internal,
+                    surface: omegon_traits::RuntimeSurface::Internal,
+                    ..Default::default()
+                },
+            )
+            .await;
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert_eq!(result.unwrap().details["status"], "active");
     }
 
     #[tokio::test]

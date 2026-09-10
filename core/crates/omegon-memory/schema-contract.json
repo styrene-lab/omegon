@@ -1,6 +1,6 @@
 {
   "description": "Canonical memory DB schema. Generated from Rust omegon-memory. Do not edit — regenerate with: cargo test -p omegon-memory schema_contract_generate -- --ignored",
-  "schema_version": 11,
+  "schema_version": 12,
   "tables": {
     "edges": ["id", "source_fact_id", "target_fact_id", "relation", "description", "confidence", "last_reinforced", "reinforcement_count", "decay_rate", "status", "created_at", "created_session", "source_mind", "target_mind"],
     "embedding_metadata": ["model_name", "dims", "inserted_at"],

@@ -427,7 +427,7 @@ pub(crate) fn ensure_project_memory_store_ready(
             Ok(Some(result))
         }
         version => anyhow::bail!(
-            "unsupported memory schema v{version} at {}; run `omegon memory migrate --status --path {}` and restore a supported v5-v10 backup or upgrade Omegon",
+            "unsupported memory schema v{version} at {}; run `omegon memory migrate --status --path {}` and restore a supported v5-v11 backup or upgrade Omegon",
             db_path.display(),
             db_path.display()
         ),
@@ -772,6 +772,10 @@ impl AgentSetup {
         );
         bus.register(Box::new(memory_feature));
         bus.register_internal_tool(crate::tool_registry::memory::MEMORY_STORE, "memory");
+        bus.register_internal_tool(
+            crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION,
+            "memory",
+        );
 
         // ─── Lifecycle (design-tree + openspec) ──────────────────────────
         // Use project root (git repo root), not cwd — docs/ and openspec/

@@ -189,6 +189,13 @@ pub(crate) enum MemoryToolMutationV1 {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum MemoryRequestV1 {
+    GetPendingFact {
+        scope: MemoryScopeV1,
+        mind: String,
+        id: String,
+        #[serde(skip, default)]
+        cancellation: CancellationToken,
+    },
     Status {
         scope: MemoryScopeV1,
         #[serde(skip, default)]
@@ -390,6 +397,7 @@ impl MemoryRequestV1 {
             Self::Status { cancellation, .. }
             | Self::Stats { cancellation, .. }
             | Self::GetFact { cancellation, .. }
+            | Self::GetPendingFact { cancellation, .. }
             | Self::ListFactsPage { cancellation, .. }
             | Self::HybridSearch { cancellation, .. }
             | Self::ContextSnapshot { cancellation, .. }
@@ -1516,6 +1524,10 @@ fn execute_request(
                     .get_fact(&id)
                     .await
                     .map(|fact| MemoryPayloadV1::Fact(Box::new(fact))),
+                MemoryRequestV1::GetPendingFact { mind, id, .. } => backend
+                    .get_pending_fact(&mind, &id)
+                    .await
+                    .map(|fact| MemoryPayloadV1::Fact(Box::new(fact))),
                 MemoryRequestV1::ListFactsPage {
                     mind,
                     filter,
@@ -1938,6 +1950,7 @@ fn request_scope(request: &MemoryRequestV1) -> MemoryScopeV1 {
         MemoryRequestV1::Status { scope, .. }
         | MemoryRequestV1::Stats { scope, .. }
         | MemoryRequestV1::GetFact { scope, .. }
+        | MemoryRequestV1::GetPendingFact { scope, .. }
         | MemoryRequestV1::ListFactsPage { scope, .. }
         | MemoryRequestV1::HybridSearch { scope, .. }
         | MemoryRequestV1::ContextSnapshot { scope, .. }

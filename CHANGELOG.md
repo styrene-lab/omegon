@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- `memory_confirm` now requests per-candidate operator approval through TUI or ACP. Only the runtime's internal confirmation route can activate the reviewed snapshot, with version-checked atomic corrections and durable session/surface attribution. Schema v12 distinguishes confirmed inferences from pending ones and preserves their metadata through transport; corrupt confirmed rows fail inventory reads rather than disappearing from vault publication.
+
 - Explicit lifecycle ingestion now checks bounded repository artifacts before admitting decisions, constraints, or baseline/archived specification conclusions. Portable source attribution retains artifact and statement hashes. Corrections require a target version and commit supersession atomically within one mind; recall now displays fact versions for those preconditions.
 
 - Inferred lifecycle summaries now persist as pending candidates with declared artifact references and proposed supersession intent. They are excluded from recall, ambient/pinned context, indexing, and vault publication. Schema v11 preserves candidate attribution and replay receipts; supported v5–v10 stores migrate through the existing backup workflow. JSONL transport cannot promote a retained inference to active knowledge.

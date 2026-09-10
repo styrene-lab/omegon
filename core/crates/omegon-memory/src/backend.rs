@@ -71,6 +71,11 @@ fn validate_mutation(mutation: &MemoryMutation) -> Result<()> {
         source.validate(&request.content, &request.section)?;
     }
     if let MemoryMutation::StoreLifecycleInference { request, inference } = mutation {
+        if inference.confirmation.is_some() {
+            return Err(MemoryError::InvalidMutation(
+                "inference ingestion cannot supply confirmation".into(),
+            ));
+        }
         inference.validate()?;
         if request.content.trim().is_empty() || request.content.len() > 65_536 {
             return Err(MemoryError::InvalidMutation(
@@ -133,6 +138,11 @@ pub(crate) fn persisted_lamport_version(version: u64) -> Result<i64> {
 /// and potential future async backends.
 #[async_trait]
 pub trait MemoryBackend: Send + Sync {
+    async fn get_pending_fact(&self, _mind: &str, _id: &str) -> Result<Option<Fact>> {
+        Err(MemoryError::InvalidMutation(
+            "pending lookup unsupported".into(),
+        ))
+    }
     /// Apply a payload-bound mutation exactly once. Reusing `operation_id` with
     /// the same payload returns the recorded effect; a different payload fails.
     async fn apply_mutation(

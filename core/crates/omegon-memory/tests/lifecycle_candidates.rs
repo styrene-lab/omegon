@@ -10,6 +10,7 @@ fn mutation() -> MemoryMutation {
             decay_profile: Default::default(),
         },
         inference: Box::new(LifecycleInference {
+            confirmation: None,
             source_kind: "design-tree".into(),
             artifact_ref_type: Some("design".into()),
             artifact_ref_path: Some("docs/design/zircon.md".into()),
