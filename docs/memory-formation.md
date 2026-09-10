@@ -137,6 +137,41 @@ It cannot promote an existing pending candidate or rewrite a retained confirmati
 Cold-store imports carry the originating record's attribution rather than asserting
 that the local operator performed a new review.
 
+## Provenance inspection
+
+Use `memory_inspect` with `fact_id` to read a fact's recorded provenance and source
+availability. It also accepts IDs of pending, archived, dormant, and superseded
+records in the current mind. Historical records are returned as stored, without
+substituting a current replacement.
+
+The shared inspection projection reports lifecycle status, version, stored
+timestamps, confidence, reinforcement count, and attribution. Content previews are
+limited to 2,048 characters and source-label previews to 512 characters. Truncation
+is explicit, and `content_sha256` always identifies the full stored content.
+
+The provenance `basis` distinguishes explicit artifact attribution, unconfirmed
+inferences, operator-confirmed inferences, invalid metadata, and `legacy_unknown`.
+The last category includes any record with only an unstructured source label,
+regardless of its creation date. A free-form label cannot establish operator
+approval or successful execution.
+
+Hosted inspection checks supported repository artifact references with the existing
+bounded reader. `evidence_availability` reports:
+
+| Value | Meaning |
+|---|---|
+| `no_reference` | No usable structured reference was recorded |
+| `not_checked` | A reference exists but this adapter has not checked it |
+| `snapshot_matches` | Current bytes match the recorded artifact hash |
+| `snapshot_changed` | Current bytes differ from that hash |
+| `readable_unverified` | A declared reference is readable but has no validated artifact hash |
+| `unavailable` | The configured reader cannot currently read the source |
+| `unsupported_reference` | The reference type or path is outside the supported lifecycle scope |
+
+The standalone `MemoryProvider` reports recorded metadata without a filesystem
+binding. Inspection does not establish execution success or current applicability.
+Source availability never changes the fact's status, confidence, or reinforcement.
+
 ## Explicit lifecycle conclusions
 
 `authority: "explicit"` requires a matching structured artifact. The authority

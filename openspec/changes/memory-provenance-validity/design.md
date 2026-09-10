@@ -128,3 +128,19 @@ constitute a cryptographic proof of local operator presence.
 Inventory read failures propagate so corrupt confirmation data cannot be mistaken
 for removed facts during vault publication. Approval is bounded to 120 seconds;
 headless callers without a responding operator surface do not receive confirmation.
+
+## Wave 5 read-only provenance inspection
+
+Add a status-neutral, mind-scoped lookup and a shared `FactInspection` projection.
+Inspection preserves the requested record instead of substituting an active
+replacement. It reports lifecycle status, stored timestamps and reinforcement,
+bounded Unicode excerpts, a full-content digest, and the recorded attribution basis.
+Legacy labels do not become evidence of operator approval or successful execution.
+
+The host can resolve known lifecycle artifact references through the existing
+descriptor-relative reader. Report matching/changed snapshots, readable unverified
+references, unavailable sources, and unsupported references separately. The
+standalone provider reports `not_checked` when it has no filesystem binding.
+Reading a declared reference never turns an inference into an explicit conclusion.
+Availability does not change confidence, status, applicability, or reinforcement.
+No schema migration is required for this read-only projection.

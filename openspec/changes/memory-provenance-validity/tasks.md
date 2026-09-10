@@ -55,3 +55,10 @@
 - [x] RED/GREEN: Add snapshot-bound confirmation with recorded operator context, stale-version rejection, atomic correction, receipt replay, reopen, and transport tests.
 - [x] Route public review requests through TUI/ACP permissions and keep the commit invocation internal; reject agent approval flags and non-internal dispatch.
 - [x] Complete schema-v12, corruption/vault-boundary, frontend, and final landing gates; record acceptance in verification-wave-5-confirmation.md.
+
+## 8. Wave 5 provenance inspection
+<!-- specs: memory/provenance -->
+
+- [x] RED/GREEN: Add shared status-neutral inspection, with explicit legacy/inferred/confirmed/artifact attribution and bounded previews.
+- [x] Verify missing, changed, readable-unverified, and unsupported artifact references without altering durable state.
+- [x] Complete cross-backend/provider checks and host/landing gates in verification-wave-5-inspection.md.

@@ -70,3 +70,15 @@ Given a fact refers to an artifact that cannot currently be read
 When the fact's evidence is inspected
 Then the reference is reported as unavailable
 And the fact and its history are not deleted
+
+#### Scenario: Changed artifact snapshot remains inspectable
+Given a fact retains the hash of its originating artifact snapshot
+When inspection reads different current artifact bytes
+Then it reports that the snapshot changed
+And preserves the fact's recorded content, status, and confidence
+
+#### Scenario: Readable declared reference remains unverified
+Given an inferred claim has a declared artifact path without a validated snapshot hash
+When inspection can read that artifact
+Then it reports a readable unverified reference
+And it does not reclassify the inference as observed or explicit evidence
