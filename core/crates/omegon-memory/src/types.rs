@@ -125,7 +125,58 @@ pub enum DecayProfileName {
     RecentWork,
 }
 
-/// A fact with search scoring attached.
+/// Recorded provenance class; not a permission or execution proof.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProvenanceBasis {
+    LegacyUnknown,
+    ExplicitArtifact,
+    UnconfirmedInference,
+    OperatorConfirmedInference,
+    InvalidMetadata,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceAvailability {
+    NotChecked,
+    NoReference,
+    SnapshotMatches,
+    SnapshotChanged,
+    ReadableUnverified,
+    Unavailable,
+    UnsupportedReference,
+}
+
+/// Read-only fact/provenance projection. Excerpts are explicitly bounded previews.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FactInspection {
+    pub id: String,
+    pub mind: String,
+    pub section: Section,
+    pub status: FactStatus,
+    pub version: u64,
+    pub content_excerpt: String,
+    pub content_truncated: bool,
+    pub content_sha256: String,
+    pub created_at: String,
+    pub created_session: Option<String>,
+    pub last_reinforced: String,
+    pub reinforcement_count: u32,
+    pub confidence: f64,
+    pub supersedes: Option<String>,
+    pub superseded_at: Option<String>,
+    pub archived_at: Option<String>,
+    pub basis: ProvenanceBasis,
+    pub artifact: Option<Box<LifecycleConclusionSource>>,
+    pub inference: Option<Box<LifecycleInference>>,
+    pub source_excerpt: Option<String>,
+    pub source_truncated: bool,
+    pub evidence_availability: EvidenceAvailability,
+    pub diagnostic: Option<String>,
+}
+
+/// An explicit embedding-space identity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmbeddingSpace {
     pub model: String,

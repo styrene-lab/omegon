@@ -24,6 +24,7 @@ pub mod embedding;
 pub mod formation;
 pub mod hash;
 pub mod inmemory;
+pub mod inspection;
 pub mod lifecycle;
 pub mod maintenance;
 #[cfg(feature = "agent")]

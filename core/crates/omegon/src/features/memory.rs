@@ -751,6 +751,12 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
             ToolDefinition {
+                name:crate::tool_registry::memory::MEMORY_INSPECT.into(),label:"memory_inspect".into(),
+                description:"Read-only inspection of one active, historical, or pending fact, its recorded provenance, and bounded artifact availability. Does not reinforce or reactivate memory.".into(),
+                parameters:serde_json::json!({"type":"object","required":["fact_id"],"additionalProperties":false,"properties":{"fact_id":{"type":"string"}}}),
+                capabilities:vec![omegon_traits::ToolCapability::Orientation],
+            },
+            ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_CONFIRM.into(),label:"memory_confirm".into(),
                 description:"Request operator review of a pending lifecycle candidate. Only an interactive operator response can confirm it; no approval flag is accepted.".into(),
                 parameters:serde_json::json!({"type":"object","required":["candidate_id"],"additionalProperties":false,"properties":{"candidate_id":{"type":"string"}}}),
@@ -1273,6 +1279,33 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         text: lines.join("\n"),
                     }],
                     details: Value::Null,
+                })
+            }
+            crate::tool_registry::memory::MEMORY_INSPECT => {
+                let id = omegon_memory::inspection::fact_id(&args)?.to_string();
+                let payload = self
+                    .invoke(crate::memory_service::MemoryRequestV1::GetFactRecord {
+                        scope: crate::memory_service::MemoryScopeV1::Project,
+                        mind: self.mind.clone(),
+                        id,
+                        cancellation: cancel.clone(),
+                    })
+                    .await?;
+                let crate::memory_service::MemoryPayloadV1::Fact(fact) = payload else {
+                    anyhow::bail!("unexpected fact inspection response");
+                };
+                let fact = (*fact).ok_or_else(|| anyhow::anyhow!("fact not found in this mind"))?;
+                let inspection = omegon_memory::FactInspection::from_fact(&fact);
+                let root = self.status_root.clone();
+                let inspection = tokio::select! {
+                    _ = cancel.cancelled() => return Err(MemoryFeatureInvokeError(ManagedServiceCallError::Cancelled).into()),
+                    result=tokio::task::spawn_blocking(move || lifecycle::inspect_source(&root,inspection)) => result?,
+                };
+                Ok(ToolResult {
+                    content: vec![ContentBlock::Text {
+                        text: omegon_memory::inspection::render(&inspection)?,
+                    }],
+                    details: serde_json::to_value(inspection)?,
                 })
             }
             crate::tool_registry::memory::MEMORY_CONFIRM => {
@@ -2330,7 +2363,7 @@ mod tests {
     async fn feature_exposes_public_memory_tools_without_internal_confirmation() {
         let feature = MemoryFeature::new(Default::default(), "test".into());
         let tools = feature.tools();
-        assert_eq!(tools.len(), 13, "public memory tool inventory");
+        assert_eq!(tools.len(), 14, "public memory tool inventory");
 
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"memory_store"));
@@ -2346,6 +2379,7 @@ mod tests {
         assert!(names.contains(&"memory_search_archive"));
         assert!(names.contains(&"memory_ingest_lifecycle"));
         assert!(names.contains(&"memory_confirm"));
+        assert!(names.contains(&"memory_inspect"));
         assert!(!names.contains(&"memory_apply_confirmation"));
     }
 
@@ -2545,6 +2579,158 @@ mod tests {
             .unwrap_err();
 
         assert!(err.to_string().contains("invalid memory section 'Notes'"));
+    }
+
+    #[tokio::test]
+    async fn inspection_reports_unavailable_declared_source_without_mutation() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        let stored=feature.execute("memory_ingest_lifecycle","candidate",serde_json::json!({"source_kind":"design-tree","authority":"inferred","section":"Decisions","content":"zircon unverified conclusion",
+            "artifact_ref_type":"design","artifact_ref_path":"docs/design/missing.md"}),CancellationToken::new()).await.unwrap();
+        let id = stored.details["id"].as_str().unwrap().to_string();
+        let pending = || crate::memory_service::MemoryRequestV1::GetPendingFact {
+            scope: crate::memory_service::MemoryScopeV1::Project,
+            mind: "test".into(),
+            id: id.clone(),
+            cancellation: CancellationToken::new(),
+        };
+        let before = serde_json::to_value(feature.invoke(pending()).await.unwrap()).unwrap();
+        let inspected = feature
+            .execute(
+                "memory_inspect",
+                "inspect",
+                serde_json::json!({"fact_id":id}),
+                CancellationToken::new(),
+            )
+            .await;
+        let after = serde_json::to_value(feature.invoke(pending()).await.unwrap()).unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        let inspected = inspected.unwrap();
+        assert_eq!(inspected.details["status"], "pending");
+        assert_eq!(inspected.details["basis"], "unconfirmed_inference");
+        assert_eq!(inspected.details["evidence_availability"], "unavailable");
+        assert_eq!(before, after);
+    }
+
+    #[tokio::test]
+    async fn inspection_tracks_artifact_availability_without_reactivating_history() {
+        let (feature, mut bus, dir) = managed_feature().await;
+        std::fs::create_dir_all(dir.path().join("docs/design")).unwrap();
+        let path = dir.path().join("docs/design/zircon.md");
+        std::fs::write(&path, lifecycle::TEST_DESIGN).unwrap();
+        let stored=feature.execute("memory_ingest_lifecycle","explicit",serde_json::json!({"source_kind":"design-tree","authority":"explicit","section":"Decisions",
+            "content":"Use transactions: Keep corrections atomic.","artifact_ref_type":"design","artifact_ref_path":"docs/design/zircon.md","artifact_ref_sub":"Use transactions"}),CancellationToken::new()).await.unwrap();
+        let id = stored.details["id"].as_str().unwrap().to_string();
+        feature
+            .execute(
+                "memory_archive",
+                "archive",
+                serde_json::json!({"fact_ids":[id]}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let record = || crate::memory_service::MemoryRequestV1::GetFactRecord {
+            scope: crate::memory_service::MemoryScopeV1::Project,
+            mind: "test".into(),
+            id: id.clone(),
+            cancellation: CancellationToken::new(),
+        };
+        let before = serde_json::to_value(feature.invoke(record()).await.unwrap()).unwrap();
+        for (step, expected) in [
+            (0, "snapshot_matches"),
+            (1, "snapshot_changed"),
+            (2, "unavailable"),
+        ] {
+            if step == 1 {
+                std::fs::write(&path, lifecycle::TEST_DESIGN.replace("atomic", "guarded")).unwrap();
+            }
+            if step == 2 {
+                std::fs::remove_file(&path).unwrap();
+            }
+            let inspected = feature
+                .execute(
+                    "memory_inspect",
+                    "inspect",
+                    serde_json::json!({"fact_id":id}),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(inspected.details["evidence_availability"], expected);
+            if step == 0 {
+                let mut projection: omegon_memory::FactInspection =
+                    serde_json::from_value(inspected.details.clone()).unwrap();
+                let artifact = projection.artifact.as_mut().unwrap();
+                artifact.artifact_sha256 = artifact.artifact_sha256.to_uppercase();
+                assert_eq!(
+                    lifecycle::inspect_source(dir.path(), projection).evidence_availability,
+                    omegon_memory::EvidenceAvailability::SnapshotMatches
+                );
+            }
+            assert_eq!(inspected.details["status"], "archived");
+            assert_eq!(inspected.details["basis"], "explicit_artifact");
+        }
+        #[cfg(unix)]
+        {
+            let outside = tempfile::tempdir().unwrap();
+            let target = outside.path().join("secret.md");
+            std::fs::write(&target, lifecycle::TEST_DESIGN).unwrap();
+            std::os::unix::fs::symlink(target, &path).unwrap();
+            let inspected = feature
+                .execute(
+                    "memory_inspect",
+                    "symlink",
+                    serde_json::json!({"fact_id":id}),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(inspected.details["evidence_availability"], "unavailable");
+        }
+        let after = serde_json::to_value(feature.invoke(record()).await.unwrap()).unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert_eq!(before, after);
+    }
+
+    #[tokio::test]
+    async fn inspection_does_not_validate_declared_references_or_follow_unsupported_paths() {
+        let (feature, mut bus, dir) = managed_feature().await;
+        std::fs::create_dir_all(dir.path().join("docs/design")).unwrap();
+        std::fs::write(
+            dir.path().join("docs/design/plain.md"),
+            "plain text, not an explicit decision",
+        )
+        .unwrap();
+        for (path, expected) in [
+            ("docs/design/plain.md", "readable_unverified"),
+            ("../outside.md", "unsupported_reference"),
+        ] {
+            let stored=feature.execute("memory_ingest_lifecycle",path,serde_json::json!({"source_kind":"design-tree","authority":"inferred","section":"Decisions","content":"unverified","artifact_ref_type":"design","artifact_ref_path":path}),CancellationToken::new()).await.unwrap();
+            let inspected = feature
+                .execute(
+                    "memory_inspect",
+                    "inspect",
+                    serde_json::json!({"fact_id":stored.details["id"]}),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(inspected.details["evidence_availability"], expected);
+            assert_eq!(inspected.details["basis"], "unconfirmed_inference");
+        }
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
     }
 
     #[tokio::test]

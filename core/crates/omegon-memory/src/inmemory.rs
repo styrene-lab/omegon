@@ -699,6 +699,16 @@ impl Default for InMemoryBackend {
 
 #[async_trait]
 impl MemoryBackend for InMemoryBackend {
+    async fn get_fact_record(&self, mind: &str, id: &str) -> Result<Option<Fact>> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .facts
+            .get(id)
+            .filter(|fact| fact.mind == mind)
+            .cloned())
+    }
     async fn get_pending_fact(&self, mind: &str, id: &str) -> Result<Option<Fact>> {
         Ok(self
             .state

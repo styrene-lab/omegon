@@ -11,6 +11,73 @@ fn normalize(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+pub(super) fn inspect_source(
+    root: &Path,
+    mut inspection: omegon_memory::FactInspection,
+) -> omegon_memory::FactInspection {
+    use omegon_memory::{EvidenceAvailability as Availability, LifecycleConclusionKind as Kind};
+    let reference = if let Some(source) = &inspection.artifact {
+        let (kind, reference_type) = match source.kind {
+            Kind::Decision | Kind::Constraint => ("design-tree", "design"),
+            Kind::Specification => ("openspec", "spec"),
+        };
+        Some((
+            source.artifact_path.as_str(),
+            kind,
+            reference_type,
+            Some(source.artifact_sha256.as_str()),
+        ))
+    } else if let Some(inference) = &inspection.inference {
+        inference.artifact_ref_path.as_deref().map(|path| {
+            (
+                path,
+                inference.source_kind.as_str(),
+                inference.artifact_ref_type.as_deref().unwrap_or(""),
+                None,
+            )
+        })
+    } else {
+        None
+    };
+    let Some((path, kind, reference_type, expected)) = reference else {
+        return inspection;
+    };
+    let allowed = valid_path(path)
+        && ((kind == "design-tree"
+            && reference_type == "design"
+            && path.starts_with("docs/design/"))
+            || (kind == "openspec"
+                && reference_type == "spec"
+                && (path.starts_with("openspec/baseline/") || archived_spec(path))));
+    inspection.evidence_availability = if !allowed {
+        Availability::UnsupportedReference
+    } else {
+        match snapshot(root, path) {
+            Ok(bytes) => match expected {
+                Some(expected) => {
+                    use sha2::{Digest, Sha256};
+                    if format!("{:x}", Sha256::digest(&bytes)).eq_ignore_ascii_case(expected) {
+                        Availability::SnapshotMatches
+                    } else {
+                        Availability::SnapshotChanged
+                    }
+                }
+                None => Availability::ReadableUnverified,
+            },
+            Err(_) => Availability::Unavailable,
+        }
+    };
+    inspection
+}
+
+fn valid_path(path: &str) -> bool {
+    path.len() <= 2048
+        && !path.contains(['\\', ':'])
+        && !path.chars().any(char::is_control)
+        && path.split('/').all(|part| !matches!(part, "" | "." | ".."))
+        && path.ends_with(".md")
+}
+
 pub(super) fn validate(
     root: &Path,
     path: &str,
@@ -24,12 +91,7 @@ pub(super) fn validate(
     {
         anyhow::bail!("explicit lifecycle claim or subreference exceeds its bounds");
     }
-    if path.len() > 2048
-        || path.contains(['\\', ':'])
-        || path.chars().any(char::is_control)
-        || path.split('/').any(|part| matches!(part, "" | "." | ".."))
-        || !path.ends_with(".md")
-    {
+    if !valid_path(path) {
         anyhow::bail!("lifecycle artifact requires a repository-relative Markdown path");
     }
     let design = source_kind == "design-tree"

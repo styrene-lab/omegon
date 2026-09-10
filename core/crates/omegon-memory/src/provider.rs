@@ -52,6 +52,12 @@ impl<B: MemoryBackend, R: ContextRenderer> MemoryProvider<B, R> {
 fn tool_defs() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
+            name:"memory_inspect".into(),label:"memory_inspect".into(),
+            description:"Inspect one fact across active, historical, or pending states without reinforcement. Reports recorded provenance; artifact availability is not checked by the standalone provider.".into(),
+            parameters:serde_json::json!({"type":"object","required":["fact_id"],"additionalProperties":false,"properties":{"fact_id":{"type":"string"}}}),
+            capabilities:vec![ToolCapability::Orientation],
+        },
+        ToolDefinition {
             name: "memory_store".into(),
             label: "memory_store".into(),
             description: "Store a durable fact in Omegon runtime memory. Facts persist across sessions. Check existing facts first; supersede stale facts instead of storing paraphrases.".into(),
@@ -272,6 +278,24 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ToolProvider
         cancel: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<ToolResult> {
         match tool_name {
+            "memory_inspect" => {
+                let id = crate::inspection::fact_id(&args)?;
+                if cancel.is_cancelled() {
+                    return Err(crate::MemoryError::Cancelled.into());
+                }
+                let fact = self
+                    .backend
+                    .get_fact_record(&self.mind, id)
+                    .await?
+                    .ok_or_else(|| crate::MemoryError::FactNotFound(id.into()))?;
+                let inspection = FactInspection::from_fact(&fact);
+                Ok(ToolResult {
+                    content: vec![ContentBlock::Text {
+                        text: crate::inspection::render(&inspection)?,
+                    }],
+                    details: serde_json::to_value(inspection)?,
+                })
+            }
             "memory_store" => {
                 let content = args["content"].as_str().unwrap_or("").to_string();
                 let section_str = args["section"].as_str().unwrap_or("Architecture");
@@ -739,10 +763,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tool_provider_exposes_12_tools() {
+    async fn tool_provider_exposes_inspection_with_memory_tools() {
         let provider = MemoryProvider::new(InMemoryBackend::new(), NoopRenderer, "test".into());
         let tools = provider.tools();
-        assert_eq!(tools.len(), 12);
+        assert_eq!(tools.len(), 13);
+        assert!(tools.iter().any(|tool| tool.name == "memory_inspect"));
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"memory_store"));
         assert!(names.contains(&"memory_recall"));

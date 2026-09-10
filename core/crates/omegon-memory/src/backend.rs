@@ -138,6 +138,12 @@ pub(crate) fn persisted_lamport_version(version: u64) -> Result<i64> {
 /// and potential future async backends.
 #[async_trait]
 pub trait MemoryBackend: Send + Sync {
+    /// Exact mind-scoped lookup across all statuses, without reinforcement.
+    async fn get_fact_record(&self, _mind: &str, _id: &str) -> Result<Option<Fact>> {
+        Err(MemoryError::InvalidMutation(
+            "status-neutral lookup unsupported".into(),
+        ))
+    }
     async fn get_pending_fact(&self, _mind: &str, _id: &str) -> Result<Option<Fact>> {
         Err(MemoryError::InvalidMutation(
             "pending lookup unsupported".into(),

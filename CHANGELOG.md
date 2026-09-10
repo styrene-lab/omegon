@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- `memory_inspect` provides mind-scoped, read-only inspection of active, historical, and pending facts. It reports bounded content previews, recorded provenance, and supported artifact availability without reinforcement or reactivation. Changed snapshots and readable-but-unverified references remain distinct from validated evidence; the standalone provider explicitly reports references it has not checked.
+
 - `memory_confirm` now requests per-candidate operator approval through TUI or ACP. Only the runtime's internal confirmation route can activate the reviewed snapshot, with version-checked atomic corrections and durable session/surface attribution. Schema v12 distinguishes confirmed inferences from pending ones and preserves their metadata through transport; corrupt confirmed rows fail inventory reads rather than disappearing from vault publication.
 
 - Explicit lifecycle ingestion now checks bounded repository artifacts before admitting decisions, constraints, or baseline/archived specification conclusions. Portable source attribution retains artifact and statement hashes. Corrections require a target version and commit supersession atomically within one mind; recall now displays fact versions for those preconditions.

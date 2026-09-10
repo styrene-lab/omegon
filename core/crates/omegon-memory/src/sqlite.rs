@@ -1212,6 +1212,18 @@ impl SqliteBackend {
 
 #[async_trait]
 impl MemoryBackend for SqliteBackend {
+    async fn get_fact_record(&self, mind: &str, id: &str) -> Result<Option<Fact>> {
+        self.conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT * FROM facts WHERE id=?1 AND mind=?2",
+                params![id, mind],
+                Self::row_to_fact,
+            )
+            .optional()
+            .map_err(|error| MemoryError::Storage(error.into()))
+    }
     async fn get_pending_fact(&self, mind: &str, id: &str) -> Result<Option<Fact>> {
         self.conn
             .lock()
