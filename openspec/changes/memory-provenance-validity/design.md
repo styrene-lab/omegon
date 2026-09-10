@@ -103,3 +103,28 @@ Receipts bind the conclusion and source snapshot to the operation identity. With
 a correction target, exact content/source duplicates reuse the normal reinforcement path; differing evidence
 remains separately attributed for later reconciliation. Revalidation on tool retry
 requires the same artifact snapshot; missing/changed sources are explicit errors.
+
+## Wave 5 operator confirmation
+
+Use the existing per-request TUI/ACP permission channel rather than accepting
+model-provided confirmation flags. `memory_confirm` reads a pending candidate and
+raises a typed runtime request containing its exact digest and preconditions. Only
+the loop's approval handler dispatches `memory_apply_confirmation`, registered as
+an internal invocation. The handler preserves the requesting invocation scope.
+
+Storage rechecks the snapshot and candidate/target versions inside the atomic
+mutation. Confirmation retains inference attribution, adds operator-surface review
+metadata, and initializes active confidence/reinforcement. Proposed supersession
+is part of the reviewed request and the same transaction. It never becomes evidence
+of a successful tool execution merely because an operator accepted the claim.
+
+Schema v12 is a semantic compatibility gate: v11 requires every attributed inference
+to be pending, while v12 permits active/historical records with confirmation. The
+existing nullable metadata column carries the additive confirmation record. Legacy
+pending records remain unconfirmed on migration. Import cannot promote an existing
+pending record or rewrite retained review metadata. Portable attribution does not
+constitute a cryptographic proof of local operator presence.
+
+Inventory read failures propagate so corrupt confirmation data cannot be mistaken
+for removed facts during vault publication. Approval is bounded to 120 seconds;
+headless callers without a responding operator surface do not receive confirmation.

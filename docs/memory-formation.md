@@ -72,7 +72,7 @@ unknown dates are assigned by storage on the first write. Advisory statistics
 remain runtime diagnostics rather than evidence metadata.
 
 Formation envelopes remain wire version 1; the database schema evolves independently
-and is currently v11.
+and is currently v12.
 Existing capture-policy v1 records and receipts are retained. The first v2 capture
 of an earlier source can create a new policy-versioned episode; repeats within v2
 are replay-safe.
@@ -86,11 +86,13 @@ produces an error rather than silently disappearing.
 
 Schema v9 introduced the nullable formation column; schema v10 retains it and adds
 vector identity metadata. Schema v11 adds pending lifecycle-inference attribution.
-Initialized project stores on schemas v5–v10 migrate
+Schema v12 permits operator-confirmed inferences to become active while retaining
+their original attribution. Initialized project stores on schemas v5–v11 migrate
 through the existing backup/verification workflow before startup opens
 them. Legacy episodes retain absent evidence as unknown. Separately managed stores
-must use the explicit migration workflow before opening with a v11 backend; older
-binaries cannot open a v11 store.
+must use the explicit migration workflow before opening with a v12 backend; older
+binaries cannot open a v12 store. This is a semantic migration: older v11 readers
+reject active facts that carry inference metadata.
 
 ## Inferred lifecycle summaries
 
@@ -102,8 +104,38 @@ These references are attribution, not verified execution evidence.
 Pending candidates are retained in JSONL and can be inspected through the backend's
 pending-status inventory. They do not enter recall, pinned context, embedding indexes,
 or vault fact publication. Retrying the same operation replays its receipt.
-Candidate confirmation remains subsequent Wave 5 work; changing JSONL status
-cannot confirm a retained inference.
+Changing JSONL status cannot confirm a retained inference.
+
+## Operator confirmation
+
+Call `memory_confirm` with `candidate_id` to request review. The tool accepts no
+approval flag. The runtime sends the candidate content, declared attribution, mind,
+version, and any proposed correction to the TUI or ACP permission channel.
+
+An affirmative per-request response permits an internal runtime invocation. The
+internal commit tool is not exposed on the public tool surface. Denial, cancellation
+while waiting, timeout, or an unavailable operator surface does not admit the candidate.
+The review wait is bounded to 120 seconds. This uses the client's existing identity
+and permission-response boundary; it is not physical-human attestation.
+
+Before committing, storage checks the candidate's version and exact snapshot hash.
+A proposed supersession also requires the reviewed target version and the same mind.
+Confirmation and correction commit atomically with their operation receipt. A stale
+snapshot or target rejects the operation rather than confirming changed content.
+
+Confirmation retains the original inference attribution and records the review
+version, snapshot/content hashes, session, request ID, approval channel, and recorded time.
+The `surface` field identifies `native_event` or `acp`; the shared native channel
+does not identify a specific TUI or web responder.
+It initializes the active confidence prior and reinforcement count as an explicit
+admission action. It does not fabricate successful execution evidence. Confirmed
+facts use normal active retrieval and vault publication; optional vector repair
+remains available through embedding backfill.
+
+JSONL transports confirmation attribution, including historical confirmed records.
+It cannot promote an existing pending candidate or rewrite a retained confirmation.
+Cold-store imports carry the originating record's attribution rather than asserting
+that the local operator performed a new review.
 
 ## Explicit lifecycle conclusions
 
@@ -150,7 +182,7 @@ missing or changed artifacts produce an error rather than a new write.
 
 Explicit attribution uses a versioned JSON envelope in `Fact.source`, decoded by
 `Fact::lifecycle_conclusion()`. It survives database reopen and JSONL transport
-without a schema change; the database remains v11. Without a correction target,
+without an additional schema change. Without a correction target,
 exact content/source duplicates reuse existing memory. Different evidence remains separately attributed for later
 reconciliation.
 

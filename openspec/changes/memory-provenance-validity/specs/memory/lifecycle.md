@@ -47,3 +47,21 @@ Given the target fact changed after the correction captured its version
 When the correction is committed
 Then a version conflict is returned
 And no replacement, edge, or success receipt is partially committed
+
+#### Scenario: Model-supplied approval cannot confirm a candidate
+Given a pending lifecycle candidate
+When a model calls the public review tool with an approval flag or attempts the internal commit invocation
+Then the request cannot activate the candidate
+And confirmation requires the runtime's operator-response path
+
+#### Scenario: Operator confirms the reviewed snapshot
+Given a pending candidate and an affirmative per-request TUI or ACP response
+When the runtime commits the reviewed candidate
+Then the candidate becomes active with retained inference and review attribution
+And an altered candidate digest or stale version prevents admission
+
+#### Scenario: Operator denial or cancellation preserves pending state
+Given a pending candidate awaiting operator review
+When the operator denies the request or the wait is cancelled before approval
+Then no confirmation mutation is dispatched
+And the candidate remains pending

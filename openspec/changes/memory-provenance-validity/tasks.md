@@ -39,7 +39,7 @@
 - [x] RED/GREEN: Reproduce active ingestion of inferred lifecycle summaries at the live tool boundary; retain them as pending candidates.
 - [x] Add typed declared-artifact attribution and proposed supersession, preserving operation replay without reinforcing identical active facts.
 - [x] Verify schema-v10 migration, reopen, transport, index/context/vault exclusion, and failed-write rollback; record final gates in verification-wave-5-candidates.md.
-- [ ] Complete candidate confirmation with trusted admission and atomic correction handling; explicit artifact admission is covered below.
+- [x] Complete candidate confirmation with trusted admission and atomic correction handling; explicit artifact admission is covered below.
 
 ## 6. Wave 5 explicit artifact admission
 <!-- specs: memory/lifecycle, memory/provenance -->
@@ -48,3 +48,10 @@
 - [x] Retain portable artifact/statement hashes and references without inferring execution evidence; reject proposal paths, open questions, symlinks, and oversized artifacts.
 - [x] Apply same-mind, version-checked corrections atomically and verify receipt replay, rollback, attribution-aware reuse, reopen, and JSONL transport.
 - [x] Record final focused checks, landing gates, and same-executor review in verification-wave-5-explicit.md.
+
+## 7. Wave 5 operator confirmation
+<!-- specs: memory/lifecycle, memory/provenance -->
+
+- [x] RED/GREEN: Add snapshot-bound confirmation with recorded operator context, stale-version rejection, atomic correction, receipt replay, reopen, and transport tests.
+- [x] Route public review requests through TUI/ACP permissions and keep the commit invocation internal; reject agent approval flags and non-internal dispatch.
+- [x] Complete schema-v12, corruption/vault-boundary, frontend, and final landing gates; record acceptance in verification-wave-5-confirmation.md.
