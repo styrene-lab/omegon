@@ -62,3 +62,11 @@
 - [x] RED/GREEN: Add shared status-neutral inspection, with explicit legacy/inferred/confirmed/artifact attribution and bounded previews.
 - [x] Verify missing, changed, readable-unverified, and unsupported artifact references without altering durable state.
 - [x] Complete cross-backend/provider checks and host/landing gates in verification-wave-5-inspection.md.
+
+## 9. Wave 5 applicability
+<!-- specs: memory/provenance -->
+
+- [x] RED/GREEN: Exclude platform mismatches before lexical candidate limits on both backends.
+- [x] Verify workspace/revision/component rules, timezone-aware validity bounds, historical recorded time, and graph/vector eligibility.
+- [x] Verify atomic scope writes, exact-scope deduplication, schema-v12 migration, reopen, and scope-aware JSONL/vault projection.
+- [x] Verify hosted HEAD changes, same-turn context retirement, unknown disclosure, and final landing gates in verification-wave-5-applicability.md.

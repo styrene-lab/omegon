@@ -72,7 +72,7 @@ unknown dates are assigned by storage on the first write. Advisory statistics
 remain runtime diagnostics rather than evidence metadata.
 
 Formation envelopes remain wire version 1; the database schema evolves independently
-and is currently v12.
+and is currently v13.
 Existing capture-policy v1 records and receipts are retained. The first v2 capture
 of an earlier source can create a new policy-versioned episode; repeats within v2
 are replay-safe.
@@ -87,11 +87,12 @@ produces an error rather than silently disappearing.
 Schema v9 introduced the nullable formation column; schema v10 retains it and adds
 vector identity metadata. Schema v11 adds pending lifecycle-inference attribution.
 Schema v12 permits operator-confirmed inferences to become active while retaining
-their original attribution. Initialized project stores on schemas v5–v11 migrate
+their original attribution. Schema v13 adds recorded applicability.
+Initialized project stores on schemas v5–v12 migrate
 through the existing backup/verification workflow before startup opens
 them. Legacy episodes retain absent evidence as unknown. Separately managed stores
-must use the explicit migration workflow before opening with a v12 backend; older
-binaries cannot open a v12 store. This is a semantic migration: older v11 readers
+must use the explicit migration workflow before opening with a v13 backend; older
+binaries cannot open a v13 store. Confirmation was a semantic migration: older v11 readers
 reject active facts that carry inference metadata.
 
 ## Inferred lifecycle summaries
@@ -138,6 +139,9 @@ Cold-store imports carry the originating record's attribution rather than assert
 that the local operator performed a new review.
 
 ## Provenance inspection
+
+Inspection also reports declared applicability, its assessment, and the evaluation
+context. See [memory applicability](memory-applicability.md) for rule and query semantics.
 
 Use `memory_inspect` with `fact_id` to read a fact's recorded provenance and source
 availability. It also accepts IDs of pending, archived, dormant, and superseded

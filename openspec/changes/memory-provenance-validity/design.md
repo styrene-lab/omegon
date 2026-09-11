@@ -144,3 +144,44 @@ standalone provider reports `not_checked` when it has no filesystem binding.
 Reading a declared reference never turns an inference into an explicit conclusion.
 Availability does not change confidence, status, applicability, or reinforcement.
 No schema migration is required for this read-only projection.
+
+## Wave 5 applicability
+
+Schema v13 adds nullable recorded applicability to facts. Rules describe platform,
+workspace, revision, component, and a valid-time interval. Lists are alternatives
+within one dimension; dimensions combine conjunctively. Start is inclusive and
+end is exclusive. Empty rules and missing required target context yield unknown
+applicability. Any known mismatch excludes the fact from current selection.
+Matching means that recorded rules match, not that unrecorded conditions are proven.
+
+The host uses the existing runtime workspace ID derived from the canonical checkout
+path. It is path-bound: moving a checkout can change the ID. Revision is the exact
+`git:<full lowercase commit OID>` for HEAD, read without Git/jj subprocesses. It is
+not a clean-working-tree attestation, branch name, ancestry range, or jj change ID.
+Unavailable descriptors remain unknown. Component labels are explicit caller data.
+
+Current managed requests freeze runtime OS, workspace, HEAD, and UTC evaluation time
+once per request. Explicit query context replaces those defaults; omitted dimensions
+are unknown, except that current queries default missing time to now. Historical
+queries retain the archive population and do not use current host constraints unless
+requested. `context.at` filters valid time, not historical database knowledge versions.
+Recorded time is preserved separately and can postdate the interval being queried.
+
+`StoreApplicableFact` stores rules atomically with a new fact. `SetFactApplicability`
+checks the fact version, records when the rule was assigned, and leaves confidence,
+reinforcement, and lifecycle status unchanged. Exact rule identity participates in
+deduplication. Legacy updates that omit scope preserve known rules; an empty rule
+object explicitly replaces them with unknown applicability.
+
+FTS scans until its eligible over-fetch budget is filled; excluded rows do not consume
+candidate slots. Vector and graph channels apply the same domain rules. Retained
+candidate limits remain bounded, although highly selective filters can scan more
+rows. No large-corpus latency claim is made. Ambient and request-context selection
+share these rules, and renderers disclose unknown applicability. A changed HEAD or
+expired rule can clear an existing context injection without a fact mutation.
+
+Scoped facts export with the `applicable_fact` JSONL tag, so older readers cannot
+silently interpret them as unrestricted `fact` records. Schema-v13 readers accept
+both tags, validate recorded rules, and preserve scope through reopen and transport.
+Vault section pages include declared scope as readable metadata; JSONL is the
+lossless record transport. Inventory remains a stored-state view, not current guidance.

@@ -35,6 +35,24 @@ When historical evidence is requested for T1 before T2
 Then the original claim is available with its validity and recorded-time metadata
 And the current replacement is not substituted without labeling the change
 
+#### Scenario: Revision change retires previously injected guidance
+Given a fact scoped to the current Git HEAD has been injected
+When HEAD changes before the next context request in the same turn
+Then the fact is excluded and the previous injection is explicitly replaced
+And the stored fact is not deleted or archived
+
+#### Scenario: Applicability updates do not reinforce claims
+Given an existing fact and its expected version
+When new applicability rules are recorded
+Then the rules and recorded time are committed with a new fact version
+And confidence, reinforcement, and lifecycle status are unchanged
+
+#### Scenario: Scoped transport cannot masquerade as an unrestricted legacy fact
+Given a fact with recorded applicability
+When the fact is exported to JSONL
+Then it uses the scope-aware applicable_fact tag
+And a legacy update without scope cannot erase its known constraints
+
 ### Requirement: Provenance migration preserves unknown information
 
 Legacy records SHALL remain readable. Migration and transport SHALL not invent
