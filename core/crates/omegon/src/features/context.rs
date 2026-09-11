@@ -577,11 +577,12 @@ impl ContextProvider {
             .into_iter()
             .enumerate()
             .map(|(idx, scored)| {
+                let score_label = omegon_memory::renderer::recall_score_label(&scored);
                 let mut entry = ShadowEntry::new(
                     format!("memory:{idx}:{}", scored.fact.id),
                     ContextKind::MemoryFact,
                     EntryBody::Inline(format!(
-                        "- [{}] {}\n  score: {:.2}",
+                        "- [{}] {}\n  {}",
                         match scored.fact.section {
                             Section::Architecture => "Architecture",
                             Section::Decisions => "Decisions",
@@ -592,7 +593,7 @@ impl ContextProvider {
                             Section::RecentWork => "Recent Work",
                         },
                         scored.fact.content,
-                        scored.score
+                        score_label
                     )),
                 );
                 entry.priority = 80;
@@ -1178,6 +1179,7 @@ mod tests {
         bus.stage_managed_generation(
             "memory",
             crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
+                workspace_root: Some(dir.path().to_path_buf()),
                 project_memory_root: dir.path().to_path_buf(),
                 project_db_path: dir.path().join("facts.db"),
                 project_jsonl_path: dir.path().join("facts.jsonl"),

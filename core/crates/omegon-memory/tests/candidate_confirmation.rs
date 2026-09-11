@@ -268,14 +268,14 @@ async fn schema11_pending_records_migrate_without_fabricating_confirmation() {
     drop(backend);
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "DELETE FROM schema_version; INSERT INTO schema_version VALUES(11,'fixture');",
+        "ALTER TABLE facts DROP COLUMN applicability; DELETE FROM schema_version; INSERT INTO schema_version VALUES(11,'fixture');",
     )
     .unwrap();
     drop(db);
     let migration =
         SqliteBackend::apply_migration(&SqliteBackend::plan_migration(&path).unwrap()).unwrap();
     assert!(migration.backup.exists());
-    assert_eq!(migration.target_version, 12);
+    assert_eq!(migration.target_version, sqlite::MEMORY_SCHEMA_VERSION);
     let backend = SqliteBackend::open(&path).unwrap();
     let fact = pending(&backend).await;
     assert!(

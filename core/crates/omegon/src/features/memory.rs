@@ -552,6 +552,7 @@ or facts better represented as Flynt/project documents.".into(),
                     "type": "object",
                     "required": ["section", "content"],
                     "properties": {
+                        "applicability": omegon_memory::applicability::constraints_schema(),
                         "section": {
                             "type": "string",
                             "enum": ["Architecture", "Decisions", "Constraints", "Known Issues", "Patterns & Conventions", "Specs"],
@@ -575,6 +576,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     "type": "object",
                     "required": ["query"],
                     "properties": {
+                        "context": omegon_memory::applicability::context_schema(),
                         "query": {
                             "type": "string",
                             "description": "Natural language query"
@@ -721,6 +723,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     "type": "object",
                     "required": ["query"],
                     "properties": {
+                        "context": omegon_memory::applicability::context_schema(),
                         "query": {
                             "type": "string",
                             "description": "Search terms"
@@ -751,6 +754,13 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
             ToolDefinition {
+                name:crate::tool_registry::memory::MEMORY_SET_APPLICABILITY.into(),label:"memory_set_applicability".into(),
+                description:"Record applicability constraints for one fact at its expected version. Does not reinforce, confirm, or change lifecycle status. An empty constraint object records unknown applicability.".into(),
+                parameters:serde_json::json!({"type":"object","required":["fact_id","expected_version","applicability"],"additionalProperties":false,"properties":{
+                    "fact_id":{"type":"string"},"expected_version":{"type":"integer","minimum":0},"applicability":omegon_memory::applicability::constraints_schema()}}),
+                capabilities:vec![omegon_traits::ToolCapability::StateChanging],
+            },
+            ToolDefinition {
                 name:crate::tool_registry::memory::MEMORY_INSPECT.into(),label:"memory_inspect".into(),
                 description:"Read-only inspection of one active, historical, or pending fact, its recorded provenance, and bounded artifact availability. Does not reinforce or reactivate memory.".into(),
                 parameters:serde_json::json!({"type":"object","required":["fact_id"],"additionalProperties":false,"properties":{"fact_id":{"type":"string"}}}),
@@ -779,18 +789,24 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 let section = Self::parse_section_arg(section_str)?;
 
                 let source = args["source"].as_str().unwrap_or("manual");
+                let request = StoreFact {
+                    mind: self.mind.clone(),
+                    content: content.clone(),
+                    section,
+                    decay_profile: DecayProfileName::Standard,
+                    source: Some(source.into()),
+                };
+                let mutation = match omegon_memory::applicability::constraints_arg(&args)? {
+                    Some(constraints) => MemoryMutation::StoreApplicableFact {
+                        request,
+                        constraints: Box::new(constraints),
+                    },
+                    None => MemoryMutation::StoreFact { request },
+                };
                 let outcome = self
                     .apply_mutation(
                         self.tool_operation_id(call_id, "store")?,
-                        MemoryMutation::StoreFact {
-                            request: StoreFact {
-                                mind: self.mind.clone(),
-                                content: content.clone(),
-                                section,
-                                decay_profile: DecayProfileName::Standard,
-                                source: Some(source.into()),
-                            },
-                        },
+                        mutation,
                         cancel.clone(),
                     )
                     .await?;
@@ -850,6 +866,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     .min(10_000);
                 let fetch_k = k.saturating_mul(2).min(10_000); // over-fetch for RRF merge headroom
                 let filter = omegon_memory::SearchFilter {
+                    context: omegon_memory::applicability::context_arg(&args)?,
                     section: args["section"]
                         .as_str()
                         .map(Self::parse_section_arg)
@@ -974,6 +991,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 }
 
                 let mut lines = Vec::new();
+                lines.push("Stored active inventory; applicability is not filtered here. Use memory_recall for current guidance.".into());
                 lines.push(format!(
                     "{} facts across {} sections:\n",
                     facts.len(),
@@ -1249,6 +1267,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         query,
                         limit: 20,
                         filter: omegon_memory::SearchFilter {
+                            context: omegon_memory::applicability::context_arg(&args)?,
                             intent: omegon_memory::SearchIntent::Historical,
                             section: None,
                         },
@@ -1270,8 +1289,12 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 for scored in &results {
                     let f = &scored.fact;
                     lines.push(format!(
-                        "[{}] ({:?}, {:?}) {}",
-                        f.id, f.section, f.status, f.content
+                        "[{}] ({:?}, {:?}) {}\n  {}",
+                        f.id,
+                        f.section,
+                        f.status,
+                        f.content,
+                        omegon_memory::renderer::recall_score_label(scored)
                     ));
                 }
                 Ok(ToolResult {
@@ -1280,6 +1303,47 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     }],
                     details: Value::Null,
                 })
+            }
+            crate::tool_registry::memory::MEMORY_SET_APPLICABILITY => {
+                let id = args["fact_id"]
+                    .as_str()
+                    .filter(|id| !id.is_empty())
+                    .ok_or_else(|| anyhow::anyhow!("fact_id is required"))?
+                    .to_string();
+                let version = args["expected_version"]
+                    .as_u64()
+                    .ok_or_else(|| anyhow::anyhow!("expected_version is required"))?;
+                let constraints = omegon_memory::applicability::constraints_arg(&args)?
+                    .ok_or_else(|| anyhow::anyhow!("applicability is required"))?;
+                let record = self
+                    .invoke(crate::memory_service::MemoryRequestV1::GetFactRecord {
+                        scope: crate::memory_service::MemoryScopeV1::Project,
+                        mind: self.mind.clone(),
+                        id: id.clone(),
+                        cancellation: cancel.clone(),
+                    })
+                    .await?;
+                if !matches!(record,crate::memory_service::MemoryPayloadV1::Fact(record) if record.is_some())
+                {
+                    anyhow::bail!("fact not found in this mind");
+                }
+                let outcome = self
+                    .apply_mutation(
+                        self.tool_operation_id(call_id, "applicability")?,
+                        MemoryMutation::SetFactApplicability {
+                            fact: FactPrecondition {
+                                id,
+                                expected_version: version,
+                            },
+                            constraints: Box::new(constraints),
+                        },
+                        cancel,
+                    )
+                    .await?;
+                self.context_dirty.store(true, Ordering::Relaxed);
+                self.pending_status_refresh.store(true, Ordering::Relaxed);
+                self.refresh_status().await;
+                Ok(ToolResult {content:vec![ContentBlock::Text {text:"Recorded applicability constraints without reinforcement or lifecycle change.".into()}],details:serde_json::to_value(outcome)?})
             }
             crate::tool_registry::memory::MEMORY_INSPECT => {
                 let id = omegon_memory::inspection::fact_id(&args)?.to_string();
@@ -1383,10 +1447,11 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         anyhow::bail!("correction target exceeds operator review bounds");
                     }
                     correction = format!(
-                        "\nReplace [{}] version {}:\n{}",
+                        "\nReplace [{}] version {}:\n{}\nTarget applicability: {}",
                         confirmation::readable(&target.id),
                         target.version,
-                        confirmation::readable(&target.content)
+                        confirmation::readable(&target.content),
+                        serde_json::to_string(&target.applicability)?
                     );
                     Some(FactPrecondition {
                         id: target.id,
@@ -1397,12 +1462,13 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 };
                 let attribution = serde_json::to_string(inference)?;
                 let prompt = format!(
-                    "Confirm this inference as project memory? This does not verify execution outcomes.\nMind: {}\nCandidate [{}] version {}:\n{}\nDeclared attribution: {}{}",
+                    "Confirm this inference as project memory? This does not verify execution outcomes.\nMind: {}\nCandidate [{}] version {}:\n{}\nDeclared attribution: {}\nCandidate applicability: {}{}",
                     confirmation::readable(&candidate.mind),
                     confirmation::readable(&candidate.id),
                     candidate.version,
                     confirmation::readable(&candidate.content),
                     attribution,
+                    serde_json::to_string(&candidate.applicability)?,
                     correction
                 );
                 return Err(confirmation::MemoryConfirmationRequired {
@@ -1633,6 +1699,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                             | crate::tool_registry::memory::MEMORY_INGEST_LIFECYCLE
                             | crate::tool_registry::memory::MEMORY_CONFIRM
                             | crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION
+                            | crate::tool_registry::memory::MEMORY_SET_APPLICABILITY
                     )
                     && self.pending_status_refresh.swap(false, Ordering::Relaxed) =>
             {
@@ -1771,7 +1838,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         .build()
                         .ok()?;
                     runtime.block_on(async {
-                        let response = binding
+                        let response = match binding
                             .invoke(crate::memory_service::MemoryRequestV1::ContextSnapshot {
                                 scope: crate::memory_service::MemoryScopeV1::Project,
                                 mind,
@@ -1782,18 +1849,22 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                                 cancellation: tokio_util::sync::CancellationToken::new(),
                             })
                             .await
-                            .ok()?;
+                        {
+                            Ok(response) => response,
+                            Err(_) => return self.clear_memory_context(),
+                        };
                         let crate::memory_service::MemoryPayloadV1::ContextSnapshot(snapshot) =
                             response.payload
                         else {
-                            return None;
+                            return self.clear_memory_context();
                         };
 
-                        let rendered = renderer.render_context(
+                        let rendered = renderer.render_context_scoped(
                             &snapshot.facts,
                             &snapshot.episodes,
                             &snapshot.working_memory,
                             context_budget_chars,
+                            &snapshot.context,
                         );
                         if rendered.markdown.is_empty() {
                             return self.clear_memory_context();
@@ -1849,6 +1920,7 @@ mod tests {
         bus.register(Box::new(crate::memory_service::MemoryDeclarationFeature));
         let candidate =
             crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
+                workspace_root: Some(dir.path().to_path_buf()),
                 project_memory_root: dir.path().to_path_buf(),
                 project_db_path: dir.path().join("facts.db"),
                 project_jsonl_path: dir.path().join("facts.jsonl"),
@@ -2363,7 +2435,7 @@ mod tests {
     async fn feature_exposes_public_memory_tools_without_internal_confirmation() {
         let feature = MemoryFeature::new(Default::default(), "test".into());
         let tools = feature.tools();
-        assert_eq!(tools.len(), 14, "public memory tool inventory");
+        assert_eq!(tools.len(), 15, "public memory tool inventory");
 
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"memory_store"));
@@ -2380,6 +2452,7 @@ mod tests {
         assert!(names.contains(&"memory_ingest_lifecycle"));
         assert!(names.contains(&"memory_confirm"));
         assert!(names.contains(&"memory_inspect"));
+        assert!(names.contains(&"memory_set_applicability"));
         assert!(!names.contains(&"memory_apply_confirmation"));
     }
 
@@ -2398,6 +2471,7 @@ mod tests {
             "memory_compact",
             "memory_ingest_lifecycle",
             "memory_confirm",
+            "memory_set_applicability",
         ] {
             let tool = tools.iter().find(|tool| tool.name == name).unwrap();
             assert!(
@@ -2613,6 +2687,192 @@ mod tests {
         assert_eq!(inspected.details["basis"], "unconfirmed_inference");
         assert_eq!(inspected.details["evidence_availability"], "unavailable");
         assert_eq!(before, after);
+    }
+
+    #[tokio::test]
+    async fn applicability_tracks_head_changes_and_retires_same_turn_context() {
+        let (feature, mut bus, dir) = managed_feature().await;
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let signature = git2::Signature::now("test", "test@example.invalid").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let first = repo
+            .commit(Some("HEAD"), &signature, &signature, "first", &tree, &[])
+            .unwrap();
+        let revision = format!("git:{first}");
+        feature.execute("memory_store","scoped",serde_json::json!({"section":"Constraints","content":"zircon revision rule","applicability":{"revisions":[revision]}}),CancellationToken::new()).await.unwrap();
+        let signals = ContextSignals {
+            user_prompt: "zircon",
+            recent_tools: &[],
+            recent_files: &[],
+            lifecycle_phase: &LifecyclePhase::Idle,
+            turn_number: 1,
+            context_budget_tokens: 500,
+        };
+        let initial = feature.provide_context(&signals).unwrap();
+        assert!(initial.content.contains("zircon revision rule"));
+        std::fs::write(dir.path().join("untracked.txt"), "dirty workspace").unwrap();
+        let context = crate::memory_service::applicability_context(Some(dir.path()));
+        assert_eq!(context.revision.as_deref(), Some(revision.as_str()));
+        assert_eq!(
+            context.workspace,
+            Some(crate::workspace::runtime::workspace_id_from_path(
+                &dir.path().canonicalize().unwrap()
+            ))
+        );
+        let parent = repo.find_commit(first).unwrap();
+        repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            "second",
+            &tree,
+            &[&parent],
+        )
+        .unwrap();
+        let cleared = feature
+            .provide_context(&signals)
+            .expect("known mismatch must replace a live injection even within the same turn");
+        assert!(cleared.content.is_empty());
+        let recall = feature
+            .execute(
+                "memory_recall",
+                "recall",
+                serde_json::json!({"query":"zircon"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(recall.details["count"], 0);
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
+    async fn applicability_update_expires_context_without_reinforcement() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        let stored = feature
+            .execute(
+                "memory_store",
+                "store",
+                serde_json::json!({"section":"Constraints","content":"zircon expires"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let id = stored.details["id"].as_str().unwrap().to_string();
+        let before = feature
+            .get_fact(id.clone(), CancellationToken::new())
+            .await
+            .unwrap()
+            .unwrap();
+        let signals = ContextSignals {
+            user_prompt: "zircon",
+            recent_tools: &[],
+            recent_files: &[],
+            lifecycle_phase: &LifecyclePhase::Idle,
+            turn_number: 1,
+            context_budget_tokens: 500,
+        };
+        assert!(
+            feature
+                .provide_context(&signals)
+                .unwrap()
+                .content
+                .contains("applicability unknown")
+        );
+        let args = serde_json::json!({"fact_id":id,"expected_version":before.version,"applicability":{"valid_until":"2000-01-01T00:00:00Z"}});
+        feature
+            .execute(
+                "memory_set_applicability",
+                "expire",
+                args.clone(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let replay = feature
+            .execute(
+                "memory_set_applicability",
+                "expire",
+                args,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(replay.details["replayed"], true);
+        assert!(
+            feature
+                .provide_context(&signals)
+                .unwrap()
+                .content
+                .is_empty()
+        );
+        let after = feature
+            .get_fact(id, CancellationToken::new())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.status, omegon_memory::FactStatus::Active);
+        assert_eq!(after.reinforcement_count, before.reinforcement_count);
+        assert_eq!(after.last_reinforced, before.last_reinforced);
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
+    async fn applicability_revalidation_failure_retires_injection_but_preserves_facts() {
+        let (feature, mut bus, dir) = managed_feature().await;
+        feature
+            .execute(
+                "memory_store",
+                "store",
+                serde_json::json!({"section":"Constraints","content":"zircon remains stored"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let signals = ContextSignals {
+            user_prompt: "zircon",
+            recent_tools: &[],
+            recent_files: &[],
+            lifecycle_phase: &LifecyclePhase::Idle,
+            turn_number: 1,
+            context_budget_tokens: 500,
+        };
+        assert!(
+            feature
+                .provide_context(&signals)
+                .unwrap()
+                .content
+                .contains("zircon remains stored")
+        );
+        let connection = rusqlite::Connection::open(dir.path().join("facts.db")).unwrap();
+        connection.execute_batch("DROP TABLE facts_fts;").unwrap();
+        assert!(
+            feature
+                .provide_context(&signals)
+                .unwrap()
+                .content
+                .is_empty()
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM facts", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
     }
 
     #[tokio::test]
@@ -2957,6 +3217,7 @@ mod tests {
         );
         let candidate =
             crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
+                workspace_root: Some(dir.path().to_path_buf()),
                 project_memory_root: dir.path().into(),
                 project_db_path: dir.path().join("facts.db"),
                 project_jsonl_path: dir.path().join("facts.jsonl"),

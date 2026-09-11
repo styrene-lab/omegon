@@ -23,6 +23,30 @@ pub fn recall_score_label(result: &ScoredFact) -> String {
         labels.push(format!("legacy rank={:.4e}", result.score));
     }
     labels.insert(0, format!("version={}", result.fact.version));
+    labels.push(format!(
+        "applicability={}",
+        match result.applicability {
+            ApplicabilityStatus::Unknown => "unknown",
+            ApplicabilityStatus::Matches => "recorded-scope-matches",
+            ApplicabilityStatus::Inapplicable => "inapplicable",
+        }
+    ));
+    if let Some(record) = &result.fact.applicability {
+        labels.push(format!(
+            "valid [{} .. {}), scope recorded {}",
+            record
+                .constraints
+                .valid_from
+                .as_deref()
+                .unwrap_or("unbounded"),
+            record
+                .constraints
+                .valid_until
+                .as_deref()
+                .unwrap_or("unbounded"),
+            record.recorded_at
+        ));
+    }
     for evidence in &result.graph_evidence {
         labels.push(format!(
             "{:?}: {} {} {}",
@@ -60,6 +84,23 @@ impl ContextRenderer for MarkdownRenderer {
         episodes: &[Episode],
         working_memory: &[Fact],
         max_chars: usize,
+    ) -> RenderedContext {
+        self.render_context_scoped(
+            facts,
+            episodes,
+            working_memory,
+            max_chars,
+            &ApplicabilityContext::local(),
+        )
+    }
+
+    fn render_context_scoped(
+        &self,
+        facts: &[Fact],
+        episodes: &[Episode],
+        working_memory: &[Fact],
+        max_chars: usize,
+        context: &ApplicabilityContext,
     ) -> RenderedContext {
         const PREAMBLE: &str = "# Project Memory\n_Use `memory_store` proactively when you learn facts worth persisting. Use `memory_recall` before non-trivial tasks to surface relevant context._";
 
@@ -103,6 +144,15 @@ impl ContextRenderer for MarkdownRenderer {
             if fact.status != FactStatus::Active || included_ids.contains(&fact.id) {
                 continue;
             }
+            let applicability = fact
+                .applicability
+                .as_ref()
+                .map_or(ApplicabilityStatus::Unknown, |record| {
+                    record.constraints.assess(context)
+                });
+            if applicability == ApplicabilityStatus::Inapplicable {
+                continue;
+            }
             let heading = if pinned {
                 "Working Memory (pinned)".to_string()
             } else {
@@ -111,7 +161,16 @@ impl ContextRenderer for MarkdownRenderer {
                     .trim_matches('"')
                     .to_string()
             };
-            let line = format!("- [{}] {}", fact.id, fact.content);
+            let line = format!(
+                "- [{}] {}{}",
+                fact.id,
+                fact.content,
+                if applicability == ApplicabilityStatus::Unknown {
+                    " _(applicability unknown)_"
+                } else {
+                    ""
+                }
+            );
             let block = if heading == previous_heading {
                 line
             } else {
@@ -163,6 +222,7 @@ mod tests {
 
     fn make_fact(section: Section, content: &str) -> Fact {
         Fact {
+            applicability: None,
             lifecycle_inference: None,
             id: content.into(),
             mind: "test".into(),

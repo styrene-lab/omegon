@@ -18,6 +18,7 @@
 //!         └── MemoryProvider → MemoryBackend::import_jsonl() + render_context()
 //! ```
 
+pub mod applicability;
 pub mod backend;
 pub mod decay;
 pub mod embedding;

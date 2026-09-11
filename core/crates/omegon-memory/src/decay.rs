@@ -123,6 +123,7 @@ mod tests {
     #[test]
     fn persisted_confidence_scales_temporal_confidence() {
         let fact = crate::types::Fact {
+            applicability: None,
             lifecycle_inference: None,
             id: "fact".into(),
             mind: "test".into(),

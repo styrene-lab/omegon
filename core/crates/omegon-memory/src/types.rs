@@ -58,6 +58,8 @@ pub enum FactStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Fact {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applicability: Option<Box<RecordedApplicability>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lifecycle_inference: Option<Box<LifecycleInference>>,
     pub id: String,
     pub mind: String,
@@ -151,6 +153,11 @@ pub enum EvidenceAvailability {
 /// Read-only fact/provenance projection. Excerpts are explicitly bounded previews.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FactInspection {
+    pub applicability: Option<Box<RecordedApplicability>>,
+    #[serde(default)]
+    pub applicability_status: ApplicabilityStatus,
+    #[serde(default)]
+    pub applicability_context: ApplicabilityContext,
     pub id: String,
     pub mind: String,
     pub section: Section,
@@ -219,6 +226,8 @@ pub enum EmbeddingIndexState {
 /// A fact with search scoring attached.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoredFact {
+    #[serde(default)]
+    pub applicability: ApplicabilityStatus,
     #[serde(flatten)]
     pub fact: Fact,
     /// Legacy raw cosine (-1.0–1.0), lexical, or proximity value. Prefer named scores.
@@ -265,6 +274,7 @@ pub struct GraphEvidence {
 impl ScoredFact {
     pub fn new(fact: Fact, similarity: f64, score: f64) -> Self {
         Self {
+            applicability: ApplicabilityStatus::Unknown,
             fact,
             similarity,
             score,
@@ -453,6 +463,8 @@ pub enum SearchIntent {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SearchFilter {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<ApplicabilityContext>,
     #[serde(default)]
     pub intent: SearchIntent,
     #[serde(default)]
@@ -469,6 +481,7 @@ impl SearchFilter {
             ),
         };
         status_matches
+            && self.applicability_status(fact) != ApplicabilityStatus::Inapplicable
             && self
                 .section
                 .as_ref()
@@ -576,6 +589,14 @@ pub struct FactPrecondition {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MemoryMutation {
+    StoreApplicableFact {
+        request: StoreFact,
+        constraints: Box<ApplicabilityConstraints>,
+    },
+    SetFactApplicability {
+        fact: FactPrecondition,
+        constraints: Box<ApplicabilityConstraints>,
+    },
     ConfirmLifecycleCandidate {
         candidate: FactPrecondition,
         snapshot_hash: String,
@@ -644,6 +665,9 @@ pub enum MemoryMutation {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MemoryMutationEffect {
+    ApplicabilityUpdated {
+        fact: FactPrecondition,
+    },
     JsonlImported {
         imported: usize,
         reinforced: usize,
@@ -697,6 +721,9 @@ pub struct MemoryMutationOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "_type")]
 pub enum JsonlRecord {
+    /// Scope-aware readers are required; older readers must not treat this as unrestricted.
+    #[serde(rename = "applicable_fact")]
+    ApplicableFact(JsonlFact),
     #[serde(rename = "fact")]
     Fact(JsonlFact),
     #[serde(rename = "episode")]
@@ -710,6 +737,8 @@ pub enum JsonlRecord {
 /// Fact transport. Legacy records omit operational state; modern exports retain it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonlFact {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applicability: Option<Box<RecordedApplicability>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lifecycle_inference: Option<Box<LifecycleInference>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -743,6 +772,49 @@ pub struct JsonlFact {
     /// Searchable tags for domain classification.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+}
+
+/// Declared applicability rules. Empty rules preserve unknown applicability.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApplicabilityConstraints {
+    #[serde(default)]
+    pub platforms: Vec<String>,
+    #[serde(default)]
+    pub workspaces: Vec<String>,
+    #[serde(default)]
+    pub revisions: Vec<String>,
+    #[serde(default)]
+    pub components: Vec<String>,
+    #[serde(default)]
+    pub valid_from: Option<String>,
+    #[serde(default)]
+    pub valid_until: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecordedApplicability {
+    pub constraints: ApplicabilityConstraints,
+    pub recorded_at: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApplicabilityContext {
+    pub platform: Option<String>,
+    pub workspace: Option<String>,
+    pub revision: Option<String>,
+    pub component: Option<String>,
+    pub at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicabilityStatus {
+    #[default]
+    Unknown,
+    Matches,
+    Inapplicable,
 }
 
 /// Supported classes of explicit structured lifecycle conclusion.
@@ -1004,6 +1076,7 @@ mod tests {
     #[test]
     fn jsonl_fact_round_trip() {
         let fact = JsonlFact {
+            applicability: None,
             lifecycle_inference: None,
             operational: None,
             id: "abc123".into(),

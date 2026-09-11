@@ -22,6 +22,8 @@ pub struct MemoryProvider<B: MemoryBackend, R: ContextRenderer> {
     mind: String,
     /// Pinned fact IDs for working memory.
     working_memory: Mutex<Vec<String>>,
+    applicability_context: Option<ApplicabilityContext>,
+    operation_namespace: String,
 }
 
 impl<B: MemoryBackend, R: ContextRenderer> MemoryProvider<B, R> {
@@ -31,11 +33,18 @@ impl<B: MemoryBackend, R: ContextRenderer> MemoryProvider<B, R> {
             renderer,
             mind,
             working_memory: Mutex::new(Vec::new()),
+            applicability_context: None,
+            operation_namespace: crate::util::gen_id(),
         }
     }
 
     pub fn backend(&self) -> &B {
         &self.backend
+    }
+
+    pub fn with_applicability_context(mut self, context: ApplicabilityContext) -> Self {
+        self.applicability_context = Some(context);
+        self
     }
 
     fn parse_section_arg(section_str: &str) -> anyhow::Result<Section> {
@@ -52,6 +61,11 @@ impl<B: MemoryBackend, R: ContextRenderer> MemoryProvider<B, R> {
 fn tool_defs() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
+            name:"memory_set_applicability".into(),label:"memory_set_applicability".into(),description:"Record version-checked applicability without reinforcement or lifecycle change.".into(),
+            parameters:serde_json::json!({"type":"object","required":["fact_id","expected_version","applicability"],"properties":{"fact_id":{"type":"string"},"expected_version":{"type":"integer"},"applicability":crate::applicability::constraints_schema()}}),
+            capabilities:vec![ToolCapability::StateChanging],
+        },
+        ToolDefinition {
             name:"memory_inspect".into(),label:"memory_inspect".into(),
             description:"Inspect one fact across active, historical, or pending states without reinforcement. Reports recorded provenance; artifact availability is not checked by the standalone provider.".into(),
             parameters:serde_json::json!({"type":"object","required":["fact_id"],"additionalProperties":false,"properties":{"fact_id":{"type":"string"}}}),
@@ -65,6 +79,7 @@ fn tool_defs() -> Vec<ToolDefinition> {
                 "type": "object",
                 "required": ["section", "content"],
                 "properties": {
+                    "applicability": crate::applicability::constraints_schema(),
                     "section": {
                         "type": "string",
                         "enum": ["Architecture", "Decisions", "Constraints", "Known Issues", "Patterns & Conventions", "Specs"],
@@ -86,6 +101,7 @@ fn tool_defs() -> Vec<ToolDefinition> {
                 "type": "object",
                 "required": ["query"],
                 "properties": {
+                    "context": crate::applicability::context_schema(),
                     "query": {
                         "type": "string",
                         "description": "Natural language query"
@@ -249,6 +265,7 @@ fn tool_defs() -> Vec<ToolDefinition> {
                 "type": "object",
                 "required": ["query"],
                 "properties": {
+                    "context": crate::applicability::context_schema(),
                     "query": {
                         "type": "string",
                         "description": "Search terms"
@@ -278,6 +295,47 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ToolProvider
         cancel: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<ToolResult> {
         match tool_name {
+            "memory_set_applicability" => {
+                let id = args["fact_id"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("fact_id is required"))?;
+                if self
+                    .backend
+                    .get_fact_record(&self.mind, id)
+                    .await?
+                    .is_none()
+                {
+                    anyhow::bail!("fact not found in this mind");
+                }
+                let constraints = crate::applicability::constraints_arg(&args)?
+                    .ok_or_else(|| anyhow::anyhow!("applicability is required"))?;
+                let version = args["expected_version"]
+                    .as_u64()
+                    .ok_or_else(|| anyhow::anyhow!("expected_version is required"))?;
+                let outcome = self
+                    .backend
+                    .apply_mutation(
+                        &format!(
+                            "provider:{}:{_call_id}:applicability",
+                            self.operation_namespace
+                        ),
+                        MemoryMutation::SetFactApplicability {
+                            fact: FactPrecondition {
+                                id: id.into(),
+                                expected_version: version,
+                            },
+                            constraints: Box::new(constraints),
+                        },
+                    )
+                    .await?;
+                Ok(ToolResult {
+                    content: vec![ContentBlock::Text {
+                        text: "Recorded applicability without reinforcement or lifecycle change."
+                            .into(),
+                    }],
+                    details: serde_json::to_value(outcome)?,
+                })
+            }
             "memory_inspect" => {
                 let id = crate::inspection::fact_id(&args)?;
                 if cancel.is_cancelled() {
@@ -288,7 +346,14 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ToolProvider
                     .get_fact_record(&self.mind, id)
                     .await?
                     .ok_or_else(|| crate::MemoryError::FactNotFound(id.into()))?;
-                let inspection = FactInspection::from_fact(&fact);
+                let mut inspection = FactInspection::from_fact(&fact);
+                let filter = SearchFilter {
+                    context: self.applicability_context.clone(),
+                    ..Default::default()
+                }
+                .resolved()?;
+                inspection.applicability_status = filter.applicability_status(&fact);
+                inspection.applicability_context = filter.context.expect("resolved context");
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text {
                         text: crate::inspection::render(&inspection)?,
@@ -301,32 +366,53 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ToolProvider
                 let section_str = args["section"].as_str().unwrap_or("Architecture");
                 let section = Self::parse_section_arg(section_str)?;
 
-                let result = self
-                    .backend
-                    .store_fact(StoreFact {
-                        mind: self.mind.clone(),
-                        content: content.clone(),
-                        section,
-                        decay_profile: DecayProfileName::Standard,
-                        source: Some("manual".into()),
-                    })
-                    .await
-                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                let request = StoreFact {
+                    mind: self.mind.clone(),
+                    content: content.clone(),
+                    section,
+                    decay_profile: DecayProfileName::Standard,
+                    source: Some("manual".into()),
+                };
+                let (fact_id, action) =
+                    if let Some(constraints) = crate::applicability::constraints_arg(&args)? {
+                        let outcome = self
+                            .backend
+                            .apply_mutation(
+                                &format!("provider:{}:{_call_id}:store", self.operation_namespace),
+                                MemoryMutation::StoreApplicableFact {
+                                    request,
+                                    constraints: Box::new(constraints),
+                                },
+                            )
+                            .await?;
+                        let MemoryMutationEffect::FactStored {
+                            fact_id, action, ..
+                        } = outcome.effect
+                        else {
+                            anyhow::bail!("unexpected scoped store effect");
+                        };
+                        (fact_id, action)
+                    } else {
+                        let result = self.backend.store_fact(request).await?;
+                        (result.fact.id, result.action)
+                    };
 
-                let msg = match result.action {
+                let msg = match action {
                     StoreAction::Stored => format!("Stored in {}: {}", section_str, content),
                     StoreAction::Reinforced => format!("Reinforced existing fact: {}", content),
                     StoreAction::Deduplicated => "Duplicate — fact already exists".to_string(),
                 };
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text { text: msg }],
-                    details: serde_json::json!({ "id": result.fact.id, "action": format!("{:?}", result.action) }),
+                    details: serde_json::json!({ "id": fact_id, "action": format!("{:?}", action) }),
                 })
             }
             "memory_recall" => {
                 let query = args["query"].as_str().unwrap_or("").to_string();
                 let k = args["k"].as_u64().unwrap_or(10).min(10_000) as usize;
                 let filter = SearchFilter {
+                    context: crate::applicability::context_arg(&args)?
+                        .or_else(|| self.applicability_context.clone()),
                     section: args["section"]
                         .as_str()
                         .map(Self::parse_section_arg)
@@ -417,6 +503,7 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ToolProvider
                 }
 
                 let mut lines = Vec::new();
+                lines.push("Stored active inventory; applicability is not filtered here. Use memory_recall for current guidance.".into());
                 lines.push(format!(
                     "{} facts across {} sections:\n",
                     facts.len(),
@@ -627,6 +714,7 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ToolProvider
                 let filter = SearchFilter {
                     intent: SearchIntent::Historical,
                     section: None,
+                    context: crate::applicability::context_arg(&args)?,
                 };
                 let results = self
                     .backend
@@ -645,8 +733,12 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ToolProvider
                 for scored in &results {
                     let f = &scored.fact;
                     lines.push(format!(
-                        "[{}] ({:?}, {:?}) {}",
-                        f.id, f.section, f.status, f.content
+                        "[{}] ({:?}, {:?}) {}\n  {}",
+                        f.id,
+                        f.section,
+                        f.status,
+                        f.content,
+                        crate::renderer::recall_score_label(scored)
                     ));
                 }
                 Ok(ToolResult {
@@ -674,7 +766,15 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ContextProvider
         // For now: use tokio::runtime::Handle to block on async backend calls
         // This is acceptable because provide_context runs once per turn and the
         // backend operations are fast (<10ms for in-memory, <50ms for sqlite).
-        let handle = tokio::runtime::Handle::try_current().ok()?;
+        let empty = || ContextInjection {
+            source: "memory".into(),
+            content: String::new(),
+            priority: 200,
+            ttl_turns: 1,
+        };
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return Some(empty());
+        };
         let backend = &self.backend;
         let renderer = &self.renderer;
 
@@ -682,11 +782,18 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ContextProvider
             scope
                 .spawn(|| {
                     handle.block_on(async {
-                        let facts = crate::service::context_facts(
+                        let filter = SearchFilter {
+                            context: self.applicability_context.clone(),
+                            ..Default::default()
+                        }
+                        .resolved()
+                        .ok()?;
+                        let facts = crate::service::context_facts_filtered(
                             backend,
                             &mind,
                             Some(signals.user_prompt),
                             10_000,
+                            &filter,
                         )
                         .await
                         .ok()?;
@@ -704,22 +811,19 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ContextProvider
                         for id in &wm_ids {
                             if let Ok(Some(f)) = backend.get_fact(id).await
                                 && f.mind == mind
-                                && crate::decay::ambient_score(1.0, &f).is_some()
+                                && filter.score(1.0, &f).is_some()
                             {
                                 wm_facts.push(f);
                             }
                         }
 
-                        let rendered = renderer.render_context(
+                        let rendered = renderer.render_context_scoped(
                             &facts,
                             &episodes,
                             &wm_facts,
                             signals.context_budget_tokens.saturating_mul(4),
+                            filter.context.as_ref().expect("resolved context"),
                         );
-                        if rendered.markdown.is_empty() {
-                            return None;
-                        }
-
                         Some(ContextInjection {
                             source: "memory".into(),
                             content: rendered.markdown,
@@ -731,6 +835,7 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ContextProvider
                 .join()
                 .ok()?
         })
+        .or_else(|| Some(empty()))
     }
 }
 
@@ -766,7 +871,7 @@ mod tests {
     async fn tool_provider_exposes_inspection_with_memory_tools() {
         let provider = MemoryProvider::new(InMemoryBackend::new(), NoopRenderer, "test".into());
         let tools = provider.tools();
-        assert_eq!(tools.len(), 13);
+        assert_eq!(tools.len(), 14);
         assert!(tools.iter().any(|tool| tool.name == "memory_inspect"));
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"memory_store"));

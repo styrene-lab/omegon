@@ -10,10 +10,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-pub const MEMORY_SCHEMA_VERSION: i64 = 12;
+pub const MEMORY_SCHEMA_VERSION: i64 = 13;
 pub const PRIMENSUS_MIND: &str = "primensus";
 pub const LEGACY_MIND: &str = "legacy";
-pub const LEGACY_MEMORY_SCHEMA_VERSIONS: std::ops::RangeInclusive<i64> = 5..=11;
+pub const LEGACY_MEMORY_SCHEMA_VERSIONS: std::ops::RangeInclusive<i64> = 5..=12;
 use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -94,7 +94,7 @@ impl SqliteBackend {
         )?;
         if !LEGACY_MEMORY_SCHEMA_VERSIONS.contains(&source_version) {
             anyhow::bail!(
-                "memory migration only supports schema v5 through v11 sources; found v{source_version}"
+                "memory migration only supports schema v5 through v12 sources; found v{source_version}"
             );
         }
         let integrity_check: String =
@@ -143,6 +143,7 @@ impl SqliteBackend {
                     "ALTER TABLE facts_vec ADD COLUMN space TEXT; -- if absent".into(),
                     "ALTER TABLE facts_vec ADD COLUMN source_hash TEXT; -- if absent".into(),
                     "ALTER TABLE facts ADD COLUMN lifecycle_inference TEXT; -- if absent".into(),
+                    "ALTER TABLE facts ADD COLUMN applicability TEXT; -- if absent".into(),
                     format!(
                         "INSERT INTO schema_version (version, applied_at) VALUES ({MEMORY_SCHEMA_VERSION}, datetime('now'))"
                     ),
@@ -155,6 +156,7 @@ impl SqliteBackend {
                     "ALTER TABLE facts_vec ADD COLUMN space TEXT; -- if absent".into(),
                     "ALTER TABLE facts_vec ADD COLUMN source_hash TEXT; -- if absent".into(),
                     "ALTER TABLE facts ADD COLUMN lifecycle_inference TEXT; -- if absent".into(),
+                    "ALTER TABLE facts ADD COLUMN applicability TEXT; -- if absent".into(),
                     format!(
                         "INSERT INTO schema_version (version, applied_at) VALUES ({MEMORY_SCHEMA_VERSION}, datetime('now'))"
                     ),
@@ -453,6 +455,7 @@ impl SqliteBackend {
             Self::add_column_if_missing(&transaction, "facts_vec", "space", "TEXT")?;
             Self::add_column_if_missing(&transaction, "facts_vec", "source_hash", "TEXT")?;
             Self::add_column_if_missing(&transaction, "facts", "lifecycle_inference", "TEXT")?;
+            Self::add_column_if_missing(&transaction, "facts", "applicability", "TEXT")?;
             transaction.execute_batch(
                 "CREATE TABLE IF NOT EXISTS memory_operation_receipts (
                     operation_id TEXT PRIMARY KEY,
@@ -713,6 +716,7 @@ impl SqliteBackend {
             VALUES ('primensus', 'Authoritative ambient memory', datetime('now'));
 
             CREATE TABLE IF NOT EXISTS facts (
+                applicability TEXT,
                 lifecycle_inference TEXT,
                 id                  TEXT PRIMARY KEY,
                 mind                TEXT NOT NULL DEFAULT 'primensus',
@@ -939,6 +943,11 @@ impl SqliteBackend {
                 })?;
 
         Ok(Fact {
+            applicability: row.get::<_,Option<String>>("applicability")?.map(|encoded| {
+                let record:RecordedApplicability=serde_json::from_str(&encoded).map_err(|error|rusqlite::Error::FromSqlConversionFailure(0,rusqlite::types::Type::Text,Box::new(error)))?;
+                record.validate().map_err(|error|rusqlite::Error::FromSqlConversionFailure(0,rusqlite::types::Type::Text,Box::new(error)))?;
+                Ok::<_,rusqlite::Error>(Box::new(record))
+            }).transpose()?,
             lifecycle_inference: {
                 let inference = row.get::<_, Option<String>>("lifecycle_inference")?.map(|value| {
                 let inference: LifecycleInference = serde_json::from_str(&value).map_err(|error| rusqlite::Error::FromSqlConversionFailure(0,rusqlite::types::Type::Text,Box::new(error)))?;
@@ -1056,7 +1065,15 @@ impl SqliteBackend {
                 continue;
             }
             match serde_json::from_str::<JsonlRecord>(trimmed) {
-                Ok(JsonlRecord::Fact(jf)) => {
+                Ok(JsonlRecord::ApplicableFact(ref fact)) if fact.applicability.is_none() => {
+                    return Err(MemoryError::InvalidMutation(
+                        "applicable_fact requires applicability metadata".into(),
+                    ));
+                }
+                Ok(JsonlRecord::Fact(jf) | JsonlRecord::ApplicableFact(jf)) => {
+                    if let Some(applicability) = &jf.applicability {
+                        applicability.validate()?;
+                    }
                     validate_inference_status(
                         &jf.status,
                         jf.lifecycle_inference.as_deref(),
@@ -1146,6 +1163,15 @@ impl SqliteBackend {
                         .map(serde_json::to_string)
                         .transpose()
                         .map_err(|error| MemoryError::Storage(error.into()))?;
+                    if let Some(applicability) = &jf.applicability {
+                        let encoded = serde_json::to_string(applicability)
+                            .map_err(|error| MemoryError::Storage(error.into()))?;
+                        tx.execute(
+                            "UPDATE facts SET applicability=?1 WHERE id=?2",
+                            params![encoded, jf.id],
+                        )
+                        .map_err(|error| MemoryError::Storage(error.into()))?;
+                    }
                     tx.execute(
                         "UPDATE facts SET lifecycle_inference=?1 WHERE id=?2",
                         params![inference, jf.id],
@@ -1312,11 +1338,36 @@ impl MemoryBackend for SqliteBackend {
         }
 
         let mutation = crate::lifecycle::lower(mutation)?;
+        let applicability = match &mutation {
+            MemoryMutation::StoreApplicableFact { constraints, .. } => {
+                Some(Box::new(RecordedApplicability::new(*constraints.clone())?))
+            }
+            _ => None,
+        };
         let inference = match &mutation {
             MemoryMutation::StoreLifecycleInference { inference, .. } => Some(inference.clone()),
             _ => None,
         };
         let effect = match mutation {
+            MemoryMutation::SetFactApplicability { fact, constraints } => {
+                Self::check_fact_precondition(&transaction, &fact)?;
+                let applicability = RecordedApplicability::new(*constraints)?;
+                let encoded = serde_json::to_string(&applicability)
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                let version = Self::next_version_static(&transaction)?;
+                transaction
+                    .execute(
+                        "UPDATE facts SET applicability=?1,version=?2 WHERE id=?3",
+                        params![encoded, version as i64, fact.id],
+                    )
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                MemoryMutationEffect::ApplicabilityUpdated {
+                    fact: FactPrecondition {
+                        id: fact.id,
+                        expected_version: version,
+                    },
+                }
+            }
             MemoryMutation::ConfirmLifecycleCandidate {
                 candidate,
                 snapshot_hash,
@@ -1381,19 +1432,42 @@ impl MemoryBackend for SqliteBackend {
                 jsonl_import_effect(self.import_jsonl_transaction(&transaction, &jsonl)?)
             }
             MemoryMutation::StoreFact { request }
+            | MemoryMutation::StoreApplicableFact { request, .. }
             | MemoryMutation::StoreLifecycleInference { request, .. } => {
                 self.ensure_mind(&transaction, &request.mind)
                     .map_err(|error| MemoryError::Storage(error.into()))?;
                 let content_hash = hash::content_hash(&request.content);
-                let existing_id: Option<String> = transaction
-                    .query_row(
-                        "SELECT id FROM facts WHERE mind = ?1 AND content_hash = ?2 AND status = 'active' AND ?3=0 AND (?4=0 OR (content=?5 AND source=?6 AND section=?7)) ORDER BY id LIMIT 1",
-                        params![request.mind, content_hash, inference.is_some(), crate::lifecycle::requires_exact_source(request.source.as_deref()),request.content,request.source,
-                            serde_json::to_string(&request.section).unwrap().trim_matches('"')],
-                        |row| row.get(0),
+                let mut candidates=transaction.prepare("SELECT * FROM facts WHERE mind = ?1 AND content_hash = ?2 AND status = 'active' AND ?3=0 AND (?4=0 OR (content=?5 AND source=?6 AND section=?7)) ORDER BY id").map_err(|error|MemoryError::Storage(error.into()))?;
+                let rows = candidates
+                    .query_map(
+                        params![
+                            request.mind,
+                            content_hash,
+                            inference.is_some(),
+                            crate::lifecycle::requires_exact_source(request.source.as_deref()),
+                            request.content,
+                            request.source,
+                            serde_json::to_string(&request.section)
+                                .unwrap()
+                                .trim_matches('"')
+                        ],
+                        Self::row_to_fact,
                     )
-                    .optional()
                     .map_err(|error| MemoryError::Storage(error.into()))?;
+                let mut existing_id = None;
+                for row in rows {
+                    let existing = row.map_err(|error| MemoryError::Storage(error.into()))?;
+                    if existing
+                        .applicability
+                        .as_ref()
+                        .map(|record| &record.constraints)
+                        == applicability.as_ref().map(|record| &record.constraints)
+                    {
+                        existing_id = Some(existing.id);
+                        break;
+                    }
+                }
+                drop(candidates);
                 let version = Self::next_version_static(&transaction)?;
                 if let Some(fact_id) = existing_id {
                     transaction.execute(
@@ -1424,6 +1498,16 @@ impl MemoryBackend for SqliteBackend {
                             timestamp, request.source.as_deref().unwrap_or("manual"), content_hash,
                             profile.trim_matches('"'), version as i64, if pending {"pending"} else {"active"}, if pending {0} else {1}, encoded],
                     ).map_err(|error| MemoryError::Storage(error.into()))?;
+                    if let Some(applicability) = &applicability {
+                        let encoded = serde_json::to_string(applicability)
+                            .map_err(|error| MemoryError::Storage(error.into()))?;
+                        transaction
+                            .execute(
+                                "UPDATE facts SET applicability=?1 WHERE id=?2",
+                                params![encoded, fact_id],
+                            )
+                            .map_err(|error| MemoryError::Storage(error.into()))?;
+                    }
                     MemoryMutationEffect::FactStored {
                         fact_id,
                         version,
@@ -1765,7 +1849,7 @@ impl MemoryBackend for SqliteBackend {
         // Check dedup
         let existing: Option<String> = transaction
             .query_row(
-                "SELECT id FROM facts WHERE mind = ?1 AND content_hash = ?2 AND status = 'active'",
+                "SELECT id FROM facts WHERE mind = ?1 AND content_hash = ?2 AND status = 'active' AND applicability IS NULL",
                 params![req.mind, ch],
                 |r| r.get(0),
             )
@@ -2192,6 +2276,7 @@ impl MemoryBackend for SqliteBackend {
         k: usize,
         filter: &SearchFilter,
     ) -> Result<Vec<ScoredFact>> {
+        let filter = filter.resolved()?;
         let conn = self.conn.lock().unwrap();
         // Use FTS5 OR mode for broader matching
         let fts_query = query
@@ -2215,45 +2300,42 @@ impl MemoryBackend for SqliteBackend {
                 "SELECT f.*, rank FROM facts_fts fts \
              JOIN facts f ON f.id = fts.id \
              WHERE facts_fts MATCH ?1 AND f.mind = ?2 \
-             AND ((?4 = 0 AND f.status = 'active') OR (?4 = 1 AND f.status IN ('archived','dormant','superseded'))) \
-             AND (?5 IS NULL OR f.section = ?5) \
-             ORDER BY rank, f.id LIMIT ?3",
+              AND ((?3 = 0 AND f.status = 'active') OR (?3 = 1 AND f.status IN ('archived','dormant','superseded'))) \
+              AND (?4 IS NULL OR f.section = ?4) \
+              ORDER BY rank, f.id",
             )
             .map_err(|e| MemoryError::Storage(e.into()))?;
 
-        let mut results: Vec<ScoredFact> = stmt
-            .query_map(
-                params![
-                    fts_query,
-                    mind,
-                    i64::try_from(k.saturating_mul(8)).unwrap_or(i64::MAX),
-                    filter.intent == SearchIntent::Historical,
-                    section
-                ],
-                |row| {
-                    let fact = Self::row_to_fact(row)?;
-                    let rank: f64 = row.get("rank")?;
-                    Ok((fact, -rank))
-                },
-            )
-            .map_err(|e| MemoryError::Storage(e.into()))?
-            .collect::<rusqlite::Result<Vec<_>>>()
+        let mut rows = stmt
+            .query(params![
+                fts_query,
+                mind,
+                filter.intent == SearchIntent::Historical,
+                section
+            ])
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        let mut results = Vec::new();
+        while let Some(row) = rows
+            .next()
             .map_err(|error| MemoryError::Storage(error.into()))?
-            .into_iter()
-            .filter_map(|(fact, relevance)| {
-                let score = filter.score(relevance, &fact)?;
-                Some(ScoredFact {
-                    fact,
-                    similarity: relevance,
-                    score,
-                    scores: RetrievalScores {
-                        lexical: Some(relevance),
-                        ..Default::default()
-                    },
-                    graph_evidence: vec![],
-                })
-            })
-            .collect();
+        {
+            let fact =
+                Self::row_to_fact(row).map_err(|error| MemoryError::Storage(error.into()))?;
+            let relevance = -row
+                .get::<_, f64>("rank")
+                .map_err(|error| MemoryError::Storage(error.into()))?;
+            let Some(score) = filter.score(relevance, &fact) else {
+                continue;
+            };
+            let applicability = filter.applicability_status(&fact);
+            let mut result = ScoredFact::new(fact, relevance, score);
+            result.applicability = applicability;
+            result.scores.lexical = Some(relevance);
+            results.push(result);
+            if results.len() >= k.saturating_mul(8) {
+                break;
+            }
+        }
         results.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
@@ -2400,6 +2482,7 @@ impl MemoryBackend for SqliteBackend {
         filter: &SearchFilter,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> Result<VectorSearchReport> {
+        let filter = filter.resolved()?;
         let mut top = crate::retrieval::VectorAccumulator::new(query, k, minimum)?;
         if cancelled() {
             return Err(MemoryError::Cancelled);
@@ -2432,6 +2515,9 @@ impl MemoryBackend for SqliteBackend {
             }
             let fact =
                 Self::row_to_fact(row).map_err(|error| MemoryError::Storage(error.into()))?;
+            if !filter.matches(&fact) {
+                continue;
+            }
             let space = crate::retrieval::stored_space(
                 row.get("space")
                     .map_err(|error| MemoryError::Storage(error.into()))?,
@@ -2466,7 +2552,7 @@ impl MemoryBackend for SqliteBackend {
             let vector = crate::retrieval::decode(&blob, &query.space)?;
             let similarity = vectors::cosine_similarity(&vector, &query.values);
             if similarity >= minimum {
-                top.push(fact, similarity as f64, filter);
+                top.push(fact, similarity as f64, &filter);
             }
         }
         Ok(top.finish())
@@ -2518,6 +2604,7 @@ impl MemoryBackend for SqliteBackend {
         id: &str,
         filter: &SearchFilter,
     ) -> Result<Option<Fact>> {
+        let filter = filter.resolved()?;
         let conn = self.conn.lock().unwrap();
         let fact = conn
             .query_row(
@@ -2537,6 +2624,10 @@ impl MemoryBackend for SqliteBackend {
         filter: &SearchFilter,
         limit: usize,
     ) -> Result<Vec<Edge>> {
+        let filter = filter.resolved()?;
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
         let conn = self.conn.lock().unwrap();
         let section = filter.section.as_ref().map(|section| {
             serde_json::to_string(section)
@@ -2544,31 +2635,52 @@ impl MemoryBackend for SqliteBackend {
                 .trim_matches('"')
                 .to_string()
         });
-        let mut stmt = conn.prepare("SELECT e.* FROM edges e JOIN facts s ON s.id=e.source_fact_id JOIN facts t ON t.id=e.target_fact_id WHERE (s.id=?1 OR t.id=?1) AND s.mind=?2 AND t.mind=?2 AND e.status='active' AND ((?3=0 AND s.status='active' AND t.status='active') OR (?3=1 AND s.status IN ('archived','dormant','superseded') AND t.status IN ('archived','dormant','superseded'))) AND (?4 IS NULL OR (s.section=?4 AND t.section=?4)) ORDER BY e.confidence DESC,e.id LIMIT ?5")
+        let mut stmt = conn.prepare("SELECT e.*,s.applicability AS source_app,t.applicability AS target_app FROM edges e JOIN facts s ON s.id=e.source_fact_id JOIN facts t ON t.id=e.target_fact_id WHERE (s.id=?1 OR t.id=?1) AND s.mind=?2 AND t.mind=?2 AND e.status='active' AND ((?3=0 AND s.status='active' AND t.status='active') OR (?3=1 AND s.status IN ('archived','dormant','superseded') AND t.status IN ('archived','dormant','superseded'))) AND (?4 IS NULL OR (s.section=?4 AND t.section=?4)) ORDER BY e.confidence DESC,e.id")
             .map_err(|error| MemoryError::Storage(error.into()))?;
-        stmt.query_map(
-            params![
-                id,
-                mind,
-                filter.intent == SearchIntent::Historical,
-                section,
-                limit.min(1024) as i64
-            ],
-            |row| {
-                Ok(Edge {
-                    id: row.get("id")?,
-                    source_id: row.get("source_fact_id")?,
-                    target_id: row.get("target_fact_id")?,
-                    relation: row.get("relation")?,
-                    description: row.get("description")?,
-                    confidence: row.get("confidence")?,
-                    created_at: row.get("created_at")?,
-                })
-            },
-        )
-        .map_err(|error| MemoryError::Storage(error.into()))?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|error| MemoryError::Storage(error.into()))
+        let rows = stmt
+            .query_map(
+                params![id, mind, filter.intent == SearchIntent::Historical, section],
+                |row| {
+                    Ok((
+                        Edge {
+                            id: row.get("id")?,
+                            source_id: row.get("source_fact_id")?,
+                            target_id: row.get("target_fact_id")?,
+                            relation: row.get("relation")?,
+                            description: row.get("description")?,
+                            confidence: row.get("confidence")?,
+                            created_at: row.get("created_at")?,
+                        },
+                        row.get::<_, Option<String>>("source_app")?,
+                        row.get::<_, Option<String>>("target_app")?,
+                    ))
+                },
+            )
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        let mut edges = Vec::new();
+        for row in rows {
+            let (edge, source, target) = row.map_err(|error| MemoryError::Storage(error.into()))?;
+            let mut eligible = true;
+            for encoded in [source, target].into_iter().flatten() {
+                let record: RecordedApplicability = serde_json::from_str(&encoded)
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                record.validate()?;
+                if record
+                    .constraints
+                    .assess(filter.context.as_ref().expect("resolved context"))
+                    == ApplicabilityStatus::Inapplicable
+                {
+                    eligible = false;
+                }
+            }
+            if eligible {
+                edges.push(edge);
+                if edges.len() >= limit.min(1024) {
+                    break;
+                }
+            }
+        }
+        Ok(edges)
     }
 
     async fn create_edge(&self, req: CreateEdge) -> Result<Edge> {
@@ -2744,7 +2856,8 @@ impl MemoryBackend for SqliteBackend {
             .map_err(|error| MemoryError::Storage(error.into()))?;
         for f in &facts {
             FactOperationalState::from(f).validate()?;
-            let record = JsonlRecord::Fact(JsonlFact {
+            let record = JsonlFact {
+                applicability: f.applicability.clone(),
                 lifecycle_inference: f.lifecycle_inference.clone(),
                 operational: Some(Box::new(FactOperationalState::from(f))),
                 id: f.id.clone(),
@@ -2761,7 +2874,12 @@ impl MemoryBackend for SqliteBackend {
                 persona_id: f.persona_id.clone(),
                 layer: f.layer.clone(),
                 tags: f.tags.clone(),
-            });
+            };
+            let record = if record.applicability.is_some() {
+                JsonlRecord::ApplicableFact(record)
+            } else {
+                JsonlRecord::Fact(record)
+            };
             lines.push(serde_json::to_string(&record).unwrap());
         }
 
@@ -2965,6 +3083,10 @@ mod tests {
         .unwrap();
         if version < 11 {
             conn.execute_batch("ALTER TABLE facts DROP COLUMN lifecycle_inference;")
+                .unwrap();
+        }
+        if version < 13 {
+            conn.execute_batch("ALTER TABLE facts DROP COLUMN applicability;")
                 .unwrap();
         }
         if version < 10 {

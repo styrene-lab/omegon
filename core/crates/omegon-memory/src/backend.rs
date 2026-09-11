@@ -64,6 +64,11 @@ pub(crate) fn mutation_payload_hash(mutation: &MemoryMutation) -> Result<String>
 }
 
 fn validate_mutation(mutation: &MemoryMutation) -> Result<()> {
+    if let MemoryMutation::StoreApplicableFact { constraints, .. }
+    | MemoryMutation::SetFactApplicability { constraints, .. } = mutation
+    {
+        constraints.validate()?;
+    }
     if let MemoryMutation::StoreLifecycleConclusion {
         request, source, ..
     } = mutation
@@ -321,6 +326,7 @@ pub trait MemoryBackend: Send + Sync {
         id: &str,
         filter: &SearchFilter,
     ) -> Result<Option<Fact>> {
+        let filter = filter.resolved()?;
         if filter.intent == SearchIntent::Historical {
             return Err(MemoryError::InvalidMutation(
                 "historical lookup unsupported".into(),
@@ -339,17 +345,35 @@ pub trait MemoryBackend: Send + Sync {
         filter: &SearchFilter,
         limit: usize,
     ) -> Result<Vec<Edge>> {
-        if filter != &SearchFilter::default() {
+        let filter = filter.resolved()?;
+        if filter.intent == SearchIntent::Historical {
             return Err(MemoryError::InvalidMutation(
                 "filtered edges unsupported".into(),
             ));
         }
-        Ok(self
-            .get_edges(mind, id)
-            .await?
-            .into_iter()
-            .take(limit)
-            .collect())
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let mut results = Vec::new();
+        for edge in self.get_edges(mind, id).await? {
+            let mut eligible = true;
+            for endpoint in [&edge.source_id, &edge.target_id] {
+                if self
+                    .get_fact_filtered(mind, endpoint, &filter)
+                    .await?
+                    .is_none()
+                {
+                    eligible = false;
+                }
+            }
+            if eligible {
+                results.push(edge);
+                if results.len() >= limit.min(1024) {
+                    break;
+                }
+            }
+        }
+        Ok(results)
     }
 
     /// Store an embedding vector for a fact. Registers the model in embedding_metadata
@@ -412,6 +436,28 @@ pub trait MemoryBackend: Send + Sync {
 /// The default implementation (`MarkdownRenderer`) produces the markdown
 /// block used for LLM system prompt injection.
 pub trait ContextRenderer: Send + Sync {
+    fn render_context_scoped(
+        &self,
+        facts: &[Fact],
+        episodes: &[Episode],
+        working_memory: &[Fact],
+        max_chars: usize,
+        context: &ApplicabilityContext,
+    ) -> RenderedContext {
+        let eligible = |fact: &&Fact| {
+            fact.status == FactStatus::Active
+                && fact.applicability.as_ref().is_none_or(|record| {
+                    record.constraints.assess(context) != ApplicabilityStatus::Inapplicable
+                })
+        };
+        let facts = facts.iter().filter(eligible).cloned().collect::<Vec<_>>();
+        let working = working_memory
+            .iter()
+            .filter(eligible)
+            .cloned()
+            .collect::<Vec<_>>();
+        self.render_context(&facts, episodes, &working, max_chars)
+    }
     /// Render a context block from the given backend.
     /// Selects facts by priority tier, respects character budget, and
     /// includes episode summaries.

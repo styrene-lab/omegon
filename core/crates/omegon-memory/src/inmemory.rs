@@ -95,11 +95,31 @@ impl InMemoryBackend {
 
     fn apply_to_state(state: &mut State, mutation: MemoryMutation) -> Result<MemoryMutationEffect> {
         let mutation = crate::lifecycle::lower(mutation)?;
+        let applicability = match &mutation {
+            MemoryMutation::StoreApplicableFact { constraints, .. } => {
+                Some(Box::new(RecordedApplicability::new(*constraints.clone())?))
+            }
+            _ => None,
+        };
         let inference = match &mutation {
             MemoryMutation::StoreLifecycleInference { inference, .. } => Some(inference.clone()),
             _ => None,
         };
         match mutation {
+            MemoryMutation::SetFactApplicability { fact, constraints } => {
+                Self::check_fact_precondition(state, &fact)?;
+                let applicability = Box::new(RecordedApplicability::new(*constraints)?);
+                let version = Self::next_version(state)?;
+                let record = state.facts.get_mut(&fact.id).unwrap();
+                record.applicability = Some(applicability);
+                record.version = version;
+                Ok(MemoryMutationEffect::ApplicabilityUpdated {
+                    fact: FactPrecondition {
+                        id: fact.id,
+                        expected_version: version,
+                    },
+                })
+            }
             MemoryMutation::ConfirmLifecycleCandidate {
                 candidate,
                 snapshot_hash,
@@ -173,6 +193,7 @@ impl InMemoryBackend {
                 Ok(jsonl_import_effect(stats))
             }
             MemoryMutation::StoreFact { request }
+            | MemoryMutation::StoreApplicableFact { request, .. }
             | MemoryMutation::StoreLifecycleInference { request, .. } => {
                 let content_hash = hash::content_hash(&request.content);
                 let existing_id = state
@@ -183,6 +204,11 @@ impl InMemoryBackend {
                             && fact.mind == request.mind
                             && fact.content_hash.as_deref() == Some(content_hash.as_str())
                             && fact.status == FactStatus::Active
+                            && fact
+                                .applicability
+                                .as_ref()
+                                .map(|record| &record.constraints)
+                                == applicability.as_ref().map(|record| &record.constraints)
                             && (!crate::lifecycle::requires_exact_source(request.source.as_deref())
                                 || (fact.content == request.content
                                     && fact.source == request.source
@@ -211,6 +237,7 @@ impl InMemoryBackend {
                     state,
                     fact_id.clone(),
                     Fact {
+                        applicability,
                         id: fact_id.clone(),
                         mind: request.mind,
                         content: request.content,
@@ -351,6 +378,7 @@ impl InMemoryBackend {
                     replacement_id.clone(),
                     Fact {
                         id: replacement_id.clone(),
+                        applicability: None,
                         lifecycle_inference: None,
                         mind: replacement.mind,
                         content_hash: Some(hash::content_hash(&replacement.content)),
@@ -566,7 +594,15 @@ impl InMemoryBackend {
                 continue;
             }
             match serde_json::from_str::<JsonlRecord>(trimmed) {
-                Ok(JsonlRecord::Fact(jf)) => {
+                Ok(JsonlRecord::ApplicableFact(ref fact)) if fact.applicability.is_none() => {
+                    return Err(MemoryError::InvalidMutation(
+                        "applicable_fact requires applicability metadata".into(),
+                    ));
+                }
+                Ok(JsonlRecord::Fact(jf) | JsonlRecord::ApplicableFact(jf)) => {
+                    if let Some(applicability) = &jf.applicability {
+                        applicability.validate()?;
+                    }
                     validate_inference_status(
                         &jf.status,
                         jf.lifecycle_inference.as_deref(),
@@ -600,6 +636,9 @@ impl InMemoryBackend {
                             updated.layer = jf.layer;
                             updated.tags = jf.tags;
                             updated.version = jf.version;
+                            if jf.applicability.is_some() {
+                                updated.applicability = jf.applicability;
+                            }
                             updated.lifecycle_inference = jf.lifecycle_inference;
                             updated.created_at = jf.created_at;
                             if let Some(operational) = jf.operational {
@@ -614,6 +653,7 @@ impl InMemoryBackend {
                     } else {
                         state.version_clock = state.version_clock.max(jf.version);
                         let mut fact = Fact {
+                            applicability: jf.applicability,
                             lifecycle_inference: jf.lifecycle_inference,
                             id: jf.id.clone(),
                             mind: jf.mind,
@@ -794,6 +834,7 @@ impl MemoryBackend for InMemoryBackend {
                 f.mind == req.mind
                     && f.content_hash.as_deref() == Some(ch.as_str())
                     && f.status == FactStatus::Active
+                    && f.applicability.is_none()
             })
             .map(|(id, _)| id.clone());
 
@@ -812,6 +853,7 @@ impl MemoryBackend for InMemoryBackend {
 
         let version = Self::next_version(&mut s)?;
         let fact = Fact {
+            applicability: None,
             lifecycle_inference: None,
             id: gen_id(),
             mind: req.mind,
@@ -1011,6 +1053,7 @@ impl MemoryBackend for InMemoryBackend {
         let new_id = gen_id();
         let ch = hash::content_hash(&replacement.content);
         let new_fact = Fact {
+            applicability: None,
             lifecycle_inference: None,
             id: new_id.clone(),
             mind: replacement.mind,
@@ -1128,6 +1171,7 @@ impl MemoryBackend for InMemoryBackend {
         k: usize,
         filter: &SearchFilter,
     ) -> Result<Vec<ScoredFact>> {
+        let filter = filter.resolved()?;
         let s = self.state.lock().unwrap();
         let query_lower = query.replace('"', " ").to_lowercase();
         let terms: Vec<&str> = query_lower.split_whitespace().collect();
@@ -1145,6 +1189,7 @@ impl MemoryBackend for InMemoryBackend {
                 let relevance = matches as f64 / terms.len().max(1) as f64;
                 let score = filter.score(relevance, f)?;
                 Some(ScoredFact {
+                    applicability: filter.applicability_status(f),
                     fact: f.clone(),
                     similarity: relevance,
                     score,
@@ -1274,6 +1319,7 @@ impl MemoryBackend for InMemoryBackend {
         filter: &SearchFilter,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> Result<VectorSearchReport> {
+        let filter = filter.resolved()?;
         let mut top = crate::retrieval::VectorAccumulator::new(query, k, minimum)?;
         if cancelled() {
             return Err(MemoryError::Cancelled);
@@ -1308,7 +1354,7 @@ impl MemoryBackend for InMemoryBackend {
             .validate()?;
             let similarity = vectors::cosine_similarity(&entry.embedding, &query.values);
             if similarity >= minimum {
-                top.push(fact.clone(), similarity as f64, filter);
+                top.push(fact.clone(), similarity as f64, &filter);
             }
         }
         Ok(top.finish())
@@ -1342,6 +1388,7 @@ impl MemoryBackend for InMemoryBackend {
         id: &str,
         filter: &SearchFilter,
     ) -> Result<Option<Fact>> {
+        let filter = filter.resolved()?;
         Ok(self
             .state
             .lock()
@@ -1359,6 +1406,7 @@ impl MemoryBackend for InMemoryBackend {
         filter: &SearchFilter,
         limit: usize,
     ) -> Result<Vec<Edge>> {
+        let filter = filter.resolved()?;
         let state = self.state.lock().unwrap();
         let mut edges = state
             .edges
@@ -1518,7 +1566,8 @@ impl MemoryBackend for InMemoryBackend {
         facts.sort_by(|a, b| a.id.cmp(&b.id));
         for fact in facts {
             FactOperationalState::from(fact).validate()?;
-            let record = JsonlRecord::Fact(JsonlFact {
+            let record = JsonlFact {
+                applicability: fact.applicability.clone(),
                 lifecycle_inference: fact.lifecycle_inference.clone(),
                 operational: Some(Box::new(FactOperationalState::from(fact))),
                 id: fact.id.clone(),
@@ -1535,7 +1584,12 @@ impl MemoryBackend for InMemoryBackend {
                 persona_id: fact.persona_id.clone(),
                 layer: fact.layer.clone(),
                 tags: fact.tags.clone(),
-            });
+            };
+            let record = if record.applicability.is_some() {
+                JsonlRecord::ApplicableFact(record)
+            } else {
+                JsonlRecord::Fact(record)
+            };
             lines.push(serde_json::to_string(&record).unwrap());
         }
 

@@ -49,6 +49,7 @@ async fn filtered_channels_respect_section_scope_and_read_only_history() {
             .await
             .unwrap();
         let filter = SearchFilter {
+            context: None,
             section: Some(Section::Constraints),
             intent: SearchIntent::Current,
         };
@@ -95,6 +96,7 @@ async fn filtered_channels_respect_section_scope_and_read_only_history() {
                 .is_empty()
         );
         let historical = SearchFilter {
+            context: None,
             intent: SearchIntent::Historical,
             section: None,
         };
@@ -138,6 +140,7 @@ async fn historical_search_survives_reopen_and_storage_failure_is_not_empty() {
     drop(backend);
     let backend = SqliteBackend::open(&path).unwrap();
     let filter = omegon_memory::SearchFilter {
+        context: None,
         intent: omegon_memory::SearchIntent::Historical,
         section: None,
     };

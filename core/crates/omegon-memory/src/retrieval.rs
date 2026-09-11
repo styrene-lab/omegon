@@ -159,6 +159,7 @@ impl VectorAccumulator {
             return;
         };
         let mut result = ScoredFact::new(fact, similarity, score);
+        result.applicability = filter.applicability_status(&result.fact);
         result.scores.cosine = Some(similarity);
         let ranked = Ranked(result);
         if self.heap.len() < self.limit {

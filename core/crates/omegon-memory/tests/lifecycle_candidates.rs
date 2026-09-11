@@ -97,6 +97,7 @@ async fn inference_replay_preserves_provenance_without_admitting_or_reinforcing_
                 "zircon",
                 10,
                 &SearchFilter {
+                    context: None,
                     intent: SearchIntent::Historical,
                     section: None,
                 },

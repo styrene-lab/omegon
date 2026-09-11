@@ -73,6 +73,7 @@ pub mod memory {
     pub const MEMORY_INGEST_LIFECYCLE: &str = "memory_ingest_lifecycle";
     pub const MEMORY_CONFIRM: &str = "memory_confirm";
     pub const MEMORY_INSPECT: &str = "memory_inspect";
+    pub const MEMORY_SET_APPLICABILITY: &str = "memory_set_applicability";
     pub const MEMORY_APPLY_CONFIRMATION: &str = "memory_apply_confirmation";
 }
 
@@ -198,7 +199,7 @@ pub mod loop_jobs {
 /// **Maintenance rule**: every `pub const` above MUST appear here.
 /// The `registry_count_is_current` test will catch omissions.
 /// Number of statically registered tools (for splash screen display).
-pub const TOOL_COUNT: usize = 84;
+pub const TOOL_COUNT: usize = 85;
 
 pub fn all_static_names() -> Vec<&'static str> {
     vec![
@@ -243,6 +244,7 @@ pub fn all_static_names() -> Vec<&'static str> {
         memory::MEMORY_INGEST_LIFECYCLE,
         memory::MEMORY_CONFIRM,
         memory::MEMORY_INSPECT,
+        memory::MEMORY_SET_APPLICABILITY,
         memory::MEMORY_APPLY_CONFIRMATION,
         // lifecycle (4)
         lifecycle::DESIGN_TREE,

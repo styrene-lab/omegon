@@ -346,6 +346,7 @@ async fn graph_conflicts_do_not_boost_seeds_and_history_preserves_status() {
         }
         backend.archive_facts(&[&a.id, &b.id]).await.unwrap();
         let filter = SearchFilter {
+            context: None,
             intent: SearchIntent::Historical,
             section: None,
         };
@@ -480,6 +481,7 @@ async fn supersession_direction_is_current_only_and_unknown_relations_do_not_exp
         );
         backend.archive_facts(&[&new.id, &old.id]).await.unwrap();
         let filter = SearchFilter {
+            context: None,
             intent: SearchIntent::Historical,
             section: None,
         };

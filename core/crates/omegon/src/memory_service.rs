@@ -44,12 +44,50 @@ pub(crate) const MAX_CONTEXT_PINS: usize = 1_000;
 
 #[derive(Debug, Clone)]
 pub(crate) struct MemoryWorkerConfig {
+    pub workspace_root: Option<PathBuf>,
     pub project_memory_root: PathBuf,
     pub project_db_path: PathBuf,
     pub project_jsonl_path: PathBuf,
     pub global_db_path: Option<PathBuf>,
     pub vault: Option<MemoryVaultConfigV1>,
     pub startup_sync_enabled: bool,
+}
+
+/// Host-owned checkout identity and HEAD commit, without invoking Git/jj processes.
+pub(crate) fn applicability_context(
+    root: Option<&std::path::Path>,
+) -> omegon_memory::ApplicabilityContext {
+    let mut context = omegon_memory::ApplicabilityContext::local();
+    if let Some(root) = root
+        .and_then(|root| root.canonicalize().ok())
+        .filter(|root| root.is_dir())
+    {
+        let workspace = crate::workspace::runtime::workspace_id_from_path(&root);
+        if workspace.len() <= 2048
+            && workspace.trim() == workspace
+            && !workspace.chars().any(char::is_control)
+        {
+            context.workspace = Some(workspace);
+        }
+        context.revision = git2::Repository::discover(&root).ok().and_then(|repo| {
+            repo.head()
+                .ok()?
+                .peel_to_commit()
+                .ok()
+                .map(|commit| format!("git:{}", commit.id()))
+        });
+    }
+    context
+}
+
+fn applicable_filter(
+    config: &MemoryWorkerConfig,
+    mut filter: omegon_memory::SearchFilter,
+) -> omegon_memory::backend::Result<omegon_memory::SearchFilter> {
+    if filter.context.is_none() && filter.intent == omegon_memory::SearchIntent::Current {
+        filter.context = Some(applicability_context(config.workspace_root.as_deref()));
+    }
+    filter.resolved()
 }
 
 #[derive(Debug, Clone)]
@@ -463,6 +501,8 @@ pub(crate) struct FactPageV1 {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ContextSnapshotV1 {
+    #[serde(default)]
+    pub context: omegon_memory::ApplicabilityContext,
     pub facts: Vec<Fact>,
     pub episodes: Vec<Episode>,
     pub working_memory: Vec<Fact>,
@@ -1568,6 +1608,7 @@ fn execute_request(
                     min_similarity,
                     ..
                 } => {
+                    let filter = applicable_filter(config, filter)?;
                     let fts = backend
                         .fts_search_filtered(&mind, &query, fetch_limit, &filter)
                         .await?;
@@ -1646,11 +1687,13 @@ fn execute_request(
                     episode_limit,
                     ..
                 } => {
-                    let facts = omegon_memory::service::context_facts(
+                    let filter = applicable_filter(config, Default::default())?;
+                    let facts = omegon_memory::service::context_facts_filtered(
                         backend,
                         &mind,
                         query.as_deref(),
                         fact_limit,
+                        &filter,
                     )
                     .await?;
                     let episodes = if let Some(query) =
@@ -1664,12 +1707,13 @@ fn execute_request(
                     for id in working_memory {
                         if let Some(fact) = backend.get_fact(&id).await?
                             && fact.mind == mind
-                            && omegon_memory::decay::ambient_score(1.0, &fact).is_some()
+                            && filter.score(1.0, &fact).is_some()
                         {
                             pins.push(fact);
                         }
                     }
                     Ok(MemoryPayloadV1::ContextSnapshot(ContextSnapshotV1 {
+                        context: filter.context.expect("resolved context"),
                         facts,
                         episodes,
                         working_memory: pins,
@@ -1697,10 +1741,13 @@ fn execute_request(
                     limit,
                     filter,
                     ..
-                } => backend
-                    .fts_search_filtered(&mind, &query, limit, &filter)
-                    .await
-                    .map(MemoryPayloadV1::ScoredFacts),
+                } => {
+                    let filter = applicable_filter(config, filter)?;
+                    backend
+                        .fts_search_filtered(&mind, &query, limit, &filter)
+                        .await
+                        .map(MemoryPayloadV1::ScoredFacts)
+                }
                 MemoryRequestV1::VectorSearch {
                     mind,
                     vector,
@@ -1710,6 +1757,7 @@ fn execute_request(
                     ..
                 } => {
                     let space = space.ok_or(MemoryError::EmbeddingIdentityRequired)?;
+                    let filter = applicable_filter(config, Default::default())?;
                     backend
                         .search_identified(
                             &mind,
@@ -1719,7 +1767,7 @@ fn execute_request(
                             },
                             limit,
                             min_similarity,
-                            &Default::default(),
+                            &filter,
                             cancelled,
                         )
                         .await
@@ -2103,6 +2151,7 @@ mod tests {
     fn worker_config(project: PathBuf, global: Option<PathBuf>) -> MemoryWorkerConfig {
         let project_memory_root = project.parent().unwrap().to_path_buf();
         MemoryWorkerConfig {
+            workspace_root: Some(project_memory_root.clone()),
             project_memory_root,
             project_jsonl_path: project.parent().unwrap().join("facts.jsonl"),
             project_db_path: project,
@@ -2114,6 +2163,7 @@ mod tests {
 
     fn jsonl_fact(id: &str, content: &str) -> String {
         serde_json::to_string(&JsonlRecord::Fact(JsonlFact {
+            applicability: None,
             lifecycle_inference: None,
             operational: None,
             id: id.into(),
@@ -2610,6 +2660,7 @@ mod tests {
         std::os::unix::fs::symlink(&outside, root.join("facts.jsonl")).unwrap();
         for startup_sync_enabled in [true, false] {
             let error = match start_candidate(MemoryWorkerConfig {
+                workspace_root: Some(dir.path().to_path_buf()),
                 project_memory_root: root.clone(),
                 project_db_path: root.join("facts.db"),
                 project_jsonl_path: root.join("facts.jsonl"),
@@ -2636,6 +2687,7 @@ mod tests {
         let root = dir.path().join("memory");
         std::fs::create_dir(&root).unwrap();
         let error = match start_candidate(MemoryWorkerConfig {
+            workspace_root: Some(dir.path().to_path_buf()),
             project_memory_root: root.clone(),
             project_db_path: root.join("facts.db"),
             project_jsonl_path: dir.path().join("facts.jsonl"),
@@ -2668,6 +2720,7 @@ mod tests {
         )
         .unwrap();
         let config = MemoryWorkerConfig {
+            workspace_root: Some(dir.path().to_path_buf()),
             project_memory_root: dir.path().to_path_buf(),
             project_jsonl_path: dir.path().join("facts.jsonl"),
             project_db_path: project,
@@ -2987,6 +3040,7 @@ mod tests {
         )
         .unwrap();
         let config = MemoryWorkerConfig {
+            workspace_root: Some(dir.path().to_path_buf()),
             project_memory_root: dir.path().to_path_buf(),
             project_jsonl_path: project.with_extension("jsonl"),
             project_db_path: project,
@@ -3074,6 +3128,7 @@ mod tests {
         std::fs::create_dir_all(vault.join("ai/memory")).unwrap();
         let project = dir.path().join("facts.db");
         let config = MemoryWorkerConfig {
+            workspace_root: Some(dir.path().to_path_buf()),
             project_memory_root: dir.path().to_path_buf(),
             project_jsonl_path: project.with_extension("jsonl"),
             project_db_path: project,

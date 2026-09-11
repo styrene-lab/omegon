@@ -4383,6 +4383,7 @@ async fn run_embedding_command(
             bus.register(Box::new(crate::memory_service::MemoryDeclarationFeature));
             let candidate =
                 crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
+                    workspace_root: Some(cwd.clone()),
                     project_memory_root: memory_dir.clone(),
                     project_db_path: db_path,
                     project_jsonl_path: memory_dir.join("facts.jsonl"),
@@ -11999,6 +12000,7 @@ mod tests {
         bus.register(Box::new(crate::memory_service::MemoryDeclarationFeature));
         let candidate =
             crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
+                workspace_root: Some(directory.path().to_path_buf()),
                 project_memory_root: directory.path().to_path_buf(),
                 project_db_path: database.clone(),
                 project_jsonl_path: directory.path().join("facts.jsonl"),

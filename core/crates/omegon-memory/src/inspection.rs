@@ -9,6 +9,7 @@ fn excerpt(text: &str, limit: usize) -> (String, bool) {
 
 impl FactInspection {
     pub fn from_fact(fact: &Fact) -> Self {
+        let context = ApplicabilityContext::local();
         let (content_excerpt, content_truncated) = excerpt(&fact.content, 2048);
         let (source_excerpt, source_truncated) = match &fact.source {
             Some(source) => {
@@ -18,6 +19,14 @@ impl FactInspection {
             None => (None, false),
         };
         let mut inspection = Self {
+            applicability: fact.applicability.clone(),
+            applicability_status: fact
+                .applicability
+                .as_ref()
+                .map_or(ApplicabilityStatus::Unknown, |record| {
+                    record.constraints.assess(&context)
+                }),
+            applicability_context: context,
             id: fact.id.clone(),
             mind: fact.mind.clone(),
             section: fact.section.clone(),

@@ -427,7 +427,7 @@ pub(crate) fn ensure_project_memory_store_ready(
             Ok(Some(result))
         }
         version => anyhow::bail!(
-            "unsupported memory schema v{version} at {}; run `omegon memory migrate --status --path {}` and restore a supported v5-v11 backup or upgrade Omegon",
+            "unsupported memory schema v{version} at {}; run `omegon memory migrate --status --path {}` and restore a supported v5-v12 backup or upgrade Omegon",
             db_path.display(),
             db_path.display()
         ),
@@ -1168,6 +1168,7 @@ impl AgentSetup {
                 .expect("project DB and JSONL paths derive from the same memory root");
             match crate::memory_service::start_candidate(
                 crate::memory_service::MemoryWorkerConfig {
+                    workspace_root: Some(project_root.clone()),
                     project_memory_root: memory_dir
                         .clone()
                         .expect("project memory paths derive from an initialized root"),
@@ -3223,6 +3224,7 @@ mod tests {
         bus.register(Box::new(crate::memory_service::MemoryDeclarationFeature));
         let candidate =
             crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
+                workspace_root: Some(directory.path().to_path_buf()),
                 project_memory_root: directory.path().to_path_buf(),
                 project_db_path: directory.path().join("facts.db"),
                 project_jsonl_path: directory.path().join("facts.jsonl"),

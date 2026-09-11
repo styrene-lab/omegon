@@ -1,13 +1,13 @@
 {
   "description": "Canonical memory DB schema. Generated from Rust omegon-memory. Do not edit — regenerate with: cargo test -p omegon-memory schema_contract_generate -- --ignored",
-  "schema_version": 12,
+  "schema_version": 13,
   "tables": {
     "edges": ["id", "source_fact_id", "target_fact_id", "relation", "description", "confidence", "last_reinforced", "reinforcement_count", "decay_rate", "status", "created_at", "created_session", "source_mind", "target_mind"],
     "embedding_metadata": ["model_name", "dims", "inserted_at"],
     "episode_facts": ["episode_id", "fact_id"],
     "episodes": ["id", "mind", "title", "narrative", "date", "session_id", "created_at", "jj_change_id", "affected_nodes", "affected_changes", "files_changed", "tags", "tool_calls_count", "formation"],
     "episodes_vec": ["episode_id", "embedding", "model_name", "dims", "created_at"],
-    "facts": ["lifecycle_inference", "id", "mind", "section", "content", "status", "created_at", "created_session", "supersedes", "superseded_at", "archived_at", "source", "content_hash", "confidence", "last_reinforced", "reinforcement_count", "decay_rate", "decay_profile", "version", "last_accessed", "jj_change_id", "persona_id", "layer", "tags"],
+    "facts": ["applicability", "lifecycle_inference", "id", "mind", "section", "content", "status", "created_at", "created_session", "supersedes", "superseded_at", "archived_at", "source", "content_hash", "confidence", "last_reinforced", "reinforcement_count", "decay_rate", "decay_profile", "version", "last_accessed", "jj_change_id", "persona_id", "layer", "tags"],
     "facts_vec": ["fact_id", "embedding", "space", "source_hash", "model_name", "dims", "created_at"],
     "memory_operation_receipts": ["operation_id", "payload_hash", "effect_json", "committed_at"],
     "minds": ["name", "description", "status", "origin_type", "origin_path", "origin_url", "readonly", "parent", "created_at", "last_sync"],

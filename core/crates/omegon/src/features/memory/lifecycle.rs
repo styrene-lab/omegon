@@ -15,6 +15,13 @@ pub(super) fn inspect_source(
     root: &Path,
     mut inspection: omegon_memory::FactInspection,
 ) -> omegon_memory::FactInspection {
+    inspection.applicability_context = crate::memory_service::applicability_context(Some(root));
+    inspection.applicability_status = inspection
+        .applicability
+        .as_ref()
+        .map_or(omegon_memory::ApplicabilityStatus::Unknown, |record| {
+            record.constraints.assess(&inspection.applicability_context)
+        });
     use omegon_memory::{EvidenceAvailability as Availability, LifecycleConclusionKind as Kind};
     let reference = if let Some(source) = &inspection.artifact {
         let (kind, reference_type) = match source.kind {

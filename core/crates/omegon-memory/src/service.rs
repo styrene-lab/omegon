@@ -83,6 +83,8 @@ pub async fn expand_edges_filtered_checked<C: Fn() -> bool + ?Sized>(
     filter: &crate::SearchFilter,
     cancelled: &C,
 ) -> crate::backend::Result<Vec<ScoredFact>> {
+    let resolved = filter.resolved()?;
+    let filter = &resolved;
     if cancelled() {
         return Err(crate::MemoryError::Cancelled);
     }
@@ -93,6 +95,9 @@ pub async fn expand_edges_filtered_checked<C: Fn() -> bool + ?Sized>(
     const MAX_NEIGHBOR_LOADS: usize = 4_096;
 
     results.retain(|result| result.fact.mind == mind && filter.score(1.0, &result.fact).is_some());
+    for result in &mut results {
+        result.applicability = filter.applicability_status(&result.fact);
+    }
 
     results.sort_by(|left, right| {
         right
@@ -197,6 +202,7 @@ pub async fn expand_edges_filtered_checked<C: Fn() -> bool + ?Sized>(
                 }
             }
             let mut result = ScoredFact::new(fact, score, score);
+            result.applicability = filter.applicability_status(&result.fact);
             result.scores.graph = Some(score);
             result.graph_evidence = evidence;
             results.push(result);
@@ -244,9 +250,20 @@ pub async fn context_facts(
     query: Option<&str>,
     limit: usize,
 ) -> crate::backend::Result<Vec<crate::Fact>> {
+    context_facts_filtered(backend, mind, query, limit, &crate::SearchFilter::default()).await
+}
+
+pub async fn context_facts_filtered(
+    backend: &dyn MemoryBackend,
+    mind: &str,
+    query: Option<&str>,
+    limit: usize,
+    filter: &crate::SearchFilter,
+) -> crate::backend::Result<Vec<crate::Fact>> {
+    let filter = filter.resolved()?;
     if let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) {
         return Ok(backend
-            .fts_search(mind, query, limit)
+            .fts_search_filtered(mind, query, limit, &filter)
             .await?
             .into_iter()
             .map(|result| result.fact)
@@ -255,7 +272,7 @@ pub async fn context_facts(
     let mut facts = backend
         .list_facts(mind, crate::FactFilter::default())
         .await?;
-    facts.retain(|fact| crate::decay::ambient_score(1.0, fact).is_some());
+    facts.retain(|fact| filter.score(1.0, fact).is_some());
     facts.truncate(limit);
     Ok(facts)
 }
