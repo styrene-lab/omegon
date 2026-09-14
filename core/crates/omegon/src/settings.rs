@@ -1301,6 +1301,9 @@ pub struct Profile {
     /// Disable automatic inference while retaining evidence capture and memory tools.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_extraction_enabled: Option<bool>,
+    /// Memory-specific accounted token cap, bounded by the host allocation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_context_tokens: Option<usize>,
 
     // ── Default posture ──
     /// Default posture name. Can be a built-in (explorator/fabricator/architect/devastator)

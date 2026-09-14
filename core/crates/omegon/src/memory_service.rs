@@ -44,6 +44,7 @@ pub(crate) const MAX_CONTEXT_PINS: usize = 1_000;
 
 #[derive(Debug, Clone)]
 pub(crate) struct MemoryWorkerConfig {
+    pub memory_token_cap: Option<usize>,
     pub workspace_root: Option<PathBuf>,
     pub project_memory_root: PathBuf,
     pub project_db_path: PathBuf,
@@ -227,6 +228,17 @@ pub(crate) enum MemoryToolMutationV1 {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum MemoryRequestV1 {
+    SelectContext {
+        scope: MemoryScopeV1,
+        mind: String,
+        query: String,
+        pins: Vec<String>,
+        host_budget: usize,
+        intent: omegon_memory::MemorySelectionIntent,
+        fetch_limit: usize,
+        #[serde(skip, default)]
+        cancellation: CancellationToken,
+    },
     GetFactRecord {
         scope: MemoryScopeV1,
         mind: String,
@@ -442,6 +454,7 @@ impl MemoryRequestV1 {
             Self::Status { cancellation, .. }
             | Self::Stats { cancellation, .. }
             | Self::GetFact { cancellation, .. }
+            | Self::SelectContext { cancellation, .. }
             | Self::GetFactRecord { cancellation, .. }
             | Self::GetPendingFact { cancellation, .. }
             | Self::ListFactsPage { cancellation, .. }
@@ -480,6 +493,7 @@ pub(crate) enum MemoryPayloadV1 {
     Fact(Box<Option<Fact>>),
     FactPage(FactPageV1),
     ContextSnapshot(ContextSnapshotV1),
+    Selection(omegon_memory::MemorySelection),
     ManagedStatus(ManagedMemoryStatusV1),
     ScoredFacts(Vec<ScoredFact>),
     EmbeddingMetadata(Option<EmbeddingMetadata>),
@@ -1719,6 +1733,37 @@ fn execute_request(
                         working_memory: pins,
                     }))
                 }
+                MemoryRequestV1::SelectContext {
+                    mind,
+                    query,
+                    pins,
+                    host_budget,
+                    intent,
+                    fetch_limit,
+                    ..
+                } => {
+                    let context = applicability_context(config.workspace_root.as_deref());
+                    let memory_cap = config
+                        .memory_token_cap
+                        .unwrap_or(omegon_memory::selection::DEFAULT_MEMORY_TOKEN_CAP)
+                        .min(omegon_memory::selection::MAX_MEMORY_TOKEN_CAP);
+                    let selection = omegon_memory::selection::retrieve_and_select(
+                        backend,
+                        &omegon_memory::MemorySelectionRequest {
+                            mind,
+                            query,
+                            pins,
+                            context,
+                            intent,
+                            host_budget,
+                            memory_cap,
+                            fetch_limit,
+                        },
+                        &omegon_memory::selection::ConservativeUtf8Counter,
+                    )
+                    .await?;
+                    Ok(MemoryPayloadV1::Selection(selection))
+                }
                 MemoryRequestV1::ManagedStatus { .. } => {
                     let stats = backend.inventory_stats().await?;
                     let (authority, index_state) = managed_status_metadata(config);
@@ -2010,6 +2055,7 @@ fn request_scope(request: &MemoryRequestV1) -> MemoryScopeV1 {
         MemoryRequestV1::Status { scope, .. }
         | MemoryRequestV1::Stats { scope, .. }
         | MemoryRequestV1::GetFact { scope, .. }
+        | MemoryRequestV1::SelectContext { scope, .. }
         | MemoryRequestV1::GetFactRecord { scope, .. }
         | MemoryRequestV1::GetPendingFact { scope, .. }
         | MemoryRequestV1::ListFactsPage { scope, .. }
@@ -2148,10 +2194,49 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn token_selection_intersects_profile_cap_and_host_allocation() {
+        for (cap, host, expected) in [
+            (0, 900, 0),
+            (64, 900, 64),
+            (1024, 200, 200),
+            (100_000, 100_000, 8192),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut config = worker_config(directory.path().join("facts.db"), None);
+            config.memory_token_cap = Some(cap);
+            let (mut bus, handle) = managed_service_with_config(config).await;
+            let response = handle
+                .invoke(MemoryRequestV1::SelectContext {
+                    scope: MemoryScopeV1::Project,
+                    mind: MIND.into(),
+                    query: "fixture task".into(),
+                    pins: vec![],
+                    host_budget: host,
+                    intent: omegon_memory::MemorySelectionIntent::Ambient,
+                    fetch_limit: 10,
+                    cancellation: CancellationToken::new(),
+                })
+                .await
+                .unwrap();
+            assert!(
+                bus.shutdown_managed_services()
+                    .await
+                    .all_resources_settled()
+            );
+            let MemoryPayloadV1::Selection(selected) = response.payload else {
+                panic!("selection");
+            };
+            assert_eq!(selected.report.budget, expected);
+            assert_eq!(selected.report.accounted_tokens, 0);
+        }
+    }
+
     fn worker_config(project: PathBuf, global: Option<PathBuf>) -> MemoryWorkerConfig {
         let project_memory_root = project.parent().unwrap().to_path_buf();
         MemoryWorkerConfig {
             workspace_root: Some(project_memory_root.clone()),
+            memory_token_cap: None,
             project_memory_root,
             project_jsonl_path: project.parent().unwrap().join("facts.jsonl"),
             project_db_path: project,
@@ -2661,6 +2746,7 @@ mod tests {
         for startup_sync_enabled in [true, false] {
             let error = match start_candidate(MemoryWorkerConfig {
                 workspace_root: Some(dir.path().to_path_buf()),
+                memory_token_cap: None,
                 project_memory_root: root.clone(),
                 project_db_path: root.join("facts.db"),
                 project_jsonl_path: root.join("facts.jsonl"),
@@ -2688,6 +2774,7 @@ mod tests {
         std::fs::create_dir(&root).unwrap();
         let error = match start_candidate(MemoryWorkerConfig {
             workspace_root: Some(dir.path().to_path_buf()),
+            memory_token_cap: None,
             project_memory_root: root.clone(),
             project_db_path: root.join("facts.db"),
             project_jsonl_path: dir.path().join("facts.jsonl"),
@@ -2721,6 +2808,7 @@ mod tests {
         .unwrap();
         let config = MemoryWorkerConfig {
             workspace_root: Some(dir.path().to_path_buf()),
+            memory_token_cap: None,
             project_memory_root: dir.path().to_path_buf(),
             project_jsonl_path: dir.path().join("facts.jsonl"),
             project_db_path: project,
@@ -3041,6 +3129,7 @@ mod tests {
         .unwrap();
         let config = MemoryWorkerConfig {
             workspace_root: Some(dir.path().to_path_buf()),
+            memory_token_cap: None,
             project_memory_root: dir.path().to_path_buf(),
             project_jsonl_path: project.with_extension("jsonl"),
             project_db_path: project,
@@ -3129,6 +3218,7 @@ mod tests {
         let project = dir.path().join("facts.db");
         let config = MemoryWorkerConfig {
             workspace_root: Some(dir.path().to_path_buf()),
+            memory_token_cap: None,
             project_memory_root: dir.path().to_path_buf(),
             project_jsonl_path: project.with_extension("jsonl"),
             project_db_path: project,

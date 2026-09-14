@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Ambient memory and explicit memory context packs now share whole-block counted selection with a configurable `memoryContextTokens` cap. Reports identify conservative UTF-8-byte accounting, selected handles, exclusions, and pin replacements. Low-signal turns use eligible pins, episodes have a bounded share, and static provider injections replace older values for every TTL instead of accumulating them.
+
 - Memory facts can carry platform, workspace, exact Git revision, component, and valid-time applicability. Current lexical/vector/graph retrieval filters known mismatches before candidate limits and labels unknown applicability. Version-checked scope updates preserve reinforcement and lifecycle state; context injections retire when scope changes or cannot be revalidated. Schema v13 and the `applicable_fact` JSONL tag preserve declared scope across persistence and transport, and vault projections display it.
 
 - `memory_inspect` provides mind-scoped, read-only inspection of active, historical, and pending facts. It reports bounded content previews, recorded provenance, and supported artifact availability without reinforcement or reactivation. Changed snapshots and readable-but-unverified references remain distinct from validated evidence; the standalone provider explicitly reports references it has not checked.

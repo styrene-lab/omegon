@@ -25,9 +25,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use omegon_memory::{
-    ContextRenderer, CreateEdge, DecayProfileName, EmbeddingService, FactPrecondition,
-    MarkdownRenderer, MemoryMutation, MemoryMutationEffect, Section, StoreAction, StoreEpisode,
-    StoreFact,
+    CreateEdge, DecayProfileName, EmbeddingService, FactPrecondition, MemoryMutation,
+    MemoryMutationEffect, Section, StoreAction, StoreEpisode, StoreFact,
 };
 
 struct SessionEndTask {
@@ -97,7 +96,7 @@ mod lifecycle;
 /// Memory feature that provides all memory_* tools and context injection.
 pub struct MemoryFeature {
     /// Renderer for context injection
-    renderer: MarkdownRenderer,
+    last_selection: Mutex<Option<omegon_memory::MemorySelectionReport>>,
     /// Mind identifier (normally `primensus` for automatic LLM memory).
     mind: String,
     /// Pinned fact IDs for working memory
@@ -128,7 +127,7 @@ pub struct MemoryFeature {
 impl MemoryFeature {
     pub(crate) fn new(memory_binding: crate::memory_service::MemoryBinding, mind: String) -> Self {
         Self {
-            renderer: MarkdownRenderer,
+            last_selection: Mutex::new(None),
             mind,
             working_memory: Mutex::new(Vec::new()),
             pending_status_refresh: AtomicBool::new(false),
@@ -754,6 +753,11 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
             ToolDefinition {
+                name:crate::tool_registry::memory::MEMORY_SELECTION.into(),label:"memory_selection".into(),
+                description:"Inspect the last ambient memory selection: selected handles, exclusion reasons, token accounting, and degradation. Explicit request_context packs return their own selection reports.".into(),
+                parameters:serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),capabilities:vec![omegon_traits::ToolCapability::Orientation],
+            },
+            ToolDefinition {
                 name:crate::tool_registry::memory::MEMORY_SET_APPLICABILITY.into(),label:"memory_set_applicability".into(),
                 description:"Record applicability constraints for one fact at its expected version. Does not reinforce, confirm, or change lifecycle status. An empty constraint object records unknown applicability.".into(),
                 parameters:serde_json::json!({"type":"object","required":["fact_id","expected_version","applicability"],"additionalProperties":false,"properties":{
@@ -1304,6 +1308,15 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     details: Value::Null,
                 })
             }
+            crate::tool_registry::memory::MEMORY_SELECTION => {
+                let report = self.last_selection.lock().unwrap().clone();
+                Ok(ToolResult {
+                    content: vec![ContentBlock::Text {
+                        text: serde_json::to_string_pretty(&report)?,
+                    }],
+                    details: serde_json::to_value(report)?,
+                })
+            }
             crate::tool_registry::memory::MEMORY_SET_APPLICABILITY => {
                 let id = args["fact_id"]
                     .as_str()
@@ -1821,12 +1834,10 @@ Also use it when you notice a gap — if you're unsure whether something was alr
         let wm_ids = self.working_memory.lock().unwrap().clone();
 
         let binding = self.memory_binding.clone();
-        let renderer = &self.renderer;
         let turn_number = signals.turn_number;
-        // Preserve the host's current character-budget estimate. Exact token
-        // accounting is owned by the later shared-selection work.
-        let context_budget_chars = signals.context_budget_tokens.saturating_mul(4);
-        if context_budget_chars == 0 {
+        if signals.context_budget_tokens == 0 {
+            *self.last_selection.lock().unwrap() =
+                Some(omegon_memory::selection::empty_report(None));
             return self.clear_memory_context();
         }
 
@@ -1839,41 +1850,46 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         .ok()?;
                     runtime.block_on(async {
                         let response = match binding
-                            .invoke(crate::memory_service::MemoryRequestV1::ContextSnapshot {
+                            .invoke(crate::memory_service::MemoryRequestV1::SelectContext {
                                 scope: crate::memory_service::MemoryScopeV1::Project,
                                 mind,
-                                query: Some(signals.user_prompt.to_string()),
-                                working_memory: wm_ids,
-                                fact_limit: 10_000,
-                                episode_limit: 1,
+                                query: signals.user_prompt.to_string(),
+                                pins: wm_ids,
+                                host_budget: signals.context_budget_tokens,
+                                intent: omegon_memory::MemorySelectionIntent::Ambient,
+                                fetch_limit: omegon_memory::selection::MAX_CANDIDATES,
                                 cancellation: tokio_util::sync::CancellationToken::new(),
                             })
                             .await
                         {
                             Ok(response) => response,
-                            Err(_) => return self.clear_memory_context(),
+                            Err(_) => {
+                                *self.last_selection.lock().unwrap() =
+                                    Some(omegon_memory::selection::empty_report(Some(
+                                        "memory_selection_failed".into(),
+                                    )));
+                                return self.clear_memory_context();
+                            }
                         };
-                        let crate::memory_service::MemoryPayloadV1::ContextSnapshot(snapshot) =
+                        let crate::memory_service::MemoryPayloadV1::Selection(selected) =
                             response.payload
                         else {
+                            *self.last_selection.lock().unwrap() =
+                                Some(omegon_memory::selection::empty_report(Some(
+                                    "memory_selection_invalid_response".into(),
+                                )));
                             return self.clear_memory_context();
                         };
 
-                        let rendered = renderer.render_context_scoped(
-                            &snapshot.facts,
-                            &snapshot.episodes,
-                            &snapshot.working_memory,
-                            context_budget_chars,
-                            &snapshot.context,
-                        );
-                        if rendered.markdown.is_empty() {
+                        *self.last_selection.lock().unwrap() = Some(selected.report);
+                        if selected.markdown.is_empty() {
                             return self.clear_memory_context();
                         }
 
                         // Hash the rendered content to detect changes
                         use std::hash::{Hash, Hasher};
                         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                        rendered.markdown.hash(&mut hasher);
+                        selected.markdown.hash(&mut hasher);
                         let content_hash = hasher.finish();
 
                         // Skip re-injection if content is unchanged and no mutation occurred
@@ -1896,7 +1912,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
 
                         Some(ContextInjection {
                             source: "memory".into(),
-                            content: rendered.markdown,
+                            content: selected.markdown,
                             priority: 200, // high — memory is important context
                             ttl_turns: 3,  // persist for 3 turns, then refresh
                         })
@@ -1921,6 +1937,7 @@ mod tests {
         let candidate =
             crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
                 workspace_root: Some(dir.path().to_path_buf()),
+                memory_token_cap: None,
                 project_memory_root: dir.path().to_path_buf(),
                 project_db_path: dir.path().join("facts.db"),
                 project_jsonl_path: dir.path().join("facts.jsonl"),
@@ -2435,7 +2452,7 @@ mod tests {
     async fn feature_exposes_public_memory_tools_without_internal_confirmation() {
         let feature = MemoryFeature::new(Default::default(), "test".into());
         let tools = feature.tools();
-        assert_eq!(tools.len(), 15, "public memory tool inventory");
+        assert_eq!(tools.len(), 16, "public memory tool inventory");
 
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"memory_store"));
@@ -2453,6 +2470,7 @@ mod tests {
         assert!(names.contains(&"memory_confirm"));
         assert!(names.contains(&"memory_inspect"));
         assert!(names.contains(&"memory_set_applicability"));
+        assert!(names.contains(&"memory_selection"));
         assert!(!names.contains(&"memory_apply_confirmation"));
     }
 
@@ -2876,6 +2894,95 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn token_selection_never_exceeds_conservative_host_budget() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        feature.execute("memory_store","large",serde_json::json!({"section":"Constraints","content":format!("zircon {}","漢".repeat(100))}),CancellationToken::new()).await.unwrap();
+        feature
+            .execute(
+                "memory_store",
+                "small",
+                serde_json::json!({"section":"Constraints","content":"zircon small fact"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let signals = ContextSignals {
+            user_prompt: "zircon",
+            recent_tools: &[],
+            recent_files: &[],
+            lifecycle_phase: &LifecyclePhase::Idle,
+            turn_number: 1,
+            context_budget_tokens: 200,
+        };
+        let injected = feature.provide_context(&signals).unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert!(
+            injected.content.len() <= 200,
+            "conservative accounting includes UTF-8 bytes and formatting"
+        );
+        assert!(injected.content.contains("zircon small fact"));
+    }
+
+    #[tokio::test]
+    async fn token_selection_standalone_and_hosted_ambient_agree() {
+        let (feature, mut bus, dir) = managed_feature().await;
+        feature
+            .execute(
+                "memory_store",
+                "fact",
+                serde_json::json!({"section":"Constraints","content":"zircon shared evidence"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let standalone = omegon_memory::MemoryProvider::new(
+            omegon_memory::SqliteBackend::open(&dir.path().join("facts.db")).unwrap(),
+            omegon_memory::MarkdownRenderer,
+            "test".into(),
+        );
+        let signals = ContextSignals {
+            user_prompt: "zircon",
+            recent_tools: &[],
+            recent_files: &[],
+            lifecycle_phase: &LifecyclePhase::Idle,
+            turn_number: 1,
+            context_budget_tokens: 900,
+        };
+        let hosted = feature.provide_context(&signals).unwrap();
+        let direct =
+            omegon_traits::ContextProvider::provide_context(&standalone, &signals).unwrap();
+        assert_eq!(hosted.content, direct.content);
+        let host_report = feature
+            .execute(
+                "memory_selection",
+                "report",
+                serde_json::json!({}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let direct_report = omegon_traits::ToolProvider::execute(
+            &standalone,
+            "memory_selection",
+            "report",
+            serde_json::json!({}),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(host_report.details, direct_report.details);
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
     async fn inspection_tracks_artifact_availability_without_reactivating_history() {
         let (feature, mut bus, dir) = managed_feature().await;
         std::fs::create_dir_all(dir.path().join("docs/design")).unwrap();
@@ -3218,6 +3325,7 @@ mod tests {
         let candidate =
             crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
                 workspace_root: Some(dir.path().to_path_buf()),
+                memory_token_cap: None,
                 project_memory_root: dir.path().into(),
                 project_db_path: dir.path().join("facts.db"),
                 project_jsonl_path: dir.path().join("facts.jsonl"),
@@ -3825,15 +3933,15 @@ mod tests {
             .await
             .unwrap();
         let signals = ContextSignals {
-            user_prompt: "",
+            user_prompt: "ambient fact",
             recent_tools: &[],
             recent_files: &[],
             lifecycle_phase: &LifecyclePhase::Idle,
             turn_number: 1,
-            context_budget_tokens: 100,
+            context_budget_tokens: 200,
         };
         let injection = feature.provide_context(&signals).expect("bounded context");
-        assert!(injection.content.chars().count() <= 400);
+        assert!(injection.content.len() <= 200);
 
         let tiny_signals = ContextSignals {
             turn_number: 2,

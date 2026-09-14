@@ -7,6 +7,7 @@
 //! - context_clear: clear history, start fresh
 
 use async_trait::async_trait;
+#[cfg(test)]
 use omegon_memory::Section;
 use omegon_traits::{ContentBlock, Feature, ToolDefinition, ToolResult};
 use serde_json::{Value, json};
@@ -560,49 +561,27 @@ impl ContextProvider {
     ) -> Result<Option<PackReport>, MemoryPackError> {
         let response = self
             .memory_binding
-            .invoke(crate::memory_service::MemoryRequestV1::FtsSearch {
+            .invoke(crate::memory_service::MemoryRequestV1::SelectContext {
                 scope: crate::memory_service::MemoryScopeV1::Project,
-                filter: Default::default(),
                 mind: self.memory_mind.clone(),
                 query: query.into(),
-                limit: max_items,
+                pins: vec![],
+                host_budget: 900,
+                intent: omegon_memory::MemorySelectionIntent::Explicit,
+                fetch_limit: max_items,
                 cancellation,
             })
             .await
             .map_err(|error| classify_memory_error(&error))?;
-        let crate::memory_service::MemoryPayloadV1::ScoredFacts(results) = response.payload else {
+        let crate::memory_service::MemoryPayloadV1::Selection(selected) = response.payload else {
             return Err(MemoryPackError::InvalidResponse);
         };
-        let entries = results
-            .into_iter()
-            .enumerate()
-            .map(|(idx, scored)| {
-                let score_label = omegon_memory::renderer::recall_score_label(&scored);
-                let mut entry = ShadowEntry::new(
-                    format!("memory:{idx}:{}", scored.fact.id),
-                    ContextKind::MemoryFact,
-                    EntryBody::Inline(format!(
-                        "- [{}] {}\n  {}",
-                        match scored.fact.section {
-                            Section::Architecture => "Architecture",
-                            Section::Decisions => "Decisions",
-                            Section::Constraints => "Constraints",
-                            Section::KnownIssues => "Known Issues",
-                            Section::PatternsConventions => "Patterns & Conventions",
-                            Section::Specs => "Specs",
-                            Section::RecentWork => "Recent Work",
-                        },
-                        scored.fact.content,
-                        score_label
-                    )),
-                );
-                entry.priority = 80;
-                entry.diversity_key = Some(format!("memory-section:{:?}", scored.fact.section));
-                entry.diversity_cap = Some(2);
-                entry
-            })
-            .collect::<Vec<_>>();
-        Ok(Self::select_pack("Memory", query, reason, entries))
+        Ok(Some(PackReport {
+            heading: "Memory".into(),
+            text: selected.markdown,
+            details: json!({"kind":"Memory","query":query,"reason":reason,
+            "selected_ids":selected.report.selected.iter().map(|handle|&handle.id).collect::<Vec<_>>(),"selection":selected.report}),
+        }))
     }
 
     async fn summarize_code(
@@ -1180,6 +1159,7 @@ mod tests {
             "memory",
             crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
                 workspace_root: Some(dir.path().to_path_buf()),
+                memory_token_cap: None,
                 project_memory_root: dir.path().to_path_buf(),
                 project_db_path: dir.path().join("facts.db"),
                 project_jsonl_path: dir.path().join("facts.jsonl"),
@@ -1540,6 +1520,22 @@ mod tests {
             .await
             .unwrap();
 
+        let expected = binding
+            .invoke(crate::memory_service::MemoryRequestV1::SelectContext {
+                scope: crate::memory_service::MemoryScopeV1::Project,
+                mind: omegon_memory::sqlite::PRIMENSUS_MIND.into(),
+                query: "selector policy mediated".into(),
+                pins: vec![],
+                host_budget: 900,
+                intent: omegon_memory::MemorySelectionIntent::Explicit,
+                fetch_limit: 3,
+                cancellation: tokio_util::sync::CancellationToken::new(),
+            })
+            .await
+            .unwrap();
+        let crate::memory_service::MemoryPayloadV1::Selection(expected) = expected.payload else {
+            panic!("selection");
+        };
         let provider = ContextProvider::new_with_sources(
             SharedContextMetrics::new(),
             new_shared_command_tx(),
@@ -1575,7 +1571,11 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(text.contains("### Memory"), "unexpected text: {text}");
+        assert!(text.contains("# Project Memory"), "unexpected text: {text}");
+        assert_eq!(
+            result.details["packs"][0]["selection"],
+            serde_json::to_value(expected.report).unwrap()
+        );
         assert!(
             text.contains("bounded and mediated"),
             "unexpected text: {text}"

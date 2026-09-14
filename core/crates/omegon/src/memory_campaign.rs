@@ -40,6 +40,7 @@ fn config(root: &Path, vault: Option<PathBuf>) -> MemoryWorkerConfig {
     });
     MemoryWorkerConfig {
         workspace_root: Some(root.to_path_buf()),
+        memory_token_cap: None,
         project_memory_root: root.to_path_buf(),
         project_db_path: root.join("facts.db"),
         project_jsonl_path: root.join("facts.jsonl"),

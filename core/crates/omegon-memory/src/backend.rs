@@ -436,6 +436,30 @@ pub trait MemoryBackend: Send + Sync {
 /// The default implementation (`MarkdownRenderer`) produces the markdown
 /// block used for LLM system prompt injection.
 pub trait ContextRenderer: Send + Sync {
+    /// Format already selected evidence. Token packing counts this complete output.
+    fn render_memory_blocks(
+        &self,
+        blocks: &[crate::renderer::MemoryFactBlock<'_>],
+        episodes: &[&Episode],
+        context: &ApplicabilityContext,
+    ) -> String {
+        let facts = blocks
+            .iter()
+            .filter(|block| !block.pinned)
+            .map(|block| block.fact.clone())
+            .collect::<Vec<_>>();
+        let pins = blocks
+            .iter()
+            .filter(|block| block.pinned)
+            .map(|block| block.fact.clone())
+            .collect::<Vec<_>>();
+        let episodes = episodes
+            .iter()
+            .map(|episode| (*episode).clone())
+            .collect::<Vec<_>>();
+        self.render_context_scoped(&facts, &episodes, &pins, usize::MAX, context)
+            .markdown
+    }
     fn render_context_scoped(
         &self,
         facts: &[Fact],

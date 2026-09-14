@@ -32,6 +32,7 @@ pub mod maintenance;
 pub mod provider;
 pub mod renderer;
 pub mod retrieval;
+pub mod selection;
 pub mod service;
 pub mod sqlite;
 pub mod types;

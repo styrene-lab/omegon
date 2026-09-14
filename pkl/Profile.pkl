@@ -43,6 +43,9 @@ memoryExtractionModel: String(length > 0)?
 /// False disables extraction inference while retaining evidence capture.
 memoryExtractionEnabled: Boolean?
 
+/// Memory-specific token accounting cap; zero disables memory injection.
+memoryContextTokens: Int(this >= 0 && this <= 8192)?
+
 /// Default behavioral posture.
 defaultPosture: ("explorator"|"fabricator"|"architect"|"devastator")?
 

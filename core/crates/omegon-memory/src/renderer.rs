@@ -6,6 +6,56 @@ use crate::types::*;
 /// Renders facts and episodes as a markdown block for LLM context injection.
 pub struct MarkdownRenderer;
 
+pub struct MemoryFactBlock<'a> {
+    pub fact: &'a Fact,
+    pub pinned: bool,
+    pub applicability: ApplicabilityStatus,
+}
+
+pub(crate) fn selection_markdown(facts: &[MemoryFactBlock<'_>], episodes: &[&Episode]) -> String {
+    if facts.is_empty() && episodes.is_empty() {
+        return String::new();
+    }
+    let mut text = String::from("# Project Memory");
+    let mut heading = String::new();
+    for block in facts {
+        let next = if block.pinned {
+            "Working Memory (pinned)".into()
+        } else {
+            serde_json::to_value(&block.fact.section)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        if heading != next {
+            text.push_str(&format!("\n\n## {next}"));
+            heading = next;
+        }
+        text.push_str(&format!(
+            "\n- [{}] v{}: {}{}",
+            block.fact.id,
+            block.fact.version,
+            block.fact.content,
+            if block.applicability == ApplicabilityStatus::Unknown {
+                " _(applicability unknown)_"
+            } else {
+                ""
+            }
+        ));
+    }
+    if !episodes.is_empty() {
+        text.push_str("\n\n## Relevant Sessions");
+    }
+    for episode in episodes {
+        text.push_str(&format!(
+            "\n\n### [{}] {}: {}\n{}",
+            episode.id, episode.date, episode.title, episode.narrative
+        ));
+    }
+    text
+}
+
 /// Retrieval signals are ranks/proximity, never calibrated truth percentages.
 pub fn recall_score_label(result: &ScoredFact) -> String {
     let mut labels = Vec::new();
@@ -78,6 +128,14 @@ pub fn vector_diagnostic_label(diagnostics: &VectorDiagnostics) -> String {
 }
 
 impl ContextRenderer for MarkdownRenderer {
+    fn render_memory_blocks(
+        &self,
+        blocks: &[MemoryFactBlock<'_>],
+        episodes: &[&Episode],
+        _context: &ApplicabilityContext,
+    ) -> String {
+        selection_markdown(blocks, episodes)
+    }
     fn render_context(
         &self,
         facts: &[Fact],

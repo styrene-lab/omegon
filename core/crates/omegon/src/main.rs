@@ -4384,6 +4384,7 @@ async fn run_embedding_command(
             let candidate =
                 crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
                     workspace_root: Some(cwd.clone()),
+                    memory_token_cap: None,
                     project_memory_root: memory_dir.clone(),
                     project_db_path: db_path,
                     project_jsonl_path: memory_dir.join("facts.jsonl"),
@@ -12001,6 +12002,7 @@ mod tests {
         let candidate =
             crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
                 workspace_root: Some(directory.path().to_path_buf()),
+                memory_token_cap: None,
                 project_memory_root: directory.path().to_path_buf(),
                 project_db_path: database.clone(),
                 project_jsonl_path: directory.path().join("facts.jsonl"),

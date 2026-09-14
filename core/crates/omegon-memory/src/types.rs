@@ -224,6 +224,89 @@ pub enum EmbeddingIndexState {
 }
 
 /// A fact with search scoring attached.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemorySelectionIntent {
+    #[default]
+    Ambient,
+    Explicit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "method", rename_all = "snake_case")]
+pub enum MemoryTokenAccounting {
+    ConservativeUtf8Bytes,
+    Exact { tokenizer: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryExclusionReason {
+    Duplicate,
+    Lifecycle,
+    Applicability,
+    Confidence,
+    Budget,
+    EpisodeBudget,
+    LowSignal,
+    InputBound,
+    MissingPin,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryEvidenceHandle {
+    pub id: String,
+    pub version: Option<u64>,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryExclusion {
+    pub id: String,
+    pub id_truncated: bool,
+    pub reason: MemoryExclusionReason,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryPinResolution {
+    pub requested_id: String,
+    pub replacement_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemorySelectionReport {
+    pub intent: MemorySelectionIntent,
+    pub low_signal: bool,
+    pub accounting: MemoryTokenAccounting,
+    pub budget: usize,
+    pub accounted_tokens: usize,
+    pub selected: Vec<MemoryEvidenceHandle>,
+    pub exclusions: Vec<MemoryExclusion>,
+    pub exclusion_counts: std::collections::BTreeMap<MemoryExclusionReason, usize>,
+    pub exclusions_truncated: bool,
+    pub budget_exhausted: bool,
+    pub pin_resolutions: Vec<MemoryPinResolution>,
+    pub retrieval_degradation: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemorySelection {
+    pub markdown: String,
+    pub report: MemorySelectionReport,
+}
+
+pub struct MemorySelectionRequest {
+    pub mind: String,
+    pub query: String,
+    pub pins: Vec<String>,
+    pub context: ApplicabilityContext,
+    pub intent: MemorySelectionIntent,
+    pub host_budget: usize,
+    pub memory_cap: usize,
+    pub fetch_limit: usize,
+}
+
+/// A fact with search scoring attached.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoredFact {
     #[serde(default)]

@@ -1420,6 +1420,7 @@ mod tests {
         let candidate =
             crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
                 workspace_root: Some(directory.path().to_path_buf()),
+                memory_token_cap: None,
                 project_memory_root: directory.path().to_path_buf(),
                 project_db_path: directory.path().join("facts.db"),
                 project_jsonl_path: directory.path().join("facts.jsonl"),

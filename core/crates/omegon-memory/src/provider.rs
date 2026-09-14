@@ -24,6 +24,8 @@ pub struct MemoryProvider<B: MemoryBackend, R: ContextRenderer> {
     working_memory: Mutex<Vec<String>>,
     applicability_context: Option<ApplicabilityContext>,
     operation_namespace: String,
+    memory_token_cap: usize,
+    last_selection: Mutex<Option<MemorySelectionReport>>,
 }
 
 impl<B: MemoryBackend, R: ContextRenderer> MemoryProvider<B, R> {
@@ -35,6 +37,8 @@ impl<B: MemoryBackend, R: ContextRenderer> MemoryProvider<B, R> {
             working_memory: Mutex::new(Vec::new()),
             applicability_context: None,
             operation_namespace: crate::util::gen_id(),
+            memory_token_cap: crate::selection::DEFAULT_MEMORY_TOKEN_CAP,
+            last_selection: Mutex::new(None),
         }
     }
 
@@ -44,6 +48,11 @@ impl<B: MemoryBackend, R: ContextRenderer> MemoryProvider<B, R> {
 
     pub fn with_applicability_context(mut self, context: ApplicabilityContext) -> Self {
         self.applicability_context = Some(context);
+        self
+    }
+
+    pub fn with_memory_token_cap(mut self, cap: usize) -> Self {
+        self.memory_token_cap = cap.min(crate::selection::MAX_MEMORY_TOKEN_CAP);
         self
     }
 
@@ -60,6 +69,10 @@ impl<B: MemoryBackend, R: ContextRenderer> MemoryProvider<B, R> {
 
 fn tool_defs() -> Vec<ToolDefinition> {
     vec![
+        ToolDefinition {
+            name:"memory_selection".into(),label:"memory_selection".into(),description:"Inspect the last ambient memory selection report: evidence handles, exclusions, and token accounting.".into(),
+            parameters:serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),capabilities:vec![ToolCapability::Orientation],
+        },
         ToolDefinition {
             name:"memory_set_applicability".into(),label:"memory_set_applicability".into(),description:"Record version-checked applicability without reinforcement or lifecycle change.".into(),
             parameters:serde_json::json!({"type":"object","required":["fact_id","expected_version","applicability"],"properties":{"fact_id":{"type":"string"},"expected_version":{"type":"integer"},"applicability":crate::applicability::constraints_schema()}}),
@@ -295,6 +308,15 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ToolProvider
         cancel: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<ToolResult> {
         match tool_name {
+            "memory_selection" => {
+                let report = self.last_selection.lock().unwrap().clone();
+                Ok(ToolResult {
+                    content: vec![ContentBlock::Text {
+                        text: serde_json::to_string_pretty(&report)?,
+                    }],
+                    details: serde_json::to_value(report)?,
+                })
+            }
             "memory_set_applicability" => {
                 let id = args["fact_id"]
                     .as_str()
@@ -773,6 +795,9 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ContextProvider
             ttl_turns: 1,
         };
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            *self.last_selection.lock().unwrap() = Some(crate::selection::empty_report(Some(
+                "runtime_unavailable".into(),
+            )));
             return Some(empty());
         };
         let backend = &self.backend;
@@ -788,45 +813,27 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ContextProvider
                         }
                         .resolved()
                         .ok()?;
-                        let facts = crate::service::context_facts_filtered(
+                        let selected = crate::selection::retrieve_and_select_with_renderer(
                             backend,
-                            &mind,
-                            Some(signals.user_prompt),
-                            10_000,
-                            &filter,
+                            &MemorySelectionRequest {
+                                mind,
+                                query: signals.user_prompt.into(),
+                                pins: wm_ids,
+                                context: filter.context.expect("resolved context"),
+                                intent: MemorySelectionIntent::Ambient,
+                                host_budget: signals.context_budget_tokens,
+                                memory_cap: self.memory_token_cap,
+                                fetch_limit: crate::selection::MAX_CANDIDATES,
+                            },
+                            &crate::selection::ConservativeUtf8Counter,
+                            renderer,
                         )
                         .await
                         .ok()?;
-                        let episodes = if signals.user_prompt.trim().is_empty() {
-                            backend.list_episodes(&mind, 1).await.ok()?
-                        } else {
-                            backend
-                                .search_episodes(&mind, signals.user_prompt, 1)
-                                .await
-                                .ok()?
-                        };
-
-                        // Resolve working memory facts
-                        let mut wm_facts = Vec::new();
-                        for id in &wm_ids {
-                            if let Ok(Some(f)) = backend.get_fact(id).await
-                                && f.mind == mind
-                                && filter.score(1.0, &f).is_some()
-                            {
-                                wm_facts.push(f);
-                            }
-                        }
-
-                        let rendered = renderer.render_context_scoped(
-                            &facts,
-                            &episodes,
-                            &wm_facts,
-                            signals.context_budget_tokens.saturating_mul(4),
-                            filter.context.as_ref().expect("resolved context"),
-                        );
+                        *self.last_selection.lock().unwrap() = Some(selected.report);
                         Some(ContextInjection {
                             source: "memory".into(),
-                            content: rendered.markdown,
+                            content: selected.markdown,
                             priority: 200, // high — memory is important context
                             ttl_turns: 3,  // persist for 3 turns; re-rendered on mutation
                         })
@@ -835,7 +842,12 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ContextProvider
                 .join()
                 .ok()?
         })
-        .or_else(|| Some(empty()))
+        .or_else(|| {
+            *self.last_selection.lock().unwrap() = Some(crate::selection::empty_report(Some(
+                "memory_selection_failed".into(),
+            )));
+            Some(empty())
+        })
     }
 }
 
@@ -871,7 +883,7 @@ mod tests {
     async fn tool_provider_exposes_inspection_with_memory_tools() {
         let provider = MemoryProvider::new(InMemoryBackend::new(), NoopRenderer, "test".into());
         let tools = provider.tools();
-        assert_eq!(tools.len(), 14);
+        assert_eq!(tools.len(), 15);
         assert!(tools.iter().any(|tool| tool.name == "memory_inspect"));
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"memory_store"));
