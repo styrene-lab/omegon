@@ -29,7 +29,7 @@ Project memory gives agents persistent knowledge across sessions. It operates at
 - **Semantic retrieval**: `memory_recall(query)` uses compatible identified vectors plus keyword retrieval. Model/revision/preprocessing identity and source fingerprints must agree before comparison. Legacy, incompatible, or stale vectors produce explicit degradation. See [retrieval and index repair](memory-retrieval.md).
 - **Working memory**: 25-slot buffer of pinned facts that survive context compaction and get priority injection.
 - **Episodic memory**: Bounded, source-linked episodes captured from validated semantic replay. Evidence is stored before independently configured extraction; generated candidates remain pending inferences. See [memory formation](memory-formation.md) for configuration, limits, and recovery behavior.
-- **Context injection**: Three-layer proactive startup injection (last 3 episodes + recency window + Architecture/Decisions core) fires before the user's first message. Semantic injection on first message adds task-specific facts on top.
+- **Context injection**: Shared selection prioritizes eligible pins and task evidence within the `memoryContextTokens` cap and host allocation. Whole-block accounting includes formatting and provenance handles; low-signal turns avoid inventory dumps. See [memory selection](memory-selection.md) for accounting and reports.
 - **Task-completion facts**: Write/edit tool calls queue `Recent Work` facts with 2-day half-life, capturing mid-term "what was accomplished" continuity.
 - **Structural pruning ceiling**: `computeConfidence()` caps effective half-life at 90 days regardless of reinforcement count. Per-section LLM archival pass fires at session_start when any section exceeds 60 facts.
 - **Mind-scoped durability**: Durable facts, vectors, edges, and episodes are isolated by mind label. The host selects the active mind scope; the managed version-1 service does not expose a standalone durable mind-record or parent-mutation API.
@@ -58,7 +58,7 @@ Project memory gives agents persistent knowledge across sessions. It operates at
 - **Semantic search primary, FTS5 fallback**: Embeddings give better retrieval; FTS5 always works as a fallback. The current selection order is configured Ollama embedding service, optional local ONNX service, then FTS5-only recall.
 - **Pointer facts over inline details**: Facts reference files (`"X does Y. See path/to/file.ts"`) instead of inlining implementation details — keeps facts atomic and maintainable.
 - **Store conclusions, not investigation steps**: Facts capture final state, not debugging journey.
-- **Proactive startup injection over reactive search**: Session_start injects Architecture + Decisions core sections + recency window + last 3 episodes before the user speaks. Reactive semantic search on first message augments this; it does not replace it.
+- **Task-aware selection**: Ambient memory revalidates applicability and lifecycle state, resolves superseded pins, and selects complete claims before formatting. Relevant episodes receive a bounded share. Source replacements retire previous memory blocks, including finite-TTL injections.
 - **Core sections = Architecture + Decisions**: These are the structural anchors always in context. Constraints and Specs are retrieved semantically only when task-relevant.
 - **90-day half-life ceiling**: `MAX_HALF_LIFE_DAYS = 90` in `factstore.ts` — reinforcement extends half-life up to 90 days max, then decay has teeth. Facts needing indefinite survival must be pinned via `memory_focus`.
 - **60-fact per-section ceiling**: `runSectionPruningPass()` fires at session_start for any section > 60 facts. Sends section facts to extraction model with instructions to identify archival candidates. `Recent Work` excluded (handled by 2-day decay).
@@ -94,7 +94,7 @@ Override the model name with `OMEGON_EMBED_LOCAL_MODEL` or the exact directory w
 - Working memory capped at 25 facts to control context injection size
 - Source capture starts at session end. Interruption before capture commits can still omit the episode; interruption during extraction leaves durable evidence with pending status. Automatic restart scheduling remains planned.
 - JSONL merge=union can create duplicates if the same fact is modified on two branches
-- Global DB injection injects up to 15 facts from `~/.config/omegon/global-memory.db`; global extraction is off by default so the global DB only receives manually stored facts and lifecycle-ingest candidates
+- Ambient selection stays within its declared mind and does not perform unrequested cross-scope expansion.
 - Vault synchronization rejects static traversal and symlink escape, but it is not a sandbox against hostile concurrent replacement of an already validated filesystem path
 
 ## Related Subsystems
