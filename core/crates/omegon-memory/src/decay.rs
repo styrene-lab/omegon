@@ -86,6 +86,39 @@ pub fn compute_confidence(
 
 pub const AMBIENT_CONFIDENCE_FLOOR: f64 = 0.10;
 
+/// Conservative deadline before a currently eligible prior can cross the floor.
+pub fn confidence_floor_deadline(
+    prior: f64,
+    count: u32,
+    profile: &crate::types::DecayProfileName,
+    reinforced: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Option<chrono::DateTime<chrono::Utc>> {
+    if !prior.is_finite() || !(0.0..=1.0).contains(&prior) || count > i32::MAX as u32 {
+        return Some(now);
+    }
+    if prior < AMBIENT_CONFIDENCE_FLOOR {
+        return None;
+    }
+    let Ok(reinforced) = chrono::DateTime::parse_from_rfc3339(reinforced) else {
+        return Some(now);
+    };
+    let reinforced = reinforced.with_timezone(&chrono::Utc);
+    let profile = resolve_profile(profile);
+    let elapsed = now.signed_duration_since(reinforced).num_seconds().max(0) as f64 / 86_400.0;
+    if prior * compute_confidence(elapsed, count, &profile) < AMBIENT_CONFIDENCE_FLOOR {
+        return None;
+    }
+    let half_life = (profile.half_life_days * profile.reinforcement_factor.powi(count as i32 - 1))
+        .min(MAX_HALF_LIFE_DAYS);
+    let seconds = ((prior / AMBIENT_CONFIDENCE_FLOOR).ln() * half_life / std::f64::consts::LN_2
+        * 86_400.0)
+        .floor() as i64;
+    reinforced
+        .checked_add_signed(chrono::Duration::seconds(seconds))
+        .map(|deadline| deadline.max(now))
+}
+
 /// Effective confidence for a stored fact at the current wall-clock time.
 ///
 /// The persisted confidence is the fact's evidence/source prior. Temporal

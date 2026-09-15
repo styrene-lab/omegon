@@ -81,6 +81,7 @@ use crate::util::{gen_id, now_iso};
 use crate::vectors;
 
 pub struct SqliteBackend {
+    cache_identity: u64,
     conn: Mutex<Connection>,
 }
 
@@ -627,6 +628,7 @@ impl SqliteBackend {
         let existed = path.exists();
         let conn = Connection::open(path)?;
         let backend = Self {
+            cache_identity: crate::selection_cache::backend_identity(),
             conn: Mutex::new(conn),
         };
         if let Err(error) = backend.init_schema(existed) {
@@ -654,6 +656,7 @@ impl SqliteBackend {
             anyhow::bail!("existing file is not an initialized memory store");
         }
         let backend = Self {
+            cache_identity: crate::selection_cache::backend_identity(),
             conn: Mutex::new(conn),
         };
         backend.init_schema(true)?;
@@ -664,6 +667,7 @@ impl SqliteBackend {
     pub fn in_memory() -> anyhow::Result<Self> {
         let conn = Connection::open_in_memory()?;
         let backend = Self {
+            cache_identity: crate::selection_cache::backend_identity(),
             conn: Mutex::new(conn),
         };
         backend.init_schema(false)?;
@@ -1238,6 +1242,76 @@ impl SqliteBackend {
 
 #[async_trait]
 impl MemoryBackend for SqliteBackend {
+    async fn selection_revision(
+        &self,
+    ) -> Result<Option<crate::selection_cache::SelectionRevision>> {
+        if self.cache_identity == u64::MAX {
+            return Ok(None);
+        }
+        let conn = self.conn.lock().unwrap();
+        let external = conn
+            .query_row("PRAGMA data_version", [], |row| row.get(0))
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        Ok(Some(crate::selection_cache::SelectionRevision {
+            instance: self.cache_identity,
+            local: conn.total_changes(),
+            external,
+        }))
+    }
+    async fn selection_time_bounds(
+        &self,
+        mind: &str,
+        query_at: chrono::DateTime<chrono::Utc>,
+        wall_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Option<crate::selection_cache::SelectionTimeBounds>> {
+        let conn = self.conn.lock().unwrap();
+        let mut bounds = crate::selection_cache::SelectionTimeBounds::default();
+        let mut statement=conn.prepare("SELECT applicability,confidence,reinforcement_count,decay_profile,last_reinforced FROM facts WHERE mind=?1 AND status='active'").map_err(|error|MemoryError::Storage(error.into()))?;
+        let rows = statement
+            .query_map([mind], |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, f64>(1)?,
+                    row.get::<_, u32>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        for row in rows {
+            let (encoded, confidence, count, profile, reinforced) =
+                row.map_err(|error| MemoryError::Storage(error.into()))?;
+            let applicability = match encoded
+                .map(|text| serde_json::from_str::<RecordedApplicability>(&text))
+                .transpose()
+            {
+                Ok(value) => value,
+                Err(_) => return Ok(None),
+            };
+            if applicability
+                .as_ref()
+                .is_some_and(|record| record.validate().is_err())
+            {
+                return Ok(None);
+            }
+            let profile = match serde_json::from_value::<DecayProfileName>(
+                serde_json::Value::String(profile),
+            ) {
+                Ok(profile) => profile,
+                Err(_) => return Ok(None),
+            };
+            bounds.observe(
+                applicability.as_ref(),
+                confidence,
+                count,
+                &profile,
+                &reinforced,
+                query_at,
+                wall_at,
+            );
+        }
+        Ok(Some(bounds))
+    }
     async fn get_fact_record(&self, mind: &str, id: &str) -> Result<Option<Fact>> {
         self.conn
             .lock()

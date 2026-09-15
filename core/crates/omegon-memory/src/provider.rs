@@ -26,6 +26,7 @@ pub struct MemoryProvider<B: MemoryBackend, R: ContextRenderer> {
     operation_namespace: String,
     memory_token_cap: usize,
     last_selection: Mutex<Option<MemorySelectionReport>>,
+    selection_cache: Mutex<crate::selection_cache::MemorySelectionCache>,
 }
 
 impl<B: MemoryBackend, R: ContextRenderer> MemoryProvider<B, R> {
@@ -39,6 +40,7 @@ impl<B: MemoryBackend, R: ContextRenderer> MemoryProvider<B, R> {
             operation_namespace: crate::util::gen_id(),
             memory_token_cap: crate::selection::DEFAULT_MEMORY_TOKEN_CAP,
             last_selection: Mutex::new(None),
+            selection_cache: Mutex::new(Default::default()),
         }
     }
 
@@ -813,23 +815,26 @@ impl<B: MemoryBackend + 'static, R: ContextRenderer + 'static> ContextProvider
                         }
                         .resolved()
                         .ok()?;
-                        let selected = crate::selection::retrieve_and_select_with_renderer(
-                            backend,
-                            &MemorySelectionRequest {
-                                mind,
-                                query: signals.user_prompt.into(),
-                                pins: wm_ids,
-                                context: filter.context.expect("resolved context"),
-                                intent: MemorySelectionIntent::Ambient,
-                                host_budget: signals.context_budget_tokens,
-                                memory_cap: self.memory_token_cap,
-                                fetch_limit: crate::selection::MAX_CANDIDATES,
-                            },
-                            &crate::selection::ConservativeUtf8Counter,
-                            renderer,
-                        )
-                        .await
-                        .ok()?;
+                        let mut cache = std::mem::take(&mut *self.selection_cache.lock().unwrap());
+                        let selected = cache
+                            .select(
+                                backend,
+                                &MemorySelectionRequest {
+                                    mind,
+                                    query: signals.user_prompt.into(),
+                                    pins: wm_ids,
+                                    context: filter.context.expect("resolved context"),
+                                    intent: MemorySelectionIntent::Ambient,
+                                    host_budget: signals.context_budget_tokens,
+                                    memory_cap: self.memory_token_cap,
+                                    fetch_limit: crate::selection::MAX_CANDIDATES,
+                                },
+                                &crate::selection::ConservativeUtf8Counter,
+                                renderer,
+                            )
+                            .await
+                            .ok()?;
+                        *self.selection_cache.lock().unwrap() = cache;
                         *self.last_selection.lock().unwrap() = Some(selected.report);
                         Some(ContextInjection {
                             source: "memory".into(),

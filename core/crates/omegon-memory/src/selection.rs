@@ -9,6 +9,9 @@ const MAX_EXCLUSIONS: usize = 64;
 
 pub fn empty_report(degradation: Option<String>) -> MemorySelectionReport {
     MemorySelectionReport {
+        cache_hit: false,
+        selected_at: None,
+        cache_expires_at: None,
         intent: MemorySelectionIntent::Ambient,
         low_signal: false,
         accounting: MemoryTokenAccounting::ConservativeUtf8Bytes,
@@ -25,6 +28,8 @@ pub fn empty_report(degradation: Option<String>) -> MemorySelectionReport {
 }
 
 /// Counters must be deterministic and count the complete supplied text.
+/// `accounting()` is also the selection-cache identity: change its tokenizer
+/// identifier whenever counting behavior changes, including preprocessing.
 pub trait MemoryTokenCounter: Send + Sync {
     fn count(&self, text: &str) -> usize;
     fn accounting(&self) -> MemoryTokenAccounting;
@@ -119,6 +124,9 @@ pub fn select_with_renderer(
     }
     let budget = input.host_budget.min(input.memory_cap);
     let mut report = MemorySelectionReport {
+        cache_hit: false,
+        selected_at: None,
+        cache_expires_at: None,
         intent: input.intent,
         low_signal: input.intent == MemorySelectionIntent::Ambient && low_signal(input.query),
         accounting: counter.accounting(),

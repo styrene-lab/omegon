@@ -1572,10 +1572,26 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(text.contains("# Project Memory"), "unexpected text: {text}");
-        assert_eq!(
-            result.details["packs"][0]["selection"],
-            serde_json::to_value(expected.report).unwrap()
-        );
+        let expected = serde_json::to_value(expected.report).unwrap();
+        for key in [
+            "intent",
+            "low_signal",
+            "accounting",
+            "budget",
+            "accounted_tokens",
+            "selected",
+            "exclusions",
+            "exclusion_counts",
+            "exclusions_truncated",
+            "budget_exhausted",
+            "pin_resolutions",
+            "retrieval_degradation",
+        ] {
+            assert_eq!(
+                result.details["packs"][0]["selection"][key], expected[key],
+                "{key}"
+            );
+        }
         assert!(
             text.contains("bounded and mediated"),
             "unexpected text: {text}"

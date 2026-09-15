@@ -23,6 +23,7 @@ struct EmbeddingEntry {
 
 #[derive(Clone)]
 struct State {
+    cache_revision: u64,
     facts: HashMap<String, Fact>,
     fact_insertion_sequences: HashMap<String, u64>,
     next_fact_insertion_sequence: u64,
@@ -34,13 +35,16 @@ struct State {
 }
 
 pub struct InMemoryBackend {
+    cache_identity: u64,
     state: Mutex<State>,
 }
 
 impl InMemoryBackend {
     pub fn new() -> Self {
         Self {
+            cache_identity: crate::selection_cache::backend_identity(),
             state: Mutex::new(State {
+                cache_revision: 0,
                 facts: HashMap::new(),
                 fact_insertion_sequences: HashMap::new(),
                 next_fact_insertion_sequence: 0,
@@ -66,6 +70,12 @@ impl InMemoryBackend {
             });
         }
         Ok(())
+    }
+
+    fn state_for_write(&self) -> std::sync::MutexGuard<'_, State> {
+        let mut state = self.state.lock().unwrap();
+        state.cache_revision = state.cache_revision.saturating_add(1);
+        state
     }
 
     fn insert_fact(state: &mut State, id: String, fact: Fact) -> Result<()> {
@@ -739,6 +749,44 @@ impl Default for InMemoryBackend {
 
 #[async_trait]
 impl MemoryBackend for InMemoryBackend {
+    async fn selection_revision(
+        &self,
+    ) -> Result<Option<crate::selection_cache::SelectionRevision>> {
+        let state = self.state.lock().unwrap();
+        if self.cache_identity == u64::MAX || state.cache_revision == u64::MAX {
+            return Ok(None);
+        }
+        Ok(Some(crate::selection_cache::SelectionRevision {
+            instance: self.cache_identity,
+            local: state.cache_revision,
+            external: 0,
+        }))
+    }
+    async fn selection_time_bounds(
+        &self,
+        mind: &str,
+        query_at: chrono::DateTime<chrono::Utc>,
+        wall_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Option<crate::selection_cache::SelectionTimeBounds>> {
+        let state = self.state.lock().unwrap();
+        let mut bounds = crate::selection_cache::SelectionTimeBounds::default();
+        for fact in state
+            .facts
+            .values()
+            .filter(|fact| fact.mind == mind && fact.status == FactStatus::Active)
+        {
+            bounds.observe(
+                fact.applicability.as_deref(),
+                fact.confidence,
+                fact.reinforcement_count,
+                &fact.decay_profile,
+                &fact.last_reinforced,
+                query_at,
+                wall_at,
+            );
+        }
+        Ok(Some(bounds))
+    }
     async fn get_fact_record(&self, mind: &str, id: &str) -> Result<Option<Fact>> {
         Ok(self
             .state
@@ -815,6 +863,7 @@ impl MemoryBackend for InMemoryBackend {
         staged
             .operation_receipts
             .insert(operation_id.into(), (payload_hash.into(), effect.clone()));
+        staged.cache_revision = state.cache_revision.saturating_add(1);
         *state = staged;
         Ok(MemoryMutationOutcome {
             effect,
@@ -823,7 +872,7 @@ impl MemoryBackend for InMemoryBackend {
     }
 
     async fn store_fact(&self, req: StoreFact) -> Result<StoreResult> {
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state_for_write();
         let ch = hash::content_hash(&req.content);
 
         // Check for dedup by content hash within same mind — find ID first, then mutate
@@ -973,7 +1022,7 @@ impl MemoryBackend for InMemoryBackend {
     }
 
     async fn reinforce_fact(&self, id: &str) -> Result<Fact> {
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state_for_write();
         if s.facts
             .get(id)
             .is_none_or(|fact| fact.status != FactStatus::Active)
@@ -990,7 +1039,7 @@ impl MemoryBackend for InMemoryBackend {
     }
 
     async fn dormancy_facts(&self, ids: &[&str]) -> Result<usize> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state_for_write();
         let mut transitioned = 0;
         for id in ids {
             let is_active = state
@@ -1011,7 +1060,7 @@ impl MemoryBackend for InMemoryBackend {
     }
 
     async fn archive_facts(&self, ids: &[&str]) -> Result<usize> {
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state_for_write();
         let mut count = 0;
         for id in ids {
             // Check if active first, then update
@@ -1031,7 +1080,7 @@ impl MemoryBackend for InMemoryBackend {
     }
 
     async fn supersede_fact(&self, id: &str, replacement: StoreFact) -> Result<Fact> {
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state_for_write();
 
         if s.facts
             .get(id)
@@ -1265,7 +1314,7 @@ impl MemoryBackend for InMemoryBackend {
         embedding: &[f32],
     ) -> Result<()> {
         validate_embedding(embedding)?;
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state_for_write();
         if s.facts
             .get(fact_id)
             .is_none_or(|fact| fact.status == FactStatus::Pending)
@@ -1432,7 +1481,7 @@ impl MemoryBackend for InMemoryBackend {
     }
 
     async fn create_edge(&self, req: CreateEdge) -> Result<Edge> {
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state_for_write();
         let source = s
             .facts
             .get(&req.source_id)
@@ -1488,7 +1537,7 @@ impl MemoryBackend for InMemoryBackend {
         if let Some(formation) = &req.formation {
             formation.validate()?;
         }
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state_for_write();
         let episode = Episode {
             id: gen_id(),
             mind: req.mind,
@@ -1618,6 +1667,7 @@ impl MemoryBackend for InMemoryBackend {
         let mut state = self.state.lock().unwrap();
         let mut staged = state.clone();
         let stats = Self::import_jsonl_to_state(&mut staged, jsonl)?;
+        staged.cache_revision = state.cache_revision.saturating_add(1);
         *state = staged;
         Ok(stats)
     }

@@ -143,6 +143,23 @@ pub(crate) fn persisted_lamport_version(version: u64) -> Result<i64> {
 /// and potential future async backends.
 #[async_trait]
 pub trait MemoryBackend: Send + Sync {
+    /// Opaque, connection-instance-bound stamp covering all potentially visible writes.
+    /// Backends without reliable invalidation leave caching disabled.
+    async fn selection_revision(
+        &self,
+    ) -> Result<Option<crate::selection_cache::SelectionRevision>> {
+        Ok(None)
+    }
+
+    /// Earliest applicability/floor transitions. Called on cache misses, not hits.
+    async fn selection_time_bounds(
+        &self,
+        _mind: &str,
+        _query_at: chrono::DateTime<chrono::Utc>,
+        _wall_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Option<crate::selection_cache::SelectionTimeBounds>> {
+        Ok(None)
+    }
     /// Exact mind-scoped lookup across all statuses, without reinforcement.
     async fn get_fact_record(&self, _mind: &str, _id: &str) -> Result<Option<Fact>> {
         Err(MemoryError::InvalidMutation(
@@ -436,6 +453,10 @@ pub trait MemoryBackend: Send + Sync {
 /// The default implementation (`MarkdownRenderer`) produces the markdown
 /// block used for LLM system prompt injection.
 pub trait ContextRenderer: Send + Sync {
+    /// Opt in only when this identity captures every rendering-policy dependency.
+    fn memory_cache_identity(&self) -> Option<&str> {
+        None
+    }
     /// Format already selected evidence. Token packing counts this complete output.
     fn render_memory_blocks(
         &self,

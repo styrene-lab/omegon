@@ -33,6 +33,7 @@ pub mod provider;
 pub mod renderer;
 pub mod retrieval;
 pub mod selection;
+pub mod selection_cache;
 pub mod service;
 pub mod sqlite;
 pub mod types;

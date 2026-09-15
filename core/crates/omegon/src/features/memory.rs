@@ -2928,6 +2928,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn selection_cache_reuses_an_unchanged_hosted_turn() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        feature
+            .execute(
+                "memory_store",
+                "cache-fact",
+                serde_json::json!({"section":"Constraints","content":"zircon cache evidence"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let signals = ContextSignals {
+            user_prompt: "zircon",
+            recent_tools: &[],
+            recent_files: &[],
+            lifecycle_phase: &LifecyclePhase::Idle,
+            turn_number: 1,
+            context_budget_tokens: 900,
+        };
+        feature.provide_context(&signals).unwrap();
+        let first = feature
+            .execute(
+                "memory_selection",
+                "report",
+                serde_json::json!({}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        feature.provide_context(&signals);
+        let second = feature
+            .execute(
+                "memory_selection",
+                "report",
+                serde_json::json!({}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert_eq!(first.details["cache_hit"], false);
+        assert_eq!(second.details["cache_hit"], true);
+    }
+
+    #[tokio::test]
     async fn token_selection_standalone_and_hosted_ambient_agree() {
         let (feature, mut bus, dir) = managed_feature().await;
         feature
@@ -2974,7 +3023,25 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(host_report.details, direct_report.details);
+        for key in [
+            "intent",
+            "low_signal",
+            "accounting",
+            "budget",
+            "accounted_tokens",
+            "selected",
+            "exclusions",
+            "exclusion_counts",
+            "exclusions_truncated",
+            "budget_exhausted",
+            "pin_resolutions",
+            "retrieval_degradation",
+        ] {
+            assert_eq!(
+                host_report.details[key], direct_report.details[key],
+                "{key}"
+            );
+        }
         assert!(
             bus.shutdown_managed_services()
                 .await

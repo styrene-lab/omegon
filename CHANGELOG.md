@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Memory selection now reuses bounded snapshots when task, scope, pins, budgets, policy, and backend state agree. Connection-bound change stamps invalidate local and external writes; applicability and confidence-floor deadlines prevent stale eligibility. Reports expose cache hits and snapshot times. Custom backends/renderers without reliable cache contracts remain uncached.
+
 - Ambient memory and explicit memory context packs now share whole-block counted selection with a configurable `memoryContextTokens` cap. Reports identify conservative UTF-8-byte accounting, selected handles, exclusions, and pin replacements. Low-signal turns use eligible pins, episodes have a bounded share, and static provider injections replace older values for every TTL instead of accumulating them.
 
 - Memory facts can carry platform, workspace, exact Git revision, component, and valid-time applicability. Current lexical/vector/graph retrieval filters known mismatches before candidate limits and labels unknown applicability. Version-checked scope updates preserve reinforcement and lifecycle state; context injections retire when scope changes or cannot be revalidated. Schema v13 and the `applicable_fact` JSONL tag preserve declared scope across persistence and transport, and vault projections display it.

@@ -128,6 +128,9 @@ pub fn vector_diagnostic_label(diagnostics: &VectorDiagnostics) -> String {
 }
 
 impl ContextRenderer for MarkdownRenderer {
+    fn memory_cache_identity(&self) -> Option<&str> {
+        Some("markdown-memory-v1")
+    }
     fn render_memory_blocks(
         &self,
         blocks: &[MemoryFactBlock<'_>],

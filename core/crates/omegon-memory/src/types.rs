@@ -275,6 +275,12 @@ pub struct MemoryPinResolution {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemorySelectionReport {
+    #[serde(default)]
+    pub cache_hit: bool,
+    #[serde(default)]
+    pub selected_at: Option<String>,
+    #[serde(default)]
+    pub cache_expires_at: Option<String>,
     pub intent: MemorySelectionIntent,
     pub low_signal: bool,
     pub accounting: MemoryTokenAccounting,
@@ -295,6 +301,7 @@ pub struct MemorySelection {
     pub report: MemorySelectionReport,
 }
 
+#[derive(Clone)]
 pub struct MemorySelectionRequest {
     pub mind: String,
     pub query: String,

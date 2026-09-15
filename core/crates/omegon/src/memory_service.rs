@@ -1090,6 +1090,7 @@ fn run_worker(
         }
     }
     let _ = startup.send(Ok(()));
+    let mut selection_cache = omegon_memory::selection_cache::MemorySelectionCache::default();
 
     while let Some(command) = receiver.blocking_recv() {
         if state.stopping.load(Ordering::Acquire) {
@@ -1108,6 +1109,7 @@ fn run_worker(
             &project,
             global.as_ref(),
             &config,
+            &mut selection_cache,
             command.request,
             &|| {
                 caller.is_cancelled()
@@ -1410,6 +1412,7 @@ fn execute_request(
     project: &SqliteBackend,
     global: Option<&SqliteBackend>,
     config: &MemoryWorkerConfig,
+    selection_cache: &mut omegon_memory::selection_cache::MemorySelectionCache,
     request: MemoryRequestV1,
     cancelled: &(dyn Fn() -> bool + Send + Sync),
 ) -> Result<MemoryResponseV1, MemoryServiceErrorV1> {
@@ -1747,21 +1750,23 @@ fn execute_request(
                         .memory_token_cap
                         .unwrap_or(omegon_memory::selection::DEFAULT_MEMORY_TOKEN_CAP)
                         .min(omegon_memory::selection::MAX_MEMORY_TOKEN_CAP);
-                    let selection = omegon_memory::selection::retrieve_and_select(
-                        backend,
-                        &omegon_memory::MemorySelectionRequest {
-                            mind,
-                            query,
-                            pins,
-                            context,
-                            intent,
-                            host_budget,
-                            memory_cap,
-                            fetch_limit,
-                        },
-                        &omegon_memory::selection::ConservativeUtf8Counter,
-                    )
-                    .await?;
+                    let selection = selection_cache
+                        .select(
+                            backend,
+                            &omegon_memory::MemorySelectionRequest {
+                                mind,
+                                query,
+                                pins,
+                                context,
+                                intent,
+                                host_budget,
+                                memory_cap,
+                                fetch_limit,
+                            },
+                            &omegon_memory::selection::ConservativeUtf8Counter,
+                            &omegon_memory::MarkdownRenderer,
+                        )
+                        .await?;
                     Ok(MemoryPayloadV1::Selection(selection))
                 }
                 MemoryRequestV1::ManagedStatus { .. } => {
