@@ -59,3 +59,18 @@ Given task, scope, pins, memory version, policy, budget, and eligibility remain 
 When another selection is requested before cache expiry
 Then the cached selection is reusable
 And the selector does not rescan the entire fact store
+
+#### Scenario: Previously excluded fact becomes eligible
+Given a cached selection excludes a fact with a future valid_from boundary
+When another selection is requested at that boundary
+Then retrieval runs again and considers the newly eligible fact
+
+#### Scenario: Selected fact reaches its validity end
+Given a cached selection contains a fact whose valid_until precedes the snapshot age limit
+When another selection is requested at valid_until
+Then the expired fact is removed before the injection TTL can preserve it
+
+#### Scenario: Another SQLite connection changes memory
+Given a selection is cached and another connection commits a fact archive
+When the cache checks the backend change stamp
+Then the external commit invalidates the cached selection

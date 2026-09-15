@@ -68,5 +68,32 @@ and decisions rather than fact contents.
 
 Static providers and runtime features both replace injections by source, including
 finite-TTL and empty replacements. An old memory block cannot reappear after its
-clearing replacement expires. Semantic selection caching is a subsequent Wave 5
-step; current selection still revalidates the underlying data.
+clearing replacement expires.
+
+## Semantic cache
+
+Each owner retains one selection snapshot. Reuse requires the same task, mind, pin
+order, applicability target, intent, candidate limit, budgets, tokenizer accounting,
+renderer identity, and policy version. Backend-instance identity prevents reuse
+across reopened or replaced stores. Local writes and external SQLite commits
+invalidate the snapshot.
+
+Snapshots retain their ranking for at most 30 seconds. They expire sooner at the
+next applicable valid-time boundary or confidence-floor transition. Timing checks
+include currently excluded future facts, so a claim becoming eligible can force
+retrieval even though it was absent from the old selection. Backward clock or
+query-time movement also forces a miss.
+
+Cache hits check the backend stamp and deadlines instead of repeating retrieval
+and scanning fact contents. Timing metadata is scanned on misses. A concurrent
+write during computation prevents that result from becoming a reusable entry.
+Zero-budget and empty control-only requests avoid this cache metadata work.
+
+`memory_selection` includes `cache_hit`, `selected_at`, and `cache_expires_at`.
+Expiry is a wall-clock ceiling, not a promise of validity despite changed inputs
+or storage. Ranking can reflect the earlier selection time within that bounded
+window; continuously recomputed fractional decay ranking is not claimed.
+
+Custom backends opt in with reliable selection revision and timing contracts.
+Custom renderers opt in with a stable `memory_cache_identity`; the default is
+uncached. Changing a renderer or tokenizer's behavior requires a different identity.

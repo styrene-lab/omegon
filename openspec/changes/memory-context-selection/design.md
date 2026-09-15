@@ -62,3 +62,27 @@ lineage lookup, then undergo the same eligibility checks as other candidates.
 reports, including empty selections. Reports contain handles and reasons, not fact
 contents. Semantic caching remains a separate follow-up; TTL alone never authorizes
 reuse of stale eligibility.
+
+## Wave 5 semantic cache
+
+Each selection owner keeps one bounded snapshot. Keys cover task text, mind, pin
+order, target context, intent, fetch limit, memory/host budgets, counter identity,
+renderer identity, and policy version. Query time is checked against the cached
+interval instead of being discarded as irrelevant. Clock reversal forces a miss.
+
+Native backends expose connection-instance-bound invalidation stamps. SQLite uses
+`data_version` for external commits and `total_changes` for local writes. In-memory
+storage advances a conservative write epoch. Unsupported backends and renderers
+without a stable cache identity remain uncached. A stamp change during computation
+prevents publication of a reusable entry.
+
+On a miss, scan active-record timing metadata to find the next validity boundary,
+including currently excluded future facts, and the earliest confidence-floor
+transition. Hits check only the stamp and deadlines; they do not repeat retrieval
+or scan fact contents. Snapshot ranking can remain stable for at most 30 seconds;
+eligibility boundaries invalidate sooner. This is bounded snapshot reuse, not a
+claim of continuously recomputed decay ranking.
+
+Reports expose cache hits, selection time, and a wall-clock expiry ceiling. That
+ceiling remains conditional on unchanged keys, backend state, and query-time
+eligibility. Zero-budget and empty low-signal selections bypass cache metadata work.

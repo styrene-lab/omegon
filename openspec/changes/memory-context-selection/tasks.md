@@ -34,3 +34,16 @@
 - [x] Verify whole-block counted packing, zero budget, eligibility reasons, superseded pins, and low-signal episode exclusion.
 - [x] Verify shared standalone/hosted/explicit-pack selection and configurable cap intersection.
 - [x] Record development fixture results, compatibility, final gates, and same-executor review in verification-wave-5-selection.md.
+
+## 5. Wave 5 semantic cache slice
+<!-- specs: memory/selection, memory/injection-budget -->
+
+- [x] RED: Reproduce lack of reuse through the hosted selection report.
+- [x] Verify retrieval-call suppression, task/target/pin/budget changes, archive and external SQLite invalidation, clock reversal, and future eligibility boundaries.
+- [x] Verify conservative confidence-floor expiry, backend-instance isolation, and mutation-during-computation behavior.
+- [ ] Record final gates and same-executor review in verification-wave-5-cache.md.
+
+The cache implementation and focused checks are complete. Final landing remains
+blocked by the unaccepted Xcode license during `just test-commit`; see the cache
+verification record. Resolve that environment blocker and rerun the gate before
+checking the final acceptance task.
