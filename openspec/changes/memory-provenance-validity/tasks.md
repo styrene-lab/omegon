@@ -3,7 +3,8 @@
 
 - [x] Introduce the minimal typed episode formation vocabulary: source frontier, attributed excerpts, observed tool outcomes, pending candidates, and extraction state.
 - [x] Preserve the source evidence across atomic completion; an assistant report cannot carry a tool outcome and generated candidates are not active facts.
-- [ ] Resolve canonical workspace/revision descriptors and evidence retention behavior before freezing schema fields.
+- [x] Resolve workspace identity and exact Git revision descriptors in the accepted applicability slice (section 9).
+- [ ] Finish the evidence-retention contract and reconcile its scenario coverage before closing the parent corpus.
 - [ ] RED: Add observed-versus-inferred, imported-authority, platform applicability, historical validity, and unavailable-source tests.
 - [ ] GREEN: Implement domain evidence/applicability types and retrieval inspection using host-owned source identities.
 - [ ] REFACTOR: Keep authority interpretation out of renderers and transport adapters.

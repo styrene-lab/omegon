@@ -12,7 +12,7 @@
 - [x] Validate classified candidates with fake extraction; reject malformed siblings, fabricated references, and supplied authority fields.
 - [x] Persist a typed source frontier and pending episode before inference; complete candidates atomically with unchanged evidence, FTS updates, vector invalidation, and replay receipts.
 - [x] Verify reopen and JSONL round-trip, pending-to-complete import, corruption errors, rejected completion, and rollback after receipt failure.
-- [ ] Implement interval/pre-eviction checkpoints, durable scheduling, and automatic restart recovery of pending extraction.
+- [ ] Implement interval/pre-eviction checkpoints and continuous durable scheduling; bounded startup recovery is tracked in section 5.
 
 ## 3. Bounded lifecycle and verification
 <!-- specs: memory/formation -->
@@ -32,3 +32,12 @@
 - [x] RED/GREEN: Stop assistant excerpts at unavailable chunks and enforce source identity consistency.
 - [x] Verify legacy invalid-model diagnostics preserve valid source evidence.
 - [x] Complete final rechecks and handoff in adversarial-review-wave-3.md before Wave 4.
+
+## 5. Wave 5C bounded startup recovery
+<!-- specs: memory/formation -->
+
+- [x] RED: Reproduce persisted pending evidence remaining unprocessed after a fresh feature startup.
+- [x] GREEN: Add bounded mind/model-filtered pending inventory and startup extraction using retained evidence.
+- [x] Verify SQLite reopen, completed-record exclusion, overflow preservation, corrupt inventory errors, and backend parity.
+- [x] Verify fresh-owner repeat behavior and managed shutdown cancellation without sleeps.
+- [x] Complete landing gates, same-executor review, and verification-wave-5-recovery.md.

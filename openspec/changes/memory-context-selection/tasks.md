@@ -19,12 +19,12 @@
 ## 3. Cache correctness and verification
 <!-- specs: memory/selection, memory/injection-budget -->
 
-- [ ] RED: Add task-change, archive-before-TTL, scope-change, smaller-budget, eligibility-expiry, and unchanged-turn backend-call-count tests.
+- [x] Verify task-change, archive-before-TTL, scope-change, smaller-budget, eligibility-expiry, and unchanged-turn retrieval-call-count regressions; hosted lack-of-reuse RED evidence is recorded in verification-wave-5-cache.md.
 
 - [x] RED/GREEN: Reproduce a task change with no matches retaining a live injection; emit an explicit empty replacement to retire it in the managed context path.
-- [ ] GREEN: Implement semantic cache invalidation and bounded selection reuse.
+- [x] GREEN: Implement semantic cache invalidation and bounded selection reuse.
 - [ ] Record scenario mappings and policy ablation results; verify runtime context and non-interactive inspection surfaces.
-- [ ] Run applicable landing gates from ../../memory-modernization.md and validate this change.
+- [x] Run applicable selection/cache landing gates from ../../memory-modernization.md and validate this change; comparative policy evaluation remains open above.
 - [x] Complete the Wave 2 scoped landing/adversarial gates in verification-wave-2.md; retain full token accounting, caching, and provenance work for Wave 5.
 
 ## 4. Wave 5 counted selection slice

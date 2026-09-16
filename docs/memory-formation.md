@@ -61,9 +61,25 @@ Source evidence is committed before inference. A separate atomic
 replacing evidence. Episode search, stale-vector invalidation, and the operation
 receipt update in the same transaction.
 
-Cancellation during inference leaves a durable pending record. Automatic restart
-scheduling remains later-wave work. Repeated completed operations replay their
-recorded outcome rather than duplicating episodes or reinforcing facts.
+Cancellation during inference leaves a durable pending record. On session startup,
+the hosted memory feature resumes up to eight pending episodes for its mind and
+exact configured extraction model, oldest first. One recovery task runs per feature
+instance, with a two-minute total budget and the existing per-extraction timeout.
+It uses the stored evidence excerpts, so the original session need not be reopened.
+
+Recovery follows the existing extraction enable/disable and child-session policy.
+Changing the configured model leaves checkpoints for the previous model pending.
+Disabled, complete, and unavailable outcomes are not automatically retried by this
+startup pass. Work beyond the batch or time budget remains pending for a later
+startup. Interval checkpoints, continuous retry scheduling, and queue backpressure
+remain planned.
+
+Managed shutdown cancels and joins the recovery task. Cancellation before completion
+leaves pending evidence intact. A completed extraction and its receipt commit
+atomically; recovery does not admit candidates as facts or reinforce existing facts.
+Concurrent owners can both perform inference, but only one pending-to-terminal
+transition can commit. A completion conflict stops that recovery pass and preserves
+the winning result and remaining pending work. Provider execution is not exactly-once.
 
 Capture-policy v2 binds operation identities to the mind, retained source evidence,
 and configured extractor. Retry-time counters and wall-clock dates are excluded

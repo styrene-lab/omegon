@@ -20,6 +20,10 @@ Wave 4 is **accepted** at `fa8b0959`; see its
 [verification record](changes/memory-retrieval-contract/verification-wave-4.md).
 Wave 5 is **implementing**, beginning with the
 [transport prerequisite](changes/memory-provenance-validity/verification-wave-5-transport.md).
+Provenance/applicability slices and shared counted selection are accepted. The
+[semantic cache gate](changes/memory-context-selection/verification-wave-5-cache.md)
+passed on 2026-09-16. Wave 5C durable recovery and Wave 5D comparative evaluation
+remain open; accepted slices do not imply completion of all parent contracts.
 Waves 6–8 remain **planned**.
 The [post-Wave-3 adversarial review](changes/memory-evidence-capture/adversarial-review-wave-3.md)
 is accepted at `987272da`; six reproduced findings were fixed before Wave 4.

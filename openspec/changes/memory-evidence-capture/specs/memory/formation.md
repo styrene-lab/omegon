@@ -99,6 +99,18 @@ When the memory pipeline restarts
 Then it resumes the pending checkpoint from its retained evidence
 And previously completed checkpoints are not admitted twice
 
+#### Scenario: Startup recovery uses the recorded model
+Given pending checkpoints for two models and a configured extractor for one model
+When the bounded startup recovery pass inventories work
+Then it selects only pending checkpoints for the configured model and mind
+And completed episodes do not consume the pending-work limit
+
+#### Scenario: Startup recovery reaches its batch limit
+Given more than eight matching durable pending checkpoints
+When one startup recovery pass runs
+Then it considers at most eight checkpoints in creation-time and ID order
+And remaining checkpoints stay durable for a later pass
+
 #### Scenario: Crash after a partial candidate batch commit
 Given a persisted extraction batch whose first candidate committed before interruption
 When batch processing resumes

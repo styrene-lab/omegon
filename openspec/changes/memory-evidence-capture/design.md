@@ -56,3 +56,30 @@ the captured source, evidence, truncation state, or selected model. JSONL import
 complete an existing pending envelope under the same checks; it does not downgrade
 a completed envelope. Cancellation leaves the pending source durable. Automatic
 rescheduling of such records remains Wave 5 scope.
+
+## Wave 5C bounded startup recovery
+
+The first recovery slice inventories pending formation envelopes directly from the
+storage owner. Filter by mind, pending state, and exact configured extraction model
+before applying an eight-record bound. Order by creation time and ID. Completed
+episodes cannot hide pending work behind a recent-episode limit. SQLite and the
+in-memory backend share this contract; unsupported backends return an explicit error.
+
+On SessionStart, the host starts at most one recovery task per feature instance,
+using the existing extraction configuration and child policy. The task has a
+120-second total deadline and reuses the 30-second extractor deadline. It consumes
+retained evidence, not the current session log. Managed shutdown cancels and joins
+the task through the existing owned-task collection. Dropping recovery cancels its
+outstanding managed-service request.
+
+Completion uses the existing atomic CompleteFormation contract and a stable
+episode-bound recovery receipt. Immutable evidence and selected model must match;
+only pending records transition. A concurrent completion cannot be overwritten.
+An interrupted provider call may run again because its result was not committed.
+This is not an exactly-once provider-execution guarantee or a candidate-admission queue.
+
+The pass preserves overflow and interrupted work for a later startup. Model changes
+do not silently reroute old checkpoints. Unavailable terminal outcomes retain their
+existing meaning and are not retried here. Continuous scheduling, interval/pre-eviction
+capture, retry/backoff state, and full readiness/backpressure projection remain open.
+No schema or formation-envelope migration is needed for this slice.
