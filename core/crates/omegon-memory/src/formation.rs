@@ -9,6 +9,17 @@ pub const MAX_CANDIDATES: usize = 32;
 pub const MAX_EXTRACTION_BYTES: usize = 65_536;
 pub const MAX_IDENTIFIER_BYTES: usize = 512;
 
+pub const MAX_RECOVERY_BATCH: usize = 8;
+
+pub(crate) fn validate_recovery_limit(limit: usize) -> crate::backend::Result<()> {
+    if limit > MAX_RECOVERY_BATCH {
+        return Err(MemoryError::InvalidMutation(
+            "formation recovery batch exceeds limit".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn invalid() -> MemoryError {
     MemoryError::InvalidMutation("invalid or oversized formation evidence".into())
 }

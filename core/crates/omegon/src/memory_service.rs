@@ -361,6 +361,14 @@ pub(crate) enum MemoryRequestV1 {
         #[serde(skip, default)]
         cancellation: CancellationToken,
     },
+    PendingFormations {
+        scope: MemoryScopeV1,
+        mind: String,
+        model: String,
+        limit: usize,
+        #[serde(skip, default)]
+        cancellation: CancellationToken,
+    },
     SearchEpisodes {
         scope: MemoryScopeV1,
         mind: String,
@@ -467,6 +475,7 @@ impl MemoryRequestV1 {
             | Self::EmbeddingIndexState { cancellation, .. }
             | Self::GetEdges { cancellation, .. }
             | Self::ListEpisodes { cancellation, .. }
+            | Self::PendingFormations { cancellation, .. }
             | Self::SearchEpisodes { cancellation, .. }
             | Self::ApplyMutation { cancellation, .. }
             | Self::ApplyToolMutation { cancellation, .. }
@@ -1839,6 +1848,12 @@ fn execute_request(
                     .list_episodes(&mind, limit)
                     .await
                     .map(MemoryPayloadV1::Episodes),
+                MemoryRequestV1::PendingFormations {
+                    mind, model, limit, ..
+                } => backend
+                    .pending_formations(&mind, &model, limit)
+                    .await
+                    .map(MemoryPayloadV1::Episodes),
                 MemoryRequestV1::SearchEpisodes {
                     mind, query, limit, ..
                 } => backend
@@ -1983,6 +1998,7 @@ fn validate_request(request: &MemoryRequestV1) -> Result<(), MemoryServiceErrorV
         | MemoryRequestV1::VectorSearch { limit, .. }
         | MemoryRequestV1::ListFactsPage { limit, .. }
         | MemoryRequestV1::ListEpisodes { limit, .. }
+        | MemoryRequestV1::PendingFormations { limit, .. }
         | MemoryRequestV1::SearchEpisodes { limit, .. } => Some(*limit),
         _ => None,
     };
@@ -2073,6 +2089,7 @@ fn request_scope(request: &MemoryRequestV1) -> MemoryScopeV1 {
         | MemoryRequestV1::EmbeddingIndexState { scope, .. }
         | MemoryRequestV1::GetEdges { scope, .. }
         | MemoryRequestV1::ListEpisodes { scope, .. }
+        | MemoryRequestV1::PendingFormations { scope, .. }
         | MemoryRequestV1::SearchEpisodes { scope, .. }
         | MemoryRequestV1::ApplyMutation { scope, .. }
         | MemoryRequestV1::ApplyToolMutation { scope, .. }

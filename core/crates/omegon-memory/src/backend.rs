@@ -421,6 +421,19 @@ pub trait MemoryBackend: Send + Sync {
     /// List the most recent episodes for a mind.
     async fn list_episodes(&self, mind: &str, k: usize) -> Result<Vec<Episode>>;
 
+    /// Bounded pending extraction inventory, filtered before the limit. Implementors
+    /// without recovery support return an error rather than claiming an empty queue.
+    async fn pending_formations(
+        &self,
+        _mind: &str,
+        _model: &str,
+        _limit: usize,
+    ) -> Result<Vec<Episode>> {
+        Err(MemoryError::InvalidMutation(
+            "pending formation inventory is unsupported".into(),
+        ))
+    }
+
     /// Search episodes by narrative similarity (FTS5 or embedding).
     async fn search_episodes(&self, mind: &str, query: &str, k: usize) -> Result<Vec<Episode>>;
 

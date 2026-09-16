@@ -2886,6 +2886,30 @@ impl MemoryBackend for SqliteBackend {
         Ok(episodes)
     }
 
+    async fn pending_formations(
+        &self,
+        mind: &str,
+        model: &str,
+        limit: usize,
+    ) -> Result<Vec<Episode>> {
+        crate::formation::validate_recovery_limit(limit)?;
+        let conn = self.conn.lock().unwrap();
+        let mut statement=conn.prepare("SELECT * FROM episodes WHERE mind=?1 AND json_extract(formation, '$.extraction.state')='pending' AND json_extract(formation, '$.extraction.model')=?2 ORDER BY created_at, id LIMIT ?3").map_err(|error|MemoryError::Storage(error.into()))?;
+        let episodes = statement
+            .query_map(params![mind, model, limit as i64], Self::row_to_episode)
+            .map_err(|error| MemoryError::Storage(error.into()))?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        for episode in &episodes {
+            episode
+                .formation
+                .as_ref()
+                .ok_or_else(|| MemoryError::InvalidMutation("missing pending formation".into()))?
+                .validate()?;
+        }
+        Ok(episodes)
+    }
+
     async fn search_episodes(&self, mind: &str, query: &str, k: usize) -> Result<Vec<Episode>> {
         let conn = self.conn.lock().unwrap();
         let fts_query = query

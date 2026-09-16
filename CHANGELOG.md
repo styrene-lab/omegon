@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Hosted memory now resumes a bounded batch of pending extraction checkpoints on session startup using retained evidence and the recorded model. Completed work is excluded, overflow remains durable, and managed shutdown cancels recovery without falsely completing checkpoints.
+
 - Memory selection now reuses bounded snapshots when task, scope, pins, budgets, policy, and backend state agree. Connection-bound change stamps invalidate local and external writes; applicability and confidence-floor deadlines prevent stale eligibility. Reports expose cache hits and snapshot times. Custom backends/renderers without reliable cache contracts remain uncached.
 
 - Ambient memory and explicit memory context packs now share whole-block counted selection with a configurable `memoryContextTokens` cap. Reports identify conservative UTF-8-byte accounting, selected handles, exclusions, and pin replacements. Low-signal turns use eligible pins, episodes have a bounded share, and static provider injections replace older values for every TTL instead of accumulating them.

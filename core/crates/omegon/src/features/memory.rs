@@ -92,6 +92,7 @@ impl std::error::Error for MemoryFeatureInvokeError {}
 pub(crate) mod confirmation;
 mod formation;
 mod lifecycle;
+mod recovery;
 
 /// Memory feature that provides all memory_* tools and context injection.
 pub struct MemoryFeature {
@@ -121,6 +122,7 @@ pub struct MemoryFeature {
     session_binding: Option<crate::session_consumers::DeferredSessionViewBinding>,
     session_id: Mutex<Option<String>>,
     session_end_tasks: Arc<Mutex<SessionEndTaskState>>,
+    recovery_started: bool,
     status_root: std::path::PathBuf,
 }
 
@@ -140,6 +142,7 @@ impl MemoryFeature {
             session_binding: None,
             session_id: Mutex::new(None),
             session_end_tasks: Arc::new(Mutex::new(SessionEndTaskState::default())),
+            recovery_started: false,
             status_root: std::env::current_dir().unwrap_or_default(),
         }
     }
@@ -1697,6 +1700,35 @@ Also use it when you notice a gap — if you're unsure whether something was alr
         match event {
             BusEvent::SessionStart { session_id, .. } => {
                 *self.session_id.lock().unwrap() = Some(session_id.clone());
+                if !self.recovery_started
+                    && self.memory_binding.available()
+                    && let Some(extractor) = self.extractor.clone()
+                {
+                    let mut tasks = self.session_end_tasks.lock().unwrap();
+                    if tasks.accepting {
+                        let binding = self.memory_binding.clone();
+                        let mind = self.mind.clone();
+                        let cancellation = tokio_util::sync::CancellationToken::new();
+                        let worker = cancellation.clone();
+                        match std::thread::Builder::new().name("memory-formation-recovery".into()).spawn(move|| {
+                            let runtime=tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|error|error.to_string())?;
+                            runtime.block_on(async {
+                                tokio::select! {
+                                    _=worker.cancelled()=>Ok(()),
+                                    result=tokio::time::timeout(std::time::Duration::from_secs(120),recovery::recover(binding,mind,extractor))=>match result {
+                                        Ok(Ok(()))=>Ok(()),
+                                        // Failures preserve pending evidence. Do not log provider or fact content.
+                                        Ok(Err(_))=>{tracing::warn!("memory formation recovery stopped; pending evidence retained");Ok(())},
+                                        Err(_)=>{tracing::warn!("memory formation recovery budget exhausted; pending evidence retained");Ok(())},
+                                    }
+                                }
+                            })
+                        }) {
+                            Ok(handle)=>{tasks.tasks.push(SessionEndTask {cancellation,handle});self.recovery_started=true;},
+                            Err(_)=>tasks.failures.push("failed to spawn formation recovery task".into()),
+                        }
+                    }
+                }
                 Vec::new()
             }
             BusEvent::ToolEnd { name, is_error, .. }
@@ -2180,6 +2212,97 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn startup_recovery_completes_durable_pending_evidence_once() {
+        struct Fake(std::sync::atomic::AtomicUsize);
+        #[async_trait::async_trait]
+        impl formation::Extractor for Fake {
+            fn model(&self) -> &str {
+                "fixture-model"
+            }
+            async fn extract(&self, _prompt: &str) -> anyhow::Result<String> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok("[]".into())
+            }
+        }
+        let (feature, mut bus, dir) = managed_feature().await;
+        let fake = Arc::new(Fake(std::sync::atomic::AtomicUsize::new(0)));
+        let mut input = adversarial_input();
+        input.extractor = Some(fake.clone());
+        let (id, request) = formation_episode_request(&input);
+        let original = request.formation.clone().unwrap();
+        feature
+            .apply_mutation(
+                id,
+                MemoryMutation::StoreEpisode { request },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        let binding = crate::memory_service::MemoryBinding::default();
+        let mut bus = crate::bus::EventBus::new();
+        bus.register(Box::new(crate::memory_service::MemoryDeclarationFeature));
+        let candidate =
+            crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
+                workspace_root: Some(dir.path().into()),
+                memory_token_cap: None,
+                project_memory_root: dir.path().into(),
+                project_db_path: dir.path().join("facts.db"),
+                project_jsonl_path: dir.path().join("facts.jsonl"),
+                global_db_path: None,
+                vault: None,
+                startup_sync_enabled: false,
+            })
+            .await
+            .unwrap();
+        bus.stage_managed_generation("memory", candidate).unwrap();
+        bus.try_finalize_managed().await.unwrap();
+        binding.capture(&bus).unwrap();
+        // Reopened SQLite owner and fresh feature; no old session binding or task.
+        for _ in 0..2 {
+            let mut restarted = MemoryFeature::new(binding.clone(), "test".into());
+            restarted.extractor = Some(fake.clone());
+            restarted.on_event(&BusEvent::SessionStart {
+                session_id: "restarted".into(),
+                cwd: dir.path().into(),
+            });
+            let tasks = std::mem::take(&mut restarted.session_end_tasks.lock().unwrap().tasks);
+            for task in tasks {
+                tokio::task::spawn_blocking(move || task.handle.join())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+            }
+        }
+        let count = fake.0.load(Ordering::SeqCst);
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert_eq!(
+            count, 1,
+            "startup must recover pending evidence exactly once"
+        );
+        use omegon_memory::MemoryBackend;
+        let store = omegon_memory::SqliteBackend::open(&dir.path().join("facts.db")).unwrap();
+        let episodes = store.list_episodes("test", 8).await.unwrap();
+        assert_eq!(episodes.len(), 1);
+        let recovered = episodes[0].formation.as_ref().unwrap();
+        assert!(matches!(
+            recovered.extraction,
+            omegon_memory::ExtractionOutcome::Complete { .. }
+        ));
+        assert_eq!(recovered.source, original.source);
+        assert_eq!(recovered.evidence, original.evidence);
+    }
+
     #[test]
     fn adversarial_capture_replay_ignores_advisory_statistics() {
         let mut input = adversarial_input();
@@ -2192,6 +2315,76 @@ mod tests {
         assert_eq!(
             first.1, second.1,
             "same capture identity must bind the same payload"
+        );
+    }
+
+    #[tokio::test]
+    async fn startup_recovery_shutdown_cancels_extraction_and_retains_pending() {
+        struct Waiting {
+            entered: tokio::sync::Notify,
+            dropped: Arc<AtomicBool>,
+        }
+        #[async_trait::async_trait]
+        impl formation::Extractor for Waiting {
+            fn model(&self) -> &str {
+                "fixture-waiting"
+            }
+            async fn extract(&self, _: &str) -> anyhow::Result<String> {
+                struct Guard(Arc<AtomicBool>);
+                impl Drop for Guard {
+                    fn drop(&mut self) {
+                        self.0.store(true, Ordering::SeqCst);
+                    }
+                }
+                let _guard = Guard(self.dropped.clone());
+                self.entered.notify_one();
+                std::future::pending().await
+            }
+        }
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        let dropped = Arc::new(AtomicBool::new(false));
+        let waiting = Arc::new(Waiting {
+            entered: tokio::sync::Notify::new(),
+            dropped: dropped.clone(),
+        });
+        let mut input = adversarial_input();
+        input.extractor = Some(waiting.clone());
+        let (id, request) = formation_episode_request(&input);
+        feature
+            .apply_mutation(
+                id,
+                MemoryMutation::StoreEpisode { request },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        feature.extractor = Some(waiting.clone());
+        feature.on_event(&BusEvent::SessionStart {
+            session_id: "recover".into(),
+            cwd: dir.path().into(),
+        });
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            waiting.entered.notified(),
+        )
+        .await
+        .unwrap();
+        feature.prepare_managed_shutdown().await.unwrap();
+        assert!(dropped.load(Ordering::SeqCst));
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        use omegon_memory::MemoryBackend;
+        let store = omegon_memory::SqliteBackend::open(&dir.path().join("facts.db")).unwrap();
+        assert_eq!(
+            store
+                .pending_formations("test", "fixture-waiting", 8)
+                .await
+                .unwrap()
+                .len(),
+            1
         );
     }
 

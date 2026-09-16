@@ -5,6 +5,109 @@ fn episode_json() -> serde_json::Value {
     serde_json::from_str(include_str!("fixtures/formation.json")).unwrap()
 }
 
+async fn recovery_inventory_case(backend: &dyn MemoryBackend) {
+    for index in 0..20 {
+        let mut row = episode_json();
+        row["id"] = json!(format!("episode-{index:02}"));
+        row["formation"]["candidates"] = json!([]);
+        row["formation"]["extraction"] = if index < 10 {
+            json!({"state":"complete","model":"fixture"})
+        } else {
+            json!({"state":"pending","model":"fixture"})
+        };
+        backend.import_jsonl(&row.to_string()).await.unwrap();
+    }
+    let mut other = episode_json();
+    other["id"] = json!("other-mind");
+    other["mind"] = json!("other");
+    other["formation"]["candidates"] = json!([]);
+    other["formation"]["extraction"] = json!({"state":"pending","model":"fixture"});
+    backend.import_jsonl(&other.to_string()).await.unwrap();
+    assert!(
+        backend
+            .pending_formations("wave3", "different", 8)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        backend
+            .pending_formations("wave3", "fixture", 9)
+            .await
+            .is_err()
+    );
+    let batch = backend
+        .pending_formations("wave3", "fixture", 8)
+        .await
+        .unwrap();
+    assert_eq!(batch.len(), 8);
+    assert_eq!(batch[0].id, "episode-10");
+    for episode in batch {
+        let mut formation = *episode.formation.unwrap();
+        formation.extraction = omegon_memory::ExtractionOutcome::Complete {
+            model: "fixture".into(),
+        };
+        backend
+            .apply_mutation(
+                &format!("recover:{}", episode.id),
+                omegon_memory::MemoryMutation::CompleteFormation {
+                    episode_id: episode.id,
+                    formation: Box::new(formation),
+                },
+            )
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        backend
+            .pending_formations("wave3", "fixture", 8)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        backend
+            .pending_formations("other", "fixture", 8)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn recovery_inventory_filters_before_limit_and_preserves_remainder() {
+    recovery_inventory_case(&omegon_memory::InMemoryBackend::new()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("facts.db");
+    {
+        let backend = SqliteBackend::open(&path).unwrap();
+        recovery_inventory_case(&backend).await;
+    }
+    let reopened = SqliteBackend::open(&path).unwrap();
+    assert_eq!(
+        reopened
+            .pending_formations("wave3", "fixture", 8)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    let conn = rusqlite::Connection::open(path).unwrap();
+    conn.execute(
+        "UPDATE episodes SET formation='invalid json' WHERE id='episode-18'",
+        [],
+    )
+    .unwrap();
+    assert!(
+        reopened
+            .pending_formations("wave3", "fixture", 8)
+            .await
+            .is_err()
+    );
+}
+
 async fn episode_search_case(backend: &dyn MemoryBackend) {
     backend
         .import_jsonl(&episode_json().to_string())

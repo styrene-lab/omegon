@@ -1575,6 +1575,30 @@ impl MemoryBackend for InMemoryBackend {
         Ok(eps)
     }
 
+    async fn pending_formations(
+        &self,
+        mind: &str,
+        model: &str,
+        limit: usize,
+    ) -> Result<Vec<Episode>> {
+        crate::formation::validate_recovery_limit(limit)?;
+        let state = self.state.lock().unwrap();
+        let mut episodes:Vec<_>=state.episodes.iter().filter(|episode| episode.mind==mind && episode.formation.as_ref().is_some_and(|formation| matches!(&formation.extraction,ExtractionOutcome::Pending {model:expected} if expected==model))).collect();
+        episodes.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
+        episodes
+            .into_iter()
+            .take(limit)
+            .map(|episode| {
+                episode
+                    .formation
+                    .as_ref()
+                    .expect("pending formation")
+                    .validate()?;
+                Ok(episode.clone())
+            })
+            .collect()
+    }
+
     async fn search_episodes(&self, mind: &str, query: &str, k: usize) -> Result<Vec<Episode>> {
         let s = self.state.lock().unwrap();
         let query_lower = query.replace('"', " ").to_lowercase();
