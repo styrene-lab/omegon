@@ -41,9 +41,8 @@
 - [x] RED: Reproduce lack of reuse through the hosted selection report.
 - [x] Verify retrieval-call suppression, task/target/pin/budget changes, archive and external SQLite invalidation, clock reversal, and future eligibility boundaries.
 - [x] Verify conservative confidence-floor expiry, backend-instance isolation, and mutation-during-computation behavior.
-- [ ] Record final gates and same-executor review in verification-wave-5-cache.md.
+- [x] Record final gates and same-executor review in verification-wave-5-cache.md.
 
-The cache implementation and focused checks are complete. Final landing remains
-blocked by the unaccepted Xcode license during `just test-commit`; see the cache
-verification record. Resolve that environment blocker and rerun the gate before
-checking the final acceptance task.
+The cache slice is accepted. After Xcode license acceptance, the final
+`RUST_TEST_THREADS=1 just test-commit --base f16cddfb^` gate passed on 2026-09-16.
+See the cache verification record for results and the execution transcript.
