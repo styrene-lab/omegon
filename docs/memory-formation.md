@@ -56,6 +56,22 @@ text across the missing content.
 
 ## Durability and inspection
 
+During a session, every eight `TurnEnd` notifications make an evidence snapshot due.
+The host captures from validated committed replay through the session-view binding;
+turn telemetry itself is not evidence. One capture worker can run per feature.
+Further turns while it is busy coalesce into a due flag instead of another task.
+Finished workers are reaped on subsequent turn notifications. A failed capture is
+retried on a later turn; unavailable sources create no checkpoint episode.
+
+Interval capture only persists evidence. The recovery scheduler performs extraction.
+With extraction disabled, snapshots remain available with disabled extraction state.
+The interval resets at SessionStart. SessionEnd retains its finalization behavior.
+Identical interval/final snapshots share the existing capture-policy v2 identity
+and replay their receipt. Different snapshots may overlap and retain the existing
+evidence-item and byte bounds, including explicit truncation. A source frontier
+identifies the observed replay boundary; it does not claim every prior event was
+retained in the bounded excerpt. The canonical session log remains the source owner.
+
 Source evidence is committed before inference. A separate atomic
 `CompleteFormation` mutation updates candidates and extraction status without
 replacing evidence. Episode search, stale-vector invalidation, and the operation
@@ -75,7 +91,8 @@ second. An empty queue is checked again after 60 seconds, including work committ
 after startup. Pass failures or timeouts use exponential backoff from 60 seconds
 to a 15-minute maximum. Success resets backoff. Pending work survives restart;
 the scheduler's timers and failure streak are process-local and restart immediately.
-Interval/pre-eviction checkpoints and queue-admission backpressure remain planned.
+Pre-eviction checkpoints, incremental coverage, and broader queue-admission
+backpressure remain planned.
 
 Managed shutdown cancels and joins the recovery task. Cancellation before completion
 leaves pending evidence intact. A completed extraction and its receipt commit
@@ -95,6 +112,13 @@ a pass runs or fails. The delay is the scheduled interval, not a live countdown.
 These observations do not establish full component readiness or successful candidate
 admission. Normal session-end formation can run alongside recovery; atomic completion
 resolves races.
+
+Hosted `memory_query` also exposes `details.evidence_checkpoint`: the event interval,
+capped turns-since-request counter, whether capture is due, and whether its worker
+is running. These are admission observations, not durable-completion acknowledgments.
+The capture worker participates in managed cancellation/join and feature-drop
+cancellation. Capture requests use the managed storage boundary and cancel outstanding
+requests when dropped. Synchronous replay validation is not a preemptible operation.
 
 Capture-policy v2 binds operation identities to the mind, retained source evidence,
 and configured extractor. Retry-time counters and wall-clock dates are excluded

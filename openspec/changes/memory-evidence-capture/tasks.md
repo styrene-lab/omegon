@@ -12,7 +12,7 @@
 - [x] Validate classified candidates with fake extraction; reject malformed siblings, fabricated references, and supplied authority fields.
 - [x] Persist a typed source frontier and pending episode before inference; complete candidates atomically with unchanged evidence, FTS updates, vector invalidation, and replay receipts.
 - [x] Verify reopen and JSONL round-trip, pending-to-complete import, corruption errors, rejected completion, and rollback after receipt failure.
-- [ ] Implement interval/pre-eviction checkpoints; startup recovery and continuous pending-work scheduling are tracked in sections 5–6.
+- [ ] Implement pre-eviction checkpoints and incremental coverage; interval snapshots and recovery scheduling are tracked in sections 5–7.
 
 ## 3. Bounded lifecycle and verification
 <!-- specs: memory/formation -->
@@ -50,3 +50,12 @@
 - [x] Verify paused-clock idle discovery, backlog progression, timeout cleanup, backoff/reset, and cancellation during waits.
 - [x] Verify SQLite-backed overflow progression, feature-drop cancellation, and startup/shutdown regressions.
 - [x] Complete final gates and same-executor review in verification-wave-5-scheduler.md.
+
+## 7. Wave 5C interval evidence snapshots
+<!-- specs: memory/formation -->
+
+- [x] RED: Reproduce missing persisted evidence after eight turns before SessionEnd.
+- [x] GREEN: Persist bounded committed snapshots through a single owned interval worker and existing capture receipts.
+- [x] Verify configured pending capture without inference, repeated-source replay, SQLite reopen, and unavailable-source rejection.
+- [x] Verify coalesced due pressure, read-only observations, and managed shutdown joining the worker slot.
+- [x] Complete final gates and same-executor review in verification-wave-5-checkpoints.md.

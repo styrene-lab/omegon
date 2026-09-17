@@ -113,3 +113,34 @@ Managed shutdown cancels the worker during work or timer wait and joins its thre
 Feature drop signals cancellation as a fallback. The existing session-end formation
 path remains independently owned; concurrent completion is resolved by the domain's
 pending-to-terminal precondition. No provider-call exactly-once guarantee is added.
+
+## Wave 5C interval evidence snapshots
+
+Use existing TurnEnd notifications as scheduling signals, not as evidence. After
+eight notifications, capture from the validated deferred session binding on an
+owned worker thread and persist through StoreEpisode. The tool-result loop records
+canonical results before emitting TurnEnd; capture independently validates source
+generation and reads only committed records. No new bus event or shared trait is needed.
+
+Allow one interval worker slot per feature. Saturate the due counter at eight while
+the slot is occupied. Reap finished work on a later turn; a failed worker leaves
+capture due. Spawn failure also preserves the due counter. Reset the interval for a
+new session and close admission with managed shutdown. Shutdown cancels and joins
+the slot; feature drop cancels it as a fallback. Keep the existing session-end and
+recovery workers separately owned.
+
+The worker only commits evidence. It does not invoke the extractor or vault sync.
+Reuse the existing capture-policy v2 payload/operation identity, so repeated source
+snapshots and matching finalization replay rather than duplicate a checkpoint.
+An enabled extractor records Pending with its model; disabled extraction records
+Disabled. Reject unavailable source captures and skip empty evidence. A ten-second
+async deadline bounds waiting for storage, but synchronous replay is not preemptible.
+
+This slice retains bounded overlapping snapshots rather than introducing a durable
+incremental coverage cursor. The source frontier attributes a snapshot, not a promise
+that every event before it appears in the excerpt. Canonical source retention, explicit
+truncation, and stable receipts preserve existing semantics. Incremental coverage and
+pre-eviction acknowledgment remain follow-up contracts.
+
+Hosted memory_query reports the interval, capped event counter, due state, and worker
+activity. It does not equate task admission or a finished thread with durable success.

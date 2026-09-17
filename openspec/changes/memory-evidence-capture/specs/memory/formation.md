@@ -164,3 +164,31 @@ And the queue sample remains unknown after failure
 Given a recovery worker is waiting for its next pass
 When its owning feature is dropped
 Then cancellation wakes the worker without waiting for the scheduled interval
+
+### Requirement: Interval capture persists committed evidence before finalization
+
+The hosted memory feature SHALL schedule a bounded evidence snapshot after eight
+turn-end notifications. Capture SHALL use validated committed replay, preserve
+explicit truncation, and persist evidence before any extraction of that checkpoint.
+
+#### Scenario: Long session reaches a capture interval
+Given a bound session has committed user-visible evidence and extraction is configured
+When its eighth turn-end notification is delivered
+Then an owned capture worker persists a pending evidence snapshot before SessionEnd
+And the capture worker does not invoke the extractor
+
+#### Scenario: Interval sees the same source snapshot again
+Given a source snapshot was already persisted under its capture-policy identity
+When a later interval captures that identical source and model
+Then the storage operation replays without another episode or reinforcement
+
+#### Scenario: Capture worker is already occupied
+Given an interval capture worker is still running
+When further turns reach the next interval
+Then capture remains due without allocating another worker
+And managed shutdown cancels and joins the occupied slot
+
+#### Scenario: Interval source is unavailable
+Given the bound source cannot be replayed
+When an interval capture worker attempts to read it
+Then it returns failure without persisting a fabricated evidence episode
