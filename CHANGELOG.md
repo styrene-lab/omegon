@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Pending memory extraction now progresses through continuous bounded recovery passes, with idle polling and capped retry backoff. Hosted `memory_query` exposes content-free scheduler observations. Managed shutdown joins the worker, and feature drop signals cancellation.
+
 - Hosted memory now resumes a bounded batch of pending extraction checkpoints on session startup using retained evidence and the recorded model. Completed work is excluded, overflow remains durable, and managed shutdown cancels recovery without falsely completing checkpoints.
 
 - Memory selection now reuses bounded snapshots when task, scope, pins, budgets, policy, and backend state agree. Connection-bound change stamps invalidate local and external writes; applicability and confidence-floor deadlines prevent stale eligibility. Reports expose cache hits and snapshot times. Custom backends/renderers without reliable cache contracts remain uncached.

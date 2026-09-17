@@ -123,7 +123,22 @@ pub struct MemoryFeature {
     session_id: Mutex<Option<String>>,
     session_end_tasks: Arc<Mutex<SessionEndTaskState>>,
     recovery_started: bool,
+    recovery_status: tokio::sync::watch::Sender<recovery::Status>,
     status_root: std::path::PathBuf,
+}
+
+impl Drop for MemoryFeature {
+    fn drop(&mut self) {
+        // Managed shutdown joins owned threads. A discarded feature must still
+        // cancel its long-lived scheduler, even when shutdown was not invoked.
+        let tasks = self
+            .session_end_tasks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for task in &tasks.tasks {
+            task.cancellation.cancel();
+        }
+    }
 }
 
 impl MemoryFeature {
@@ -143,6 +158,7 @@ impl MemoryFeature {
             session_id: Mutex::new(None),
             session_end_tasks: Arc::new(Mutex::new(SessionEndTaskState::default())),
             recovery_started: false,
+            recovery_status: tokio::sync::watch::channel(recovery::Status::default()).0,
             status_root: std::env::current_dir().unwrap_or_default(),
         }
     }
@@ -983,7 +999,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         content: vec![ContentBlock::Text {
                             text: "No facts in memory.".into(),
                         }],
-                        details: serde_json::json!({ "count": 0 }),
+                        details: serde_json::json!({ "count": 0, "formation_recovery": {"enabled":self.extractor.is_some(),"mind":self.mind,"status":self.recovery_status.borrow().clone()} }),
                     });
                 }
 
@@ -1041,7 +1057,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     content: vec![ContentBlock::Text {
                         text: lines.join("\n"),
                     }],
-                    details: serde_json::json!({ "count": facts.len(), "sections": sections.len(), "inventory_only": facts.len() > large_store_threshold }),
+                    details: serde_json::json!({ "count": facts.len(), "sections": sections.len(), "inventory_only": facts.len() > large_store_threshold, "formation_recovery": {"enabled":self.extractor.is_some(),"mind":self.mind,"status":self.recovery_status.borrow().clone()} }),
                 })
             }
             crate::tool_registry::memory::MEMORY_ARCHIVE => {
@@ -1710,22 +1726,29 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         let mind = self.mind.clone();
                         let cancellation = tokio_util::sync::CancellationToken::new();
                         let worker = cancellation.clone();
-                        match std::thread::Builder::new().name("memory-formation-recovery".into()).spawn(move|| {
-                            let runtime=tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|error|error.to_string())?;
-                            runtime.block_on(async {
-                                tokio::select! {
-                                    _=worker.cancelled()=>Ok(()),
-                                    result=tokio::time::timeout(std::time::Duration::from_secs(120),recovery::recover(binding,mind,extractor))=>match result {
-                                        Ok(Ok(()))=>Ok(()),
-                                        // Failures preserve pending evidence. Do not log provider or fact content.
-                                        Ok(Err(_))=>{tracing::warn!("memory formation recovery stopped; pending evidence retained");Ok(())},
-                                        Err(_)=>{tracing::warn!("memory formation recovery budget exhausted; pending evidence retained");Ok(())},
-                                    }
-                                }
-                            })
-                        }) {
-                            Ok(handle)=>{tasks.tasks.push(SessionEndTask {cancellation,handle});self.recovery_started=true;},
-                            Err(_)=>tasks.failures.push("failed to spawn formation recovery task".into()),
+                        let status = self.recovery_status.clone();
+                        match std::thread::Builder::new()
+                            .name("memory-formation-recovery".into())
+                            .spawn(move || {
+                                let runtime = tokio::runtime::Builder::new_current_thread()
+                                    .enable_all()
+                                    .build()
+                                    .map_err(|error| error.to_string())?;
+                                runtime.block_on(recovery::run(
+                                    binding, mind, extractor, worker, status,
+                                ));
+                                Ok(())
+                            }) {
+                            Ok(handle) => {
+                                tasks.tasks.push(SessionEndTask {
+                                    cancellation,
+                                    handle,
+                                });
+                                self.recovery_started = true;
+                            }
+                            Err(_) => tasks
+                                .failures
+                                .push("failed to spawn formation recovery task".into()),
                         }
                     }
                 }
@@ -2271,14 +2294,15 @@ mod tests {
                 session_id: "restarted".into(),
                 cwd: dir.path().into(),
             });
-            let tasks = std::mem::take(&mut restarted.session_end_tasks.lock().unwrap().tasks);
-            for task in tasks {
-                tokio::task::spawn_blocking(move || task.handle.join())
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .unwrap();
-            }
+            let mut observed = restarted.recovery_status.subscribe();
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                observed.wait_for(|state| state.passes >= 1),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            restarted.prepare_managed_shutdown().await.unwrap();
         }
         let count = fake.0.load(Ordering::SeqCst);
         assert!(
@@ -2385,6 +2409,119 @@ mod tests {
                 .unwrap()
                 .len(),
             1
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_scheduler_drains_overflow_without_another_startup() {
+        struct Fake(std::sync::atomic::AtomicUsize);
+        #[async_trait::async_trait]
+        impl formation::Extractor for Fake {
+            fn model(&self) -> &str {
+                "scheduler-model"
+            }
+            async fn extract(&self, _: &str) -> anyhow::Result<String> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok("[]".into())
+            }
+        }
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        let fake = Arc::new(Fake(std::sync::atomic::AtomicUsize::new(0)));
+        let mut input = adversarial_input();
+        input.extractor = Some(fake.clone());
+        for index in 0..9 {
+            input.session_id = format!("scheduler-{index}");
+            let (id, request) = formation_episode_request(&input);
+            feature
+                .apply_mutation(
+                    id,
+                    MemoryMutation::StoreEpisode { request },
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+        }
+        feature.extractor = Some(fake.clone());
+        feature.on_event(&BusEvent::SessionStart {
+            session_id: "scheduler".into(),
+            cwd: dir.path().into(),
+        });
+        let mut observed = feature.recovery_status.subscribe();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            observed.wait_for(|state| state.passes >= 2),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let report = feature
+            .execute(
+                "memory_query",
+                "scheduler-report",
+                serde_json::json!({}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            report.details["formation_recovery"]["status"]["phase"],
+            "idle"
+        );
+        assert_eq!(
+            report.details["formation_recovery"]["status"]["pending_sample"],
+            0
+        );
+        feature.prepare_managed_shutdown().await.unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert_eq!(
+            fake.0.load(Ordering::SeqCst),
+            9,
+            "overflow must progress without another startup"
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_scheduler_feature_drop_cancels_idle_worker() {
+        struct Empty;
+        #[async_trait::async_trait]
+        impl formation::Extractor for Empty {
+            fn model(&self) -> &str {
+                "empty-fixture"
+            }
+            async fn extract(&self, _: &str) -> anyhow::Result<String> {
+                panic!("empty inventory must not call extractor")
+            }
+        }
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        feature.extractor = Some(Arc::new(Empty));
+        let mut observed = feature.recovery_status.subscribe();
+        feature.on_event(&BusEvent::SessionStart {
+            session_id: "idle".into(),
+            cwd: dir.path().into(),
+        });
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            observed.wait_for(|state| state.passes >= 1),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        drop(feature);
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            observed.wait_for(|state| state.stopped()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
         );
     }
 
@@ -2510,7 +2647,7 @@ mod tests {
         .unwrap();
         let feature = MemoryFeature::new(Default::default(), "wave3".into())
             .with_capabilities(&profile, false, None);
-        assert_eq!(feature.extractor.unwrap().model(), "fixture:cheap");
+        assert_eq!(feature.extractor.as_ref().unwrap().model(), "fixture:cheap");
         profile.memory_extraction_enabled = Some(false);
         let disabled = MemoryFeature::new(Default::default(), "wave3".into())
             .with_extraction_model("previous".into())
