@@ -134,3 +134,33 @@ Given an extractor is running against a durable pending checkpoint
 When managed shutdown cancels its work
 Then owned resources settle within the declared shutdown contract
 And the checkpoint is not falsely marked completed
+
+### Requirement: Pending recovery progresses while the feature remains active
+
+The hosted recovery worker SHALL discover pending work after startup, process bounded
+serial passes, and back off on pass failure. Inspection SHALL distinguish sampled
+backlog, unknown backlog, active work, and scheduled retry without exposing evidence.
+
+#### Scenario: Overflow progresses without restart
+Given nine matching pending checkpoints and an active configured recovery worker
+When bounded recovery passes complete successfully
+Then the ninth checkpoint completes without another SessionStart event
+And each pass considers at most eight checkpoints
+
+#### Scenario: Later work is discovered from idle
+Given the worker observed an empty queue and another checkpoint is committed
+When the next 60-second idle interval expires
+Then the worker checks the durable pending inventory again
+And newly observed backlog schedules another pass after one second
+
+#### Scenario: Repeated pass failure backs off
+Given repeated storage failure prevents recovery from completing a pass
+When the worker schedules retries
+Then the delay doubles from 60 seconds up to a 900-second cap
+And successful recovery resets the failure streak
+And the queue sample remains unknown after failure
+
+#### Scenario: Discarded feature releases the recovery worker
+Given a recovery worker is waiting for its next pass
+When its owning feature is dropped
+Then cancellation wakes the worker without waiting for the scheduled interval

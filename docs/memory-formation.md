@@ -62,17 +62,20 @@ replacing evidence. Episode search, stale-vector invalidation, and the operation
 receipt update in the same transaction.
 
 Cancellation during inference leaves a durable pending record. On session startup,
-the hosted memory feature resumes up to eight pending episodes for its mind and
-exact configured extraction model, oldest first. One recovery task runs per feature
-instance, with a two-minute total budget and the existing per-extraction timeout.
-It uses the stored evidence excerpts, so the original session need not be reopened.
+the hosted memory feature starts one background recovery worker. Each pass resumes
+up to eight pending episodes for its mind and exact configured extraction model,
+oldest first. Each pass has a two-minute budget and the existing per-extraction
+timeout. It uses stored evidence excerpts, so the original session need not be reopened.
 
 Recovery follows the existing extraction enable/disable and child-session policy.
 Changing the configured model leaves checkpoints for the previous model pending.
 Disabled, complete, and unavailable outcomes are not automatically retried by this
-startup pass. Work beyond the batch or time budget remains pending for a later
-startup. Interval checkpoints, continuous retry scheduling, and queue backpressure
-remain planned.
+worker. After a successful pass, observed backlog schedules another pass after one
+second. An empty queue is checked again after 60 seconds, including work committed
+after startup. Pass failures or timeouts use exponential backoff from 60 seconds
+to a 15-minute maximum. Success resets backoff. Pending work survives restart;
+the scheduler's timers and failure streak are process-local and restart immediately.
+Interval/pre-eviction checkpoints and queue-admission backpressure remain planned.
 
 Managed shutdown cancels and joins the recovery task. Cancellation before completion
 leaves pending evidence intact. A completed extraction and its receipt commit
@@ -80,6 +83,18 @@ atomically; recovery does not admit candidates as facts or reinforce existing fa
 Concurrent owners can both perform inference, but only one pending-to-terminal
 transition can commit. A completion conflict stops that recovery pass and preserves
 the winning result and remaining pending work. Provider execution is not exactly-once.
+Discarding a feature also signals cancellation; managed shutdown remains the path
+that joins its owned threads.
+
+Hosted `memory_query` includes `details.formation_recovery` with enablement, mind,
+and scheduler state. The state reports phase, completed pass attempts, consecutive
+pass failures, scheduled delay, a pending-queue sample, and a bounded failure code.
+The sample covers only the configured model/mind at the last completed pass.
+When `pending_sample_capped` is true, the count is a lower bound. It is unknown while
+a pass runs or fails. The delay is the scheduled interval, not a live countdown.
+These observations do not establish full component readiness or successful candidate
+admission. Normal session-end formation can run alongside recovery; atomic completion
+resolves races.
 
 Capture-policy v2 binds operation identities to the mind, retained source evidence,
 and configured extractor. Retry-time counters and wall-clock dates are excluded

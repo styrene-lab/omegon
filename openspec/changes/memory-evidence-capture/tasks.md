@@ -12,7 +12,7 @@
 - [x] Validate classified candidates with fake extraction; reject malformed siblings, fabricated references, and supplied authority fields.
 - [x] Persist a typed source frontier and pending episode before inference; complete candidates atomically with unchanged evidence, FTS updates, vector invalidation, and replay receipts.
 - [x] Verify reopen and JSONL round-trip, pending-to-complete import, corruption errors, rejected completion, and rollback after receipt failure.
-- [ ] Implement interval/pre-eviction checkpoints and continuous durable scheduling; bounded startup recovery is tracked in section 5.
+- [ ] Implement interval/pre-eviction checkpoints; startup recovery and continuous pending-work scheduling are tracked in sections 5–6.
 
 ## 3. Bounded lifecycle and verification
 <!-- specs: memory/formation -->
@@ -41,3 +41,12 @@
 - [x] Verify SQLite reopen, completed-record exclusion, overflow preservation, corrupt inventory errors, and backend parity.
 - [x] Verify fresh-owner repeat behavior and managed shutdown cancellation without sleeps.
 - [x] Complete landing gates, same-executor review, and verification-wave-5-recovery.md.
+
+## 6. Wave 5C continuous pending-work scheduling
+<!-- specs: memory/formation -->
+
+- [x] RED: Reproduce the ninth pending checkpoint requiring another startup after the initial eight-record pass.
+- [x] GREEN: Add serial bounded passes, idle polling, capped failure backoff, and read-only scheduler observations through hosted memory_query.
+- [x] Verify paused-clock idle discovery, backlog progression, timeout cleanup, backoff/reset, and cancellation during waits.
+- [x] Verify SQLite-backed overflow progression, feature-drop cancellation, and startup/shutdown regressions.
+- [x] Complete final gates and same-executor review in verification-wave-5-scheduler.md.

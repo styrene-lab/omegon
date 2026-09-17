@@ -59,6 +59,9 @@ rescheduling of such records remains Wave 5 scope.
 
 ## Wave 5C bounded startup recovery
 
+This section records the initial accepted slice. The continuous scheduler below
+supersedes its one-pass lifetime and later-startup-only overflow behavior.
+
 The first recovery slice inventories pending formation envelopes directly from the
 storage owner. Filter by mind, pending state, and exact configured extraction model
 before applying an eight-record bound. Order by creation time and ID. Completed
@@ -83,3 +86,30 @@ do not silently reroute old checkpoints. Unavailable terminal outcomes retain th
 existing meaning and are not retried here. Continuous scheduling, interval/pre-eviction
 capture, retry/backoff state, and full readiness/backpressure projection remain open.
 No schema or formation-envelope migration is needed for this slice.
+
+## Wave 5C continuous pending-work scheduler
+
+Keep one owned recovery worker per feature instance. Start its first pass immediately,
+then schedule from completion time rather than accumulating missed timer ticks.
+Each pass retains the eight-record bound and 120-second deadline. After successful
+completion, take another bounded pending inventory sample. A nonempty sample schedules
+the next pass after one second; an empty sample schedules it after 60 seconds.
+
+Failed or timed-out passes retain pending evidence and back off for 60, 120, 240,
+480, then at most 900 seconds. A successful pass resets the failure streak. This
+policy retries pass-level storage/concurrency failures and interruptions. Existing
+terminal Unavailable extraction outcomes are not reopened. Queue state is the durable
+episode envelope; scheduling delays and telemetry are process-local. Restart begins
+with an immediate bounded pass.
+
+Use a latest-value watch channel for content-free runtime observations. Hosted
+memory_query exposes enablement, mind, phase, completed pass attempts, failure streak,
+scheduled delay, pending sample/cap, and a bounded failure code in its structured
+details. A sample is limited to the configured model/mind and is not a live total.
+Clear it when a pass begins, so failed inventory does not appear as an empty queue.
+Full cross-component readiness and admission backpressure remain separate contracts.
+
+Managed shutdown cancels the worker during work or timer wait and joins its thread.
+Feature drop signals cancellation as a fallback. The existing session-end formation
+path remains independently owned; concurrent completion is resolved by the domain's
+pending-to-terminal precondition. No provider-call exactly-once guarantee is added.
