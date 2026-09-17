@@ -1009,6 +1009,9 @@ done
         )
         .unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        // Allow real process scheduling and pipe I/O on loaded hosts. The fixture
+        // still withholds initialize forever, so consuming the entire startup
+        // budget there must fail even with this more generous watchdog.
         let manifest = toml::from_str(
             r#"
 [extension]
@@ -1018,7 +1021,7 @@ version = "0.1.0"
 type = "native"
 binary = "fixture.sh"
 [startup]
-timeout_ms = 200
+timeout_ms = 2000
 "#,
         )
         .unwrap();
