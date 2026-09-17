@@ -72,6 +72,19 @@ evidence-item and byte bounds, including explicit truncation. A source frontier
 identifies the observed replay boundary; it does not claim every prior event was
 retained in the bounded excerpt. The canonical session log remains the source owner.
 
+Before pressure, overflow, feature-requested, or manual compaction, the host awaits
+an optional feature checkpoint hook. Aggressive decay also invokes it before
+tightening the context window. Memory can persist a snapshot immediately, without
+waiting for the eight-turn interval or running inference. The host gives published
+features a shared ten-second wait budget and propagates cancellation.
+
+Memory reports `persisted` only after the storage acknowledgment, `not_applicable`
+when there is no substantive evidence, or `unavailable` with a bounded reason.
+An occupied interval-worker slot reports `capture_busy` rather than allocating more
+work. Missing sources, storage failure, and timeout do not veto optional-memory
+compaction or claim successful capture. Canonical session records remain retained.
+Timed-out capture stays owned until it settles; synchronous replay cannot be preempted.
+
 Source evidence is committed before inference. A separate atomic
 `CompleteFormation` mutation updates candidates and extraction status without
 replacing evidence. Episode search, stale-vector invalidation, and the operation
@@ -91,8 +104,7 @@ second. An empty queue is checked again after 60 seconds, including work committ
 after startup. Pass failures or timeouts use exponential backoff from 60 seconds
 to a 15-minute maximum. Success resets backoff. Pending work survives restart;
 the scheduler's timers and failure streak are process-local and restart immediately.
-Pre-eviction checkpoints, incremental coverage, and broader queue-admission
-backpressure remain planned.
+Incremental coverage and broader queue-admission backpressure remain planned.
 
 Managed shutdown cancels and joins the recovery task. Cancellation before completion
 leaves pending evidence intact. A completed extraction and its receipt commit
@@ -116,6 +128,10 @@ resolves races.
 Hosted `memory_query` also exposes `details.evidence_checkpoint`: the event interval,
 capped turns-since-request counter, whether capture is due, and whether its worker
 is running. These are admission observations, not durable-completion acknowledgments.
+Its `last_pre_eviction` field reports the last memory-hook outcome. A persisted
+outcome acknowledges a bounded snapshot, not complete historical coverage. A null
+value means no completed observation is available for that attempt; it must not be
+interpreted as successful capture. This field is not a ledger of every compaction.
 The capture worker participates in managed cancellation/join and feature-drop
 cancellation. Capture requests use the managed storage boundary and cancel outstanding
 requests when dropped. Synchronous replay validation is not a preemptible operation.

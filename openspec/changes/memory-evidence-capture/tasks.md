@@ -12,7 +12,7 @@
 - [x] Validate classified candidates with fake extraction; reject malformed siblings, fabricated references, and supplied authority fields.
 - [x] Persist a typed source frontier and pending episode before inference; complete candidates atomically with unchanged evidence, FTS updates, vector invalidation, and replay receipts.
 - [x] Verify reopen and JSONL round-trip, pending-to-complete import, corruption errors, rejected completion, and rollback after receipt failure.
-- [ ] Implement pre-eviction checkpoints and incremental coverage; interval snapshots and recovery scheduling are tracked in sections 5–7.
+- [ ] Complete incremental evidence coverage; recovery, interval snapshots, and awaited pre-compaction capture are tracked in sections 5–8.
 
 ## 3. Bounded lifecycle and verification
 <!-- specs: memory/formation -->
@@ -59,3 +59,12 @@
 - [x] Verify configured pending capture without inference, repeated-source replay, SQLite reopen, and unavailable-source rejection.
 - [x] Verify coalesced due pressure, read-only observations, and managed shutdown joining the worker slot.
 - [x] Complete final gates and same-executor review in verification-wave-5-checkpoints.md.
+
+## 8. Wave 5C awaited pre-compaction checkpoints
+<!-- specs: memory/formation -->
+
+- [x] RED: Reproduce absent durable acknowledgment before interval/session finalization through the default optional hook.
+- [x] GREEN: Add the compatible Feature hook and invoke it before pressure, overflow, requested/manual compaction, and aggressive decay.
+- [x] Verify persistence acknowledgment, read-only outcome reporting, occupied-slot degradation, and unchanged interval behavior.
+- [x] Verify awaited ordering, published-feature admission, shared timeout/cancellation, optional absence, and outcome serialization.
+- [x] Complete shared-contract/reverse-dependent gates and same-executor review in verification-wave-5-pre-eviction.md.

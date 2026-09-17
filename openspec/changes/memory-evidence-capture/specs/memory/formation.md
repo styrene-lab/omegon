@@ -192,3 +192,38 @@ And managed shutdown cancels and joins the occupied slot
 Given the bound source cannot be replayed
 When an interval capture worker attempts to read it
 Then it returns failure without persisting a fabricated evidence episode
+
+### Requirement: Compaction awaits optional evidence checkpoint acknowledgment
+
+Host compaction and aggressive-decay entrypoints SHALL await published feature
+checkpoint hooks before applying their context reduction. Hooks SHALL use a shared
+bounded wait and explicit persistence, absence, or unavailability outcomes. Optional
+memory failure SHALL NOT veto compaction or fabricate a persistence acknowledgment.
+
+#### Scenario: Snapshot persists before eviction
+Given a bound session has committed evidence but has not reached the interval
+When the pre-eviction memory hook is awaited
+Then it acknowledges persistence only after the durable snapshot write
+And the snapshot survives reopening the store
+
+#### Scenario: Host waits for the checkpoint hook
+Given a published feature is awaiting checkpoint acknowledgment
+When the host prepares context eviction
+Then the following eviction action waits for that acknowledgment or the bounded deadline
+
+#### Scenario: Optional hook reaches its deadline
+Given an optional checkpoint hook does not finish within the shared ten-second budget
+When the deadline expires
+Then its wait is dropped and child cancellation is signaled
+And compaction may proceed without claiming persistence
+
+#### Scenario: Feature has not been published
+Given a registered feature is not in the published contribution graph
+When the host prepares context eviction
+Then it does not invoke that feature's checkpoint hook
+
+#### Scenario: Interval capture already owns the worker slot
+Given a memory capture worker is still active
+When a pre-eviction memory checkpoint is requested
+Then it reports unavailable with capture_busy
+And it does not create another capture worker or label the old snapshot as a new acknowledgment

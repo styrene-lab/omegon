@@ -144,3 +144,29 @@ pre-eviction acknowledgment remain follow-up contracts.
 
 Hosted memory_query reports the interval, capped event counter, due state, and worker
 activity. It does not equate task admission or a finished thread with durable success.
+
+## Wave 5C awaited pre-compaction checkpoints
+
+Add an optional async Feature hook with a default NotApplicable outcome. Shared
+traits own its renderer-neutral outcome vocabulary: NotApplicable, Persisted, or
+Unavailable with a reason. Existing implementors remain source-compatible through
+the default. The event bus invokes only published features and applies one shared
+ten-second deadline, cancelling child tokens on return or timeout.
+
+Invoke the hook before the compaction provider can commit its canonical replacement,
+not merely before the in-memory conversation projection is updated. Cover automatic
+pressure, overflow, feature-requested compaction, manual control/runtime entrypoints,
+and aggressive decay. Optional memory unavailability does not veto compaction.
+
+Memory reuses its single owned capture slot and capture-policy v2 receipts. A busy
+slot reports Unavailable rather than adding work or treating an older snapshot as
+acknowledgment of a new request. A oneshot acknowledgment comes after the managed
+storage result. Empty evidence is NotApplicable; source/storage failure is Unavailable.
+Wait cancellation signals the worker and leaves its handle owned for managed cleanup.
+Synchronous replay itself remains non-preemptible.
+
+Hosted memory_query records the last memory-hook outcome in evidence_checkpoint.
+Clear its prior observation before awaiting a new attempt, so a dropped/expired
+hook cannot retain an old Persisted label as the new result. A persisted snapshot
+still obeys bounded excerpt and explicit truncation semantics; complete incremental
+coverage remains open. No persisted schema or extraction authority changes are made.
