@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Compaction and aggressive decay now await optional, published feature checkpoint hooks under a shared deadline. Memory acknowledges a durable bounded snapshot or reports unavailable capture, reusing its owned worker and receipts; optional memory failure does not block compaction.
+
 - Hosted memory now captures bounded committed-evidence snapshots every eight turn-end notifications before session finalization. A single interval worker coalesces scheduling pressure, replays identical captures, and leaves extraction to background recovery; `memory_query` reports capture admission state.
 
 - Pending memory extraction now progresses through continuous bounded recovery passes, with idle polling and capped retry backoff. Hosted `memory_query` exposes content-free scheduler observations. Managed shutdown joins the worker, and feature drop signals cancellation.

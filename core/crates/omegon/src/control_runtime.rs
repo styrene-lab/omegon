@@ -2866,6 +2866,10 @@ pub async fn context_compact_response(
                 reason: retention_reason.clone(),
             },
         ));
+        runtime_state
+            .bus
+            .before_context_eviction(tokio_util::sync::CancellationToken::new())
+            .await;
         let compact_result = if let Some(authority) = authority_compaction.as_ref() {
             crate::session_execution::boot_execution_binding()
                 .compact_scoped(

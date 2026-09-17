@@ -6209,6 +6209,7 @@ fn build_tui_secret_readiness_snapshot(
                     .await;
                 if let Ok(Some(plan)) = planning {
                     let payload = &plan.payload;
+                    runtime_state.bus.before_context_eviction(CancellationToken::new()).await;
                     match session_execution::boot_execution_binding()
                         .compact(bridge_guard.as_ref(), payload, &stream_options)
                         .await

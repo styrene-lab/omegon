@@ -127,6 +127,7 @@ pub struct MemoryFeature {
     recovery_status: tokio::sync::watch::Sender<recovery::Status>,
     checkpoint_turns: u32,
     checkpoint_task: Option<SessionEndTask>,
+    last_pre_eviction: Option<omegon_traits::ContextCheckpointOutcome>,
     status_root: std::path::PathBuf,
 }
 
@@ -167,6 +168,7 @@ impl MemoryFeature {
             recovery_status: tokio::sync::watch::channel(recovery::Status::default()).0,
             checkpoint_turns: 0,
             checkpoint_task: None,
+            last_pre_eviction: None,
             status_root: std::env::current_dir().unwrap_or_default(),
         }
     }
@@ -1870,6 +1872,13 @@ Also use it when you notice a gap — if you're unsure whether something was alr
         }
     }
 
+    async fn before_context_eviction(
+        &mut self,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> omegon_traits::ContextCheckpointOutcome {
+        checkpoint::before_eviction(self, cancel).await
+    }
+
     async fn prepare_managed_shutdown(&mut self) -> anyhow::Result<()> {
         let (mut tasks, mut failures) = {
             let mut state = self.session_end_tasks.lock().unwrap();
@@ -2437,6 +2446,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pre_eviction_checkpoint_acknowledges_durable_snapshot_without_interval() {
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        let (_authority, _, _, _) = crate::session_replay::test_open_joined_request(&dir);
+        let binding = crate::session_consumers::DeferredSessionViewBinding::default();
+        binding.bind(crate::session_consumers::SessionViewBinding::new(
+            dir.path().join("session.json"),
+            "fixture-session".into(),
+        ));
+        feature = feature.with_session_binding(binding);
+        let outcome = feature
+            .before_context_eviction(CancellationToken::new())
+            .await;
+        let report = feature
+            .execute(
+                "memory_query",
+                "pre-eviction-report",
+                serde_json::json!({}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            report.details["evidence_checkpoint"]["last_pre_eviction"]["state"],
+            "persisted"
+        );
+        feature.prepare_managed_shutdown().await.unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert_eq!(outcome, omegon_traits::ContextCheckpointOutcome::Persisted);
+        use omegon_memory::MemoryBackend;
+        let store = omegon_memory::SqliteBackend::open(&dir.path().join("facts.db")).unwrap();
+        assert_eq!(store.list_episodes("test", 8).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
     async fn startup_recovery_shutdown_cancels_extraction_and_retains_pending() {
         struct Waiting {
             entered: tokio::sync::Notify,
@@ -2533,6 +2580,15 @@ mod tests {
             checkpoint::on_turn(&mut feature);
         }
         assert_eq!(feature.checkpoint_turns, 8);
+        let outcome = feature
+            .before_context_eviction(CancellationToken::new())
+            .await;
+        assert_eq!(
+            outcome,
+            omegon_traits::ContextCheckpointOutcome::Unavailable {
+                reason: "capture_busy".into()
+            }
+        );
         let report = feature
             .execute(
                 "memory_query",
