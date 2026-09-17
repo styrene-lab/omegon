@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Hosted memory now captures bounded committed-evidence snapshots every eight turn-end notifications before session finalization. A single interval worker coalesces scheduling pressure, replays identical captures, and leaves extraction to background recovery; `memory_query` reports capture admission state.
+
 - Pending memory extraction now progresses through continuous bounded recovery passes, with idle polling and capped retry backoff. Hosted `memory_query` exposes content-free scheduler observations. Managed shutdown joins the worker, and feature drop signals cancellation.
 
 - Hosted memory now resumes a bounded batch of pending extraction checkpoints on session startup using retained evidence and the recorded model. Completed work is excluded, overflow remains durable, and managed shutdown cancels recovery without falsely completing checkpoints.

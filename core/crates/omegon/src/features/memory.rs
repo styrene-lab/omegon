@@ -89,6 +89,7 @@ impl std::fmt::Display for MemoryFeatureInvokeError {
 
 impl std::error::Error for MemoryFeatureInvokeError {}
 
+mod checkpoint;
 pub(crate) mod confirmation;
 mod formation;
 mod lifecycle;
@@ -124,6 +125,8 @@ pub struct MemoryFeature {
     session_end_tasks: Arc<Mutex<SessionEndTaskState>>,
     recovery_started: bool,
     recovery_status: tokio::sync::watch::Sender<recovery::Status>,
+    checkpoint_turns: u32,
+    checkpoint_task: Option<SessionEndTask>,
     status_root: std::path::PathBuf,
 }
 
@@ -136,6 +139,9 @@ impl Drop for MemoryFeature {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         for task in &tasks.tasks {
+            task.cancellation.cancel();
+        }
+        if let Some(task) = &self.checkpoint_task {
             task.cancellation.cancel();
         }
     }
@@ -159,6 +165,8 @@ impl MemoryFeature {
             session_end_tasks: Arc::new(Mutex::new(SessionEndTaskState::default())),
             recovery_started: false,
             recovery_status: tokio::sync::watch::channel(recovery::Status::default()).0,
+            checkpoint_turns: 0,
+            checkpoint_task: None,
             status_root: std::env::current_dir().unwrap_or_default(),
         }
     }
@@ -999,7 +1007,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         content: vec![ContentBlock::Text {
                             text: "No facts in memory.".into(),
                         }],
-                        details: serde_json::json!({ "count": 0, "formation_recovery": {"enabled":self.extractor.is_some(),"mind":self.mind,"status":self.recovery_status.borrow().clone()} }),
+                        details: serde_json::json!({ "count": 0, "formation_recovery": {"enabled":self.extractor.is_some(),"mind":self.mind,"status":self.recovery_status.borrow().clone()}, "evidence_checkpoint":checkpoint::status(self) }),
                     });
                 }
 
@@ -1057,7 +1065,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     content: vec![ContentBlock::Text {
                         text: lines.join("\n"),
                     }],
-                    details: serde_json::json!({ "count": facts.len(), "sections": sections.len(), "inventory_only": facts.len() > large_store_threshold, "formation_recovery": {"enabled":self.extractor.is_some(),"mind":self.mind,"status":self.recovery_status.borrow().clone()} }),
+                    details: serde_json::json!({ "count": facts.len(), "sections": sections.len(), "inventory_only": facts.len() > large_store_threshold, "formation_recovery": {"enabled":self.extractor.is_some(),"mind":self.mind,"status":self.recovery_status.borrow().clone()}, "evidence_checkpoint":checkpoint::status(self) }),
                 })
             }
             crate::tool_registry::memory::MEMORY_ARCHIVE => {
@@ -1716,6 +1724,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
         match event {
             BusEvent::SessionStart { session_id, .. } => {
                 *self.session_id.lock().unwrap() = Some(session_id.clone());
+                self.checkpoint_turns = 0;
                 if !self.recovery_started
                     && self.memory_binding.available()
                     && let Some(extractor) = self.extractor.clone()
@@ -1752,6 +1761,10 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         }
                     }
                 }
+                Vec::new()
+            }
+            BusEvent::TurnEnd(_) => {
+                checkpoint::on_turn(self);
                 Vec::new()
             }
             BusEvent::ToolEnd { name, is_error, .. }
@@ -1858,13 +1871,16 @@ Also use it when you notice a gap — if you're unsure whether something was alr
     }
 
     async fn prepare_managed_shutdown(&mut self) -> anyhow::Result<()> {
-        let (tasks, mut failures) = {
+        let (mut tasks, mut failures) = {
             let mut state = self.session_end_tasks.lock().unwrap();
             state.accepting = false;
             let tasks = std::mem::take(&mut state.tasks);
             let failures = std::mem::take(&mut state.failures);
             (tasks, failures)
         };
+        if let Some(task) = self.checkpoint_task.take() {
+            tasks.push(task);
+        }
         for task in &tasks {
             task.cancellation.cancel();
         }
@@ -2343,6 +2359,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn interval_checkpoint_persists_committed_evidence_before_session_end() {
+        struct NoInference;
+        #[async_trait::async_trait]
+        impl formation::Extractor for NoInference {
+            fn model(&self) -> &str {
+                "checkpoint-fixture"
+            }
+            async fn extract(&self, _: &str) -> anyhow::Result<String> {
+                panic!("capture must not run inference")
+            }
+        }
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        let (_authority, _, _, _) = crate::session_replay::test_open_joined_request(&dir);
+        let binding = crate::session_consumers::DeferredSessionViewBinding::default();
+        binding.bind(crate::session_consumers::SessionViewBinding::new(
+            dir.path().join("session.json"),
+            "fixture-session".into(),
+        ));
+        feature = feature.with_session_binding(binding);
+        feature.extractor = Some(Arc::new(NoInference));
+        for _ in 0..2 {
+            for turn in 0..8 {
+                feature.on_event(&BusEvent::TurnEnd(Box::new(
+                    omegon_traits::BusEventTurnEnd {
+                        turn,
+                        model: None,
+                        provider: None,
+                        estimated_tokens: 0,
+                        context_window: 0,
+                        context_composition: Default::default(),
+                        actual_input_tokens: 0,
+                        actual_output_tokens: 0,
+                        cache_read_tokens: 0,
+                        provider_telemetry: None,
+                        dominant_phase: None,
+                        drift_kind: None,
+                        progress_signal: Default::default(),
+                    },
+                )));
+                if turn < 7 {
+                    assert!(feature.checkpoint_task.is_none());
+                }
+            }
+            let task = feature
+                .checkpoint_task
+                .take()
+                .expect("interval checkpoint worker");
+            tokio::task::spawn_blocking(move || task.handle.join())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+        }
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        use omegon_memory::MemoryBackend;
+        let store = omegon_memory::SqliteBackend::open(&dir.path().join("facts.db")).unwrap();
+        let episodes = store.list_episodes("test", 8).await.unwrap();
+        assert_eq!(
+            episodes.len(),
+            1,
+            "committed evidence must persist before SessionEnd"
+        );
+        let evidence = episodes[0].formation.as_ref().unwrap();
+        assert!(!evidence.evidence.is_empty());
+        assert!(matches!(
+            evidence.source,
+            omegon_memory::FormationSource::Available { .. }
+        ));
+        assert!(
+            matches!(&evidence.extraction,omegon_memory::ExtractionOutcome::Pending {model} if model=="checkpoint-fixture")
+        );
+    }
+
+    #[tokio::test]
     async fn startup_recovery_shutdown_cancels_extraction_and_retains_pending() {
         struct Waiting {
             entered: tokio::sync::Notify,
@@ -2410,6 +2504,95 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn interval_checkpoint_coalesces_pressure_and_shutdown_joins_single_slot() {
+        let (mut feature, mut bus, _dir) = managed_feature().await;
+        let cancellation = CancellationToken::new();
+        let worker = cancellation.clone();
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let handle = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async {
+                let _ = entered.send(());
+                worker.cancelled().await;
+            });
+            Ok(())
+        });
+        let id = handle.thread().id();
+        feature.checkpoint_task = Some(SessionEndTask {
+            cancellation,
+            handle,
+        });
+        started.await.unwrap();
+        for _ in 0..100 {
+            checkpoint::on_turn(&mut feature);
+        }
+        assert_eq!(feature.checkpoint_turns, 8);
+        let report = feature
+            .execute(
+                "memory_query",
+                "checkpoint-pressure",
+                serde_json::json!({}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(report.details["evidence_checkpoint"]["capture_due"], true);
+        assert_eq!(
+            report.details["evidence_checkpoint"]["worker_running"],
+            true
+        );
+        assert_eq!(
+            feature
+                .checkpoint_task
+                .as_ref()
+                .unwrap()
+                .handle
+                .thread()
+                .id(),
+            id
+        );
+        feature.prepare_managed_shutdown().await.unwrap();
+        checkpoint::on_turn(&mut feature);
+        assert!(feature.checkpoint_task.is_none());
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
+    async fn interval_checkpoint_unavailable_source_does_not_fabricate_episode() {
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        let binding = crate::session_consumers::DeferredSessionViewBinding::default();
+        binding.bind(crate::session_consumers::SessionViewBinding::new(
+            dir.path().join("missing-session.json"),
+            "fixture-session".into(),
+        ));
+        feature = feature.with_session_binding(binding);
+        for _ in 0..8 {
+            checkpoint::on_turn(&mut feature);
+        }
+        let task = feature.checkpoint_task.take().unwrap();
+        let result = tokio::task::spawn_blocking(move || task.handle.join())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(result.is_err());
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        use omegon_memory::MemoryBackend;
+        let store = omegon_memory::SqliteBackend::open(&dir.path().join("facts.db")).unwrap();
+        assert!(store.list_episodes("test", 8).await.unwrap().is_empty());
     }
 
     #[tokio::test]
