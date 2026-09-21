@@ -20,6 +20,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 - CI now serializes main-crate tests to respect process-global fixture isolation, with a matching integration-job time budget. Delegate process tests use checked-in executable fixtures to avoid Linux executable-write races.
 
+- Composition surface baselines now account for the four admitted memory tools and applicability schemas in the Wave 5 prerequisite stack. Recorded Linux artifact evidence and budget regressions preserve existing growth allowances and reduced-host limits.
+
 - Memory status now reports storage, extraction, embedding, and indexing readiness independently without provider probes. Schema v14 preserves version- and attempt-bound indexing failures across restart, completes compatible vector writes atomically, and supports bounded repair without reinforcing facts.
 
 - Memory evaluation now provides time-filtered synthetic cases, stage-attributed paired policy reports, and an opt-in live runner with one aggregate token/deadline budget. Reports retain unknown costs, incomplete provider execution, and frozen smoke thresholds instead of treating unavailable runs as quality success.

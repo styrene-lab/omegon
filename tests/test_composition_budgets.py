@@ -105,6 +105,57 @@ class AggregateCompositionBudgetScenarios(unittest.TestCase):
                 self.assertEqual(len(failures), 1)
                 self.assertIn(metric, failures[0])
 
+    def test_wave5_measured_surface_and_existing_headroom(self) -> None:
+        evidence = json.loads(
+            (ROOT / "fixtures/composition-wave5-surface-v1.json").read_text()
+        )
+        schema_owners = evidence["model_schema_tokens"]
+        capabilities = evidence["callable_capabilities"]
+        self.assertEqual(len(capabilities), len(set(capabilities)))
+        self.assertNotIn("tool:memory_apply_confirmation", capabilities)
+        changes = evidence["memory_schema_changes"]
+        added = {name for name, cost in changes.items() if cost["before"] == 0}
+        self.assertEqual(added, {
+            "memory_confirm", "memory_inspect", "memory_set_applicability", "memory_selection"
+        })
+        self.assertTrue({f"tool:{name}" for name in added} <= set(capabilities))
+        self.assertEqual(sum(cost["after"] - cost["before"] for cost in changes.values()), 666)
+        # Retain the 13-token reduction relative to the old aggregate baseline.
+        self.assertEqual(sum(schema_owners.values()), 8019 + 666 - 13)
+        self.assertEqual(len(capabilities), 64 + len(added))
+
+        measurement = self.baseline_measurement()
+        measurement["target"] = evidence["evidence"]["target"]
+        full = measurement["artifact_rows"]["full-product"]
+        observed = {
+            "model_schema_tokens": schema_owners,
+            "callable_capability_count": {name: 1 for name in capabilities},
+        }
+        for metric, owners in observed.items():
+            full["owners"][metric] = owners
+            full["metrics"][metric] = sum(owners.values())
+        self.assertEqual(self.budgets.enforce_artifacts(measurement, self.policy), [])
+
+        old_policy = json.loads(json.dumps(self.policy))
+        for metric, baseline in (("model_schema_tokens", 8019), ("callable_capability_count", 64)):
+            old_policy["artifact_rows"]["full-product"][metric]["baseline"] = baseline
+        failures = self.budgets.enforce_artifacts(measurement, old_policy)
+        self.assertEqual(len(failures), 2)
+        for metric, allowance, legacy_metric in (
+            ("model_schema_tokens", 128, "model_schema_tokens"),
+            ("callable_capability_count", 1, "default_callable_capabilities"),
+        ):
+            approved = self.policy["artifact_rows"]["full-product"][metric]
+            self.assertEqual(approved, {
+                "baseline": full["metrics"][metric], "max_delta": allowance
+            })
+            self.assertEqual(self.policy["profiles"]["normal"][legacy_metric], approved)
+            for name in ("kernel-only", "kernel+codescan"):
+                self.assertEqual(self.policy["artifact_rows"][name][metric], {
+                    "baseline": 0 if metric == "model_schema_tokens" else 3,
+                    "max_delta": 0,
+                })
+
     def test_missing_or_malformed_owner_diagnostics_are_rejected(self) -> None:
         measurement = self.baseline_measurement()
         del measurement["artifact_rows"]["full-product"]["owners"]["model_schema_tokens"]

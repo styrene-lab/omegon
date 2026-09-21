@@ -657,6 +657,44 @@ dependency, installed-byte, sidecar-byte, or process delta must belong to
 explicit baseline-plus-delta budgets for the other metrics. Non-release source
 profiles collect and validate evidence without applying release byte ceilings.
 
+### Memory Wave 5 surface baseline
+
+`fixtures/composition-wave5-surface-v1.json` retains the changed-surface evidence
+from CI run `35655580961`, revision `39ac5ef1`. The Linux release artifact ladder
+measured 8,672 model-schema tokens and 68 callable capabilities in `full-product`.
+The fixture contains the runtime schema-owner map and complete callable inventory.
+It is a historical measurement, not a substitute for the live artifact gate.
+
+The prerequisite memory changes intentionally added four admitted capabilities:
+
+| Capability | Introducing commit | Estimated schema tokens |
+|---|---|---:|
+| `memory_confirm` | `10ca0293` | 69 |
+| `memory_inspect` | `147db2fb` | 72 |
+| `memory_set_applicability` | `869d1d8c` | 245 |
+| `memory_selection` | `272035ff` | 64 |
+
+Applicability also adds 143 tokens to `memory_store` and 73 to `memory_recall`.
+These source-derived costs use the runtime estimator: UTF-8 byte lengths of the
+name, description, and compact JSON parameters, divided by four per tool.
+The admitted memory owner grows from 709 to 1,375 tokens, a 666-token increase.
+The measured aggregate increases by 653 against the previous 8,019-token baseline.
+The refreshed baseline retains that 13-token difference instead of adding the
+entire memory delta to the old aggregate.
+
+The callable inventory contains each new tool once. Internal
+`memory_apply_confirmation` remains absent, as do the previously unadmitted
+`memory_connect`, `memory_search_archive`, and `memory_ingest_lifecycle` tools.
+Changes to unadmitted schemas do not contribute to these costs.
+
+The `full-product` and equivalent legacy `normal` surface baselines use the
+measured totals. Their existing allowances remain 128 tokens and one capability.
+Kernel, additive sidecar, resident, startup, dependency, process, and byte budgets
+retain their existing limits. Budget tests replay the measured surface, reproduce
+both failures against the old policy, and reject costs above the refreshed limits.
+Future surface baseline updates need measured owner evidence, an explanation of
+the intended capabilities, and rejection coverage for each changed metric.
+
 To extract another optional domain, add an `extracted_domains` declaration and
 its accumulated artifact row to the composition matrix and ladder. The
 declaration names one canonical service identity, one canonical extension
