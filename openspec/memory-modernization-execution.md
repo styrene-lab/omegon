@@ -338,6 +338,20 @@ enabling broader semantic admission.
 
 **Corpus:** [memory-maintenance-revalidation](changes/memory-maintenance-revalidation/proposal.md).
 
+**Post-Wave-5 entry:** The [drift assessment](changes/memory-maintenance-revalidation/assessment.md)
+uses integrated `main` at `7b2da402`. Extend existing dormancy planning, applicability,
+provenance inspection, transport, and mutation receipts. New work is evidence-versus-
+attention policy, versioned maintenance, and durable source revalidation. Age-based
+eligibility and cache deadlines must change together; duplicate/reference writes
+need an explicit compatibility policy rather than another retrieval-only refactor.
+
+**Delivery:** `feat/memory-wave7-revalidation` is a sibling planning seed from main,
+not proof that Wave 6 is complete. Record accepted Wave 6 source-independence and
+correction contracts before correction-capable integration. Freeze 7A policy and
+shared DTOs before parallel readers/fixtures/runtime work; keep one schema/backend
+owner. Wave 8 consumes the accepted evidence/usage/validity policy slice, not the
+whole revalidation scheduler.
+
 **Scope:** Separate confidence, freshness, salience, validity, and retention. Migrate
 legacy metadata without inventing verification. Detect source changes, schedule
 bounded revalidation, and apply versioned maintenance plans. Preserve history.
@@ -347,6 +361,12 @@ do not increase evidence confidence. Expired workarounds leave current guidance 
 remain historically searchable. Source-read failure preserves state and verification
 time. A newer correction defeats a stale maintenance plan.
 
+Preserve existing archive-search behavior while adding an explicit retained-history
+contract for Active-but-expired records, including as-of applicability. Imported
+metadata must not claim local scan completion. Incomplete reads, path denial,
+truncation, and exhausted budgets preserve uncertainty rather than advance checked
+or verified time.
+
 **Adversarial review:** Advance fake clocks across policy boundaries. Repeatedly
 access an incorrect fact. Change an unrelated source. Temporarily remove vault access.
 Apply a plan after correction and repeat it after restart. Ensure missing sources
@@ -355,6 +375,11 @@ and high usage are not treated as proof of falsehood or truth.
 **Exit:** Retention/revalidation contracts pass, including transport and reopen.
 Evaluation meets frozen stale-guidance criteria without unacceptable loss of old
 valid knowledge. Inspection explains each transition and its evidence.
+
+Use new development and held-out stale-guidance/old-valid-knowledge cases. Wave 5's
+synthetic smoke and historical live budget do not establish this quality gate or
+authorize new inference. Refresh migration and resource limits at implementation
+start; preserve serialized main tests and review changed composition surface.
 
 ## Wave 8 — Learn procedures from observed outcomes
 
