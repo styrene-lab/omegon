@@ -1,7 +1,6 @@
 //! Reusable command UI surfaces: panels, toasts, and modal descriptors.
 
 use ratatui::prelude::*;
-use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wrap};
 
@@ -88,7 +87,7 @@ pub fn render_prompt(area: Rect, buf: &mut Buffer, theme: &dyn Theme, prompt: &C
     }
     Clear.render(panel_area, buf);
     let border = match prompt.severity {
-        CommandSeverity::Info => theme.accent(),
+        CommandSeverity::Info => theme.style_ui_border().fg.unwrap_or(theme.border()),
         CommandSeverity::Success => theme.success(),
         CommandSeverity::Warning => theme.warning(),
         CommandSeverity::Error => theme.error(),
@@ -99,11 +98,9 @@ pub fn render_prompt(area: Rect, buf: &mut Buffer, theme: &dyn Theme, prompt: &C
         .border_style(Style::default().fg(border))
         .title(Span::styled(
             format!(" {} ", prompt.title),
-            Style::default()
-                .fg(theme.accent_bright())
-                .add_modifier(Modifier::BOLD),
+            theme.style_ui_title(),
         ))
-        .style(Style::default().bg(theme.card_bg()));
+        .style(theme.style_panel());
     let inner = block.inner(panel_area);
     block.render(panel_area, buf);
     let width = usize::from(inner.width);
@@ -123,10 +120,10 @@ pub fn render_prompt(area: Rect, buf: &mut Buffer, theme: &dyn Theme, prompt: &C
     lines.extend(
         actions
             .into_iter()
-            .map(|text| Line::styled(text, Style::default().fg(theme.accent_bright()))),
+            .map(|text| Line::styled(text, theme.style_ui_title())),
     );
     Paragraph::new(lines)
-        .style(Style::default().fg(theme.fg()).bg(theme.card_bg()))
+        .style(theme.style_panel())
         .render(inner, buf);
 }
 
@@ -211,18 +208,13 @@ fn render_usage_panel_in(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(theme.accent()))
-        .title(Span::styled(
-            format!(" {title} "),
-            Style::default()
-                .fg(theme.accent_bright())
-                .add_modifier(Modifier::BOLD),
-        ))
+        .border_style(theme.style_ui_border())
+        .title(Span::styled(format!(" {title} "), theme.style_ui_title()))
         .title_bottom(Span::styled(
             " Esc close · ↑↓ scroll · ^Y copy ",
-            Style::default().fg(theme.dim()),
+            theme.style_ui_hint(),
         ))
-        .style(Style::default().bg(theme.card_bg()));
+        .style(theme.style_panel());
     let inner = block.inner(panel_area);
     block.render(panel_area, buf);
 
@@ -234,19 +226,17 @@ fn render_usage_panel_in(
         }
         lines.push(Line::from(Span::styled(
             section.title.to_uppercase(),
-            Style::default()
-                .fg(theme.accent_bright())
-                .add_modifier(Modifier::BOLD),
+            theme.style_ui_title(),
         )));
         for (label, value) in &section.metrics {
             lines.push(Line::from(vec![
-                Span::styled(format!("  {label:<22}"), Style::default().fg(theme.dim())),
-                Span::styled(value, Style::default().fg(theme.fg())),
+                Span::styled(format!("  {label:<22}"), theme.style_ui_hint()),
+                Span::styled(value, theme.style_ui_text()),
             ]));
         }
     }
     Paragraph::new(lines)
-        .style(Style::default().fg(theme.fg()).bg(theme.card_bg()))
+        .style(theme.style_panel())
         .wrap(Wrap { trim: false })
         .scroll((panel.scroll, 0))
         .render(inner, buf);
@@ -259,7 +249,7 @@ fn render_panel_in(panel_area: Rect, buf: &mut Buffer, theme: &dyn Theme, panel:
 
     Clear.render(panel_area, buf);
     let border = match panel.severity {
-        CommandSeverity::Info => theme.accent(),
+        CommandSeverity::Info => theme.style_ui_border().fg.unwrap_or(theme.border()),
         CommandSeverity::Success => theme.success(),
         CommandSeverity::Warning => theme.warning(),
         CommandSeverity::Error => theme.error(),
@@ -276,12 +266,10 @@ fn render_panel_in(panel_area: Rect, buf: &mut Buffer, theme: &dyn Theme, panel:
         .border_style(Style::default().fg(border))
         .title(Span::styled(
             format!(" {} ", panel.title),
-            Style::default()
-                .fg(theme.accent_bright())
-                .add_modifier(Modifier::BOLD),
+            theme.style_ui_title(),
         ))
-        .title_bottom(Span::styled(footer, Style::default().fg(theme.dim())))
-        .style(Style::default().bg(theme.card_bg()));
+        .title_bottom(Span::styled(footer, theme.style_ui_hint()))
+        .style(theme.style_panel());
 
     let lines = panel
         .body
@@ -290,7 +278,7 @@ fn render_panel_in(panel_area: Rect, buf: &mut Buffer, theme: &dyn Theme, panel:
         .collect::<Vec<_>>();
     Paragraph::new(lines)
         .block(block)
-        .style(Style::default().fg(theme.fg()).bg(theme.card_bg()))
+        .style(theme.style_panel())
         .wrap(Wrap { trim: false })
         .scroll((panel.scroll, 0))
         .render(panel_area, buf);

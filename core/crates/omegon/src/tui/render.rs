@@ -919,7 +919,7 @@ impl App {
                     fields.push(format!("thinking {thinking}"));
                 }
                 for field in fields.into_iter().filter(|v| !v.is_empty()) {
-                    let span = Span::styled(format!("· {field} "), t.style_dim());
+                    let span = Span::styled(format!("· {field} "), t.style_ui_hint());
                     if spans.iter().map(Span::width).sum::<usize>() + span.width() <= budget {
                         spans.push(span);
                     }
@@ -936,14 +936,15 @@ impl App {
                 })
                 .border_type(ratatui::widgets::BorderType::Rounded)
                 .border_style(if framed {
-                    t.style_dim()
+                    t.style_ui_border()
                 } else {
                     Style::default().fg(intent_color).bg(intent_bg)
                 })
                 .title(editor_title);
             if shell_primed || command_primed {
-                editor_block = editor_block
-                    .title_bottom(Line::styled(hint_text.clone(), t.style_dim()).right_aligned());
+                editor_block = editor_block.title_bottom(
+                    Line::styled(hint_text.clone(), t.style_ui_hint()).right_aligned(),
+                );
             } else if let Some(status) = self.inline_composer_status() {
                 let status = widgets::truncate_str(
                     status,
@@ -951,14 +952,17 @@ impl App {
                     "…",
                 );
                 editor_block = editor_block.title_bottom(
-                    Line::styled(format!(" {status} "), t.style_dim()).right_aligned(),
+                    Line::styled(format!(" {status} "), t.style_ui_hint()).right_aligned(),
                 );
             } else if connected && self.footer_data.context_window > 0 {
                 let capacity = widgets::format_tokens(self.footer_data.context_window);
                 let percent = self.footer_data.context_percent.clamp(0.0, 100.0).round() as u8;
                 editor_block = editor_block.title_bottom(
-                    Line::styled(format!(" {percent}% of {capacity} context "), t.style_dim())
-                        .right_aligned(),
+                    Line::styled(
+                        format!(" {percent}% of {capacity} context "),
+                        t.style_ui_hint(),
+                    )
+                    .right_aligned(),
                 );
             }
 
@@ -991,7 +995,7 @@ impl App {
                         ),
                     ])]
                 } else {
-                    vec![Line::styled(hint_text, t.style_dim())]
+                    vec![Line::styled(hint_text, t.style_ui_hint())]
                 }
             } else {
                 self.editor
@@ -1077,20 +1081,20 @@ impl App {
                         format!("  — {}", row.metadata.join(" · "))
                     };
                     Line::from(vec![
-                        Span::styled(format!(" {}", row.command), t.style_accent()),
-                        Span::styled(format!("  {}", row.description), t.style_muted()),
-                        Span::styled(metadata, t.style_dim()),
-                        Span::styled(badges, t.style_dim()),
+                        Span::styled(format!(" {}", row.command), t.style_ui_text()),
+                        Span::styled(format!("  {}", row.description), t.style_ui_secondary()),
+                        Span::styled(metadata, t.style_ui_hint()),
+                        Span::styled(badges, t.style_ui_hint()),
                     ])
                 })
                 .collect();
 
-            let palette = Paragraph::new(items).block(
+            let palette = Paragraph::new(items).style(t.style_panel()).block(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_type(ratatui::widgets::BorderType::Rounded)
-                    .border_style(t.style_border())
-                    .title(Span::styled(" commands ", t.style_dim())),
+                    .border_style(t.style_ui_border())
+                    .title(Span::styled(" commands ", t.style_ui_title())),
             );
 
             // Clear the area first (prevents bleed-through)

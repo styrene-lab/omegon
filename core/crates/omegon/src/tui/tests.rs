@@ -11695,7 +11695,7 @@ fn native_usability_primary_composer_hint_survives_narrow_width() {
 }
 
 #[test]
-fn terminal_composer_placeholder_is_dim_and_disappears_when_typing() {
+fn terminal_composer_placeholder_uses_hint_role_and_disappears_when_typing() {
     for presentation in [
         TerminalPresentation::Inline,
         TerminalPresentation::Fullscreen,
@@ -11710,11 +11710,12 @@ fn terminal_composer_placeholder_is_dim_and_disappears_when_typing() {
                 .expect("empty editor draw");
             let area = app.editor_area.expect("editor area");
             let cell = &terminal.backend().buffer()[(area.x + 2, area.y + 1)];
-            assert!(
-                cell.modifier.contains(Modifier::DIM),
-                "placeholder must be faint"
+            assert_eq!(Some(cell.fg), app.theme.style_ui_hint().fg);
+            assert_ne!(
+                cell.fg,
+                app.theme.fg(),
+                "placeholder must differ from input"
             );
-            assert_eq!(cell.fg, Color::Reset);
             assert_eq!(cell.bg, Color::Reset);
             assert_eq!(area.height, 3);
             app.editor.set_text("A real message");

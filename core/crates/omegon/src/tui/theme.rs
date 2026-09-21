@@ -1,5 +1,6 @@
 //! Semantic TUI styles. The default inherits the terminal's foreground,
-//! background and ANSI palette. Legacy palettes remain available for explicit
+//! background and ANSI palette, with neutral grey control surfaces. Legacy palettes
+//! remain available for explicit
 //! theme integration; startup does not discover or load a theme file.
 
 use ratatui::style::{Color, Modifier, Style};
@@ -110,12 +111,37 @@ pub trait Theme: Send + Sync {
         Style::default().fg(self.border_dim())
     }
 
+    // Control chrome is separate from conversation/Markdown styling.
+    fn style_panel(&self) -> Style {
+        self.style_fg().bg(self.card_bg())
+    }
+    fn style_selection(&self) -> Style {
+        self.style_accent_bold().bg(self.surface_bg())
+    }
+    fn style_ui_text(&self) -> Style {
+        self.style_fg()
+    }
+    fn style_ui_title(&self) -> Style {
+        self.style_accent_bold()
+    }
+    fn style_ui_secondary(&self) -> Style {
+        self.style_muted()
+    }
+    fn style_ui_hint(&self) -> Style {
+        self.style_dim()
+    }
+    fn style_ui_border(&self) -> Style {
+        self.style_border()
+    }
+
     /// Background colors that widgets may intentionally paint into the final
     /// frame. The TUI has a post-render cleanup pass to normalize accidental
     /// terminal/default-color bleed-through; this list keeps that pass from
     /// erasing deliberate badge, panel, diff, and signal backgrounds.
     fn intentional_backgrounds(&self) -> Vec<Color> {
         vec![
+            self.style_panel().bg.unwrap_or(self.card_bg()),
+            self.style_selection().bg.unwrap_or(self.surface_bg()),
             self.bg(),
             self.surface_bg(),
             self.card_bg(),
@@ -361,16 +387,56 @@ impl Theme for Alpharius {
     }
 }
 
-/// Use SGR default colors for surfaces and the terminal's ANSI palette for signals.
+/// Keep the conversation canvas terminal-native; give controls a neutral hierarchy.
+/// Explicit panel foregrounds keep them readable with either a light or dark canvas.
 pub struct TerminalTheme;
 
 impl Theme for TerminalTheme {
+    fn style_panel(&self) -> Style {
+        self.style_ui_text().bg(Color::Indexed(235))
+    }
+    fn style_selection(&self) -> Style {
+        Style::default()
+            .fg(Color::Indexed(255))
+            .bg(Color::Indexed(240))
+    }
+    fn style_ui_text(&self) -> Style {
+        Style::default().fg(Color::Indexed(252))
+    }
+    fn style_ui_title(&self) -> Style {
+        Style::default()
+            .fg(Color::Indexed(255))
+            .add_modifier(Modifier::BOLD)
+    }
+    fn style_ui_secondary(&self) -> Style {
+        Style::default().fg(Color::Indexed(248))
+    }
+    fn style_ui_hint(&self) -> Style {
+        Style::default().fg(Color::Indexed(244))
+    }
+    fn style_ui_border(&self) -> Style {
+        Style::default().fg(Color::Indexed(244))
+    }
+
     fn finish_frame(&self, buffer: &mut ratatui::buffer::Buffer) {
+        let foregrounds = [
+            self.style_ui_text().fg,
+            self.style_ui_title().fg,
+            self.style_ui_secondary().fg,
+            self.style_ui_hint().fg,
+            self.style_ui_border().fg,
+            self.style_selection().fg,
+        ];
+        let backgrounds = [self.style_panel().bg, self.style_selection().bg];
         for cell in &mut buffer.content {
-            if matches!(cell.fg, Color::Rgb(..) | Color::Indexed(16..=255)) {
+            if matches!(cell.fg, Color::Rgb(..) | Color::Indexed(16..=255))
+                && !foregrounds.contains(&Some(cell.fg))
+            {
                 cell.set_fg(Color::Reset);
             }
-            if matches!(cell.bg, Color::Rgb(..) | Color::Indexed(16..=255)) {
+            if matches!(cell.bg, Color::Rgb(..) | Color::Indexed(16..=255))
+                && !backgrounds.contains(&Some(cell.bg))
+            {
                 cell.set_bg(Color::Reset);
             }
         }

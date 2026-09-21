@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- TUI menus, selectors, command panels, and slash suggestions now use shared grey surface, selection, and text roles. Composer borders and hints are subdued while the conversation canvas retains terminal defaults.
+
 - Inline activity and publication status now sit in the composer frame, keeping working/cancellation hints out of the model response flow.
 
 - Inline assistant replies retain Markdown styling and structure in native scrollback. Prose wraps at word boundaries instead of splitting ordinary words; pending output follows terminal resizing without replaying published rows.

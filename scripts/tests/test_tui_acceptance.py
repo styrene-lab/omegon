@@ -303,6 +303,40 @@ def test_markdown_fixture_holds_all_blocks_before_completion():
         assert not reader.is_alive()
 
 
+def test_control_palette_rejects_missing_roles_stale_selection_and_colored_draft():
+    panel = ("\x1b[0m  \n\x1b[38;5;255;48;5;235mPanel\n"
+             "\x1b[38;5;252mLabel\n\x1b[38;5;255;48;5;240mSelected\n"
+             "\x1b[38;5;248;48;5;235m~2k token budget\n\x1b[38;5;244mEsc closes\x1b[0m\n")
+    captures = {name: panel for name in ("slash", "connect", "settings", "think", "help", "help-panel")}
+    captures.update({"composer": "\x1b[38;5;244mAsk anything\x1b[0m",
+                     "draft": "\x1b[0mCONTROLS_DRAFT_PROBE", "connect-moved": "\n" + panel})
+    captures["connect"] = panel.replace("Selected", "OpenAI API")
+    captures["connect-moved"] = ("\x1b[38;5;252;48;5;235mOpenAI API\n" + panel.replace("Selected", "Free hosted models"))
+    runner.assert_control_palette(captures)
+    for name, invalid in (("composer", "Ask anything"),
+                          ("draft", "\x1b[38;5;244mCONTROLS_DRAFT_PROBE"),
+                          ("connect-moved", panel),
+                          ("connect", panel.replace("48;5;240", "48;5;235")),
+                          ("think", panel.replace("38;5;248", "38;5;252")),
+                          ("help", panel.replace("48;5;235", "48;5;234")),
+                          ("help-panel", panel.replace("\x1b[0m  ", "\x1b[48;5;235m  "))):
+        altered = dict(captures, **{name: invalid})
+        try:
+            runner.assert_control_palette(altered)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError(f"controls accepted broken palette/selection in {name}")
+
+
+def test_ansi_spans_preserves_grouped_and_split_color_state():
+    spans = runner.ansi_spans("\x1b[38;5;255m\x1b[48;5;240mSelected\n\x1b[39;49mCanvas")
+    selected = next(span for span in spans if span["text"] == "Selected")
+    canvas = next(span for span in spans if span["text"] == "Canvas")
+    assert selected == {"row": 0, "text": "Selected", "fg": 255, "bg": 240}
+    assert canvas == {"row": 1, "text": "Canvas", "fg": None, "bg": None}
+
+
 if __name__ == "__main__":
     command = runner.tui_command(Path("/binary with spaces"), Path("/workspace"), Path("/log"), "inline", "full")
     assert "--tui" in command and "--ui" in command, "fixture must select both axes explicitly"
@@ -337,3 +371,6 @@ if __name__ == "__main__":
     test_markdown_fixture_holds_all_blocks_before_completion()
 
     test_inline_working_status_rejects_response_interruption_and_missing_status()
+
+    test_control_palette_rejects_missing_roles_stale_selection_and_colored_draft()
+    test_ansi_spans_preserves_grouped_and_split_color_state()

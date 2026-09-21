@@ -105,23 +105,22 @@ impl Selector {
             };
 
             let label_style = if is_cursor {
-                Style::default().fg(t.fg()).add_modifier(Modifier::BOLD)
-            } else if opt.active {
-                Style::default().fg(t.accent())
+                t.style_selection().add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(t.muted())
+                t.style_ui_text()
             };
 
             let marker_style = if is_cursor {
-                Style::default().fg(t.accent())
+                t.style_ui_text()
             } else if opt.active {
                 Style::default().fg(t.success())
             } else {
-                Style::default().fg(t.dim())
+                t.style_ui_hint()
             };
 
-            let desc_style = Style::default().fg(if is_cursor { t.muted() } else { t.dim() });
+            let desc_style = t.style_ui_secondary();
 
+            let row_start = items.len();
             // Line 1: marker + label
             items.push(Line::from(vec![
                 Span::styled(marker.to_string(), marker_style),
@@ -139,6 +138,15 @@ impl Selector {
                 items.push(Line::from(""));
             }
 
+            if is_cursor {
+                for line in &mut items[row_start..] {
+                    let padding = usize::from(popup_area.width.saturating_sub(2))
+                        .saturating_sub(line.width());
+                    line.spans.push(Span::raw(" ".repeat(padding)));
+                    *line = std::mem::take(line).style(t.style_selection());
+                }
+            }
+
             if items.len() >= inner_height {
                 break;
             }
@@ -147,7 +155,7 @@ impl Selector {
         if truncated {
             items.push(Line::from(Span::styled(
                 "  … more options; use ↑/↓ to navigate",
-                Style::default().fg(t.dim()),
+                t.style_ui_hint(),
             )));
             items.truncate(inner_height);
         }
@@ -155,13 +163,13 @@ impl Selector {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .border_style(Style::default().fg(if true { t.accent() } else { t.border() }))
+            .border_style(t.style_ui_border())
             .title(Span::styled(
                 format!(" {} ", self.title),
-                t.style_accent_bold(),
+                t.style_ui_title(),
             ));
 
-        let bg_style = Style::default().bg(t.card_bg());
+        let bg_style = t.style_panel();
 
         frame.render_widget(Clear, popup_area);
         let widget = Paragraph::new(items).block(block).style(bg_style);

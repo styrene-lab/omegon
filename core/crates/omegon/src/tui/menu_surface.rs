@@ -94,8 +94,11 @@ fn menu_paragraph<'a>(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(theme.style_border())
-        .title(format!(" {} ", projection.title));
+        .border_style(theme.style_ui_border())
+        .title(Span::styled(
+            format!(" {} ", projection.title),
+            theme.style_ui_title(),
+        ));
 
     let inner_width = width.saturating_sub(2);
     let lines = menu_lines(
@@ -106,6 +109,7 @@ fn menu_paragraph<'a>(
         height.saturating_sub(2),
     );
     Paragraph::new(lines)
+        .style(theme.style_panel())
         .block(block)
         .alignment(Alignment::Left)
 }
@@ -122,9 +126,7 @@ fn menu_lines<'a>(
     lines.push(clipped_line(
         projection.title.clone(),
         width,
-        Style::default()
-            .fg(theme.accent())
-            .add_modifier(Modifier::BOLD),
+        theme.style_ui_title(),
     ));
     if let Some(summary) = projection
         .summary
@@ -132,9 +134,11 @@ fn menu_lines<'a>(
         .filter(|summary| !summary.is_empty())
     {
         for line in summary.lines() {
-            lines.extend(wrap_display(line, width).into_iter().map(|segment| {
-                Line::from(Span::styled(segment, Style::default().fg(theme.muted())))
-            }));
+            lines.extend(
+                wrap_display(line, width)
+                    .into_iter()
+                    .map(|segment| Line::from(Span::styled(segment, theme.style_ui_secondary()))),
+            );
         }
     }
 
@@ -145,11 +149,9 @@ fn menu_lines<'a>(
                 .iter()
                 .flat_map(|tab| {
                     let style = if tab.id == state.active_tab {
-                        Style::default()
-                            .fg(theme.accent_bright())
-                            .add_modifier(Modifier::BOLD)
+                        theme.style_selection()
                     } else {
-                        Style::default().fg(theme.muted())
+                        theme.style_ui_secondary()
                     };
                     [
                         Span::styled(
@@ -175,11 +177,11 @@ fn menu_lines<'a>(
     lines.push(clipped_line(
         filter_label,
         width,
-        Style::default().fg(if matches!(state.mode, MenuMode::Search) {
-            theme.accent_bright()
+        if matches!(state.mode, MenuMode::Search) {
+            theme.style_ui_text()
         } else {
-            theme.dim()
-        }),
+            theme.style_ui_hint()
+        },
     ));
     lines.push(Line::from(""));
 
@@ -198,7 +200,7 @@ fn menu_lines<'a>(
     if rows.is_empty() {
         lines.push(Line::from(Span::styled(
             "No matching rows",
-            Style::default().fg(theme.muted()),
+            theme.style_ui_secondary(),
         )));
     } else {
         let selected = state.selected_row.min(rows.len().saturating_sub(1));
@@ -220,7 +222,7 @@ fn menu_lines<'a>(
         if has_above {
             lines.push(Line::from(Span::styled(
                 format!("  ↑ {} more", start),
-                Style::default().fg(theme.dim()),
+                theme.style_ui_hint(),
             )));
         }
 
@@ -237,9 +239,7 @@ fn menu_lines<'a>(
                 previous_group = Some(visible.group_id);
                 lines.push(Line::from(Span::styled(
                     visible.group_label.to_string(),
-                    Style::default()
-                        .fg(theme.muted())
-                        .add_modifier(Modifier::BOLD),
+                    theme.style_ui_secondary().add_modifier(Modifier::BOLD),
                 )));
             }
             lines.push(menu_row_line(
@@ -262,17 +262,14 @@ fn menu_lines<'a>(
         if end < rows.len() {
             lines.push(Line::from(Span::styled(
                 format!("  ↓ {} more", rows.len() - end),
-                Style::default().fg(theme.dim()),
+                theme.style_ui_hint(),
             )));
         }
     }
 
     lines.push(Line::from(""));
     for segment in footer_segments {
-        lines.push(Line::from(Span::styled(
-            segment,
-            Style::default().fg(theme.dim()),
-        )));
+        lines.push(Line::from(Span::styled(segment, theme.style_ui_hint())));
     }
     lines
 }
@@ -315,7 +312,7 @@ fn menu_description_lines<'a>(
         .map(|segment| {
             Line::from(Span::styled(
                 format!("{indent}{segment}"),
-                Style::default().fg(theme.muted()),
+                theme.style_ui_secondary(),
             ))
         })
         .collect()
@@ -465,15 +462,17 @@ fn menu_row_line<'a>(
     columns: &MenuRowColumns,
 ) -> Line<'a> {
     let marker = if selected { "›" } else { " " };
-    let label_style = match row.kind {
-        MenuRowKind::Action => Style::default().fg(theme.fg()).add_modifier(Modifier::BOLD),
-        MenuRowKind::Object => Style::default().fg(theme.fg()),
-        MenuRowKind::Heading => Style::default()
-            .fg(theme.accent_bright())
-            .add_modifier(Modifier::BOLD),
+    let label_style = if selected {
+        theme.style_selection()
+    } else {
+        match row.kind {
+            MenuRowKind::Action => theme.style_ui_text().add_modifier(Modifier::BOLD),
+            MenuRowKind::Object => theme.style_ui_text(),
+            MenuRowKind::Heading => theme.style_ui_title(),
+        }
     };
     let mut spans = vec![
-        Span::styled(format!("{marker} "), Style::default().fg(theme.accent())),
+        Span::styled(format!("{marker} "), theme.style_ui_text()),
         Span::styled(padded_menu_field(&row.label, columns.label), label_style),
     ];
     if columns.value > 0 {
@@ -481,7 +480,7 @@ fn menu_row_line<'a>(
         spans.push(Span::raw("  "));
         spans.push(Span::styled(
             padded_menu_field(value, columns.value),
-            Style::default().fg(theme.accent_bright()),
+            theme.style_ui_title(),
         ));
     }
     for (idx, column_width) in columns.badges.iter().copied().enumerate() {
@@ -490,11 +489,13 @@ fn menu_row_line<'a>(
             spans.push(Span::styled(
                 padded_menu_field(&format!("[{}]", badge.label), column_width),
                 Style::default().fg(match badge.tone {
-                    MenuBadgeTone::Neutral => theme.muted(),
+                    MenuBadgeTone::Neutral => {
+                        theme.style_ui_secondary().fg.unwrap_or(theme.muted())
+                    }
                     MenuBadgeTone::Success => theme.success(),
                     MenuBadgeTone::Warning => theme.warning(),
                     MenuBadgeTone::Danger => theme.error(),
-                    MenuBadgeTone::Info => theme.accent_bright(),
+                    MenuBadgeTone::Info => theme.style_ui_text().fg.unwrap_or(theme.fg()),
                 }),
             ));
         } else {
@@ -502,7 +503,7 @@ fn menu_row_line<'a>(
         }
     }
     if row.primary_action.is_some() {
-        spans.push(Span::styled("  ↵", Style::default().fg(theme.dim())));
+        spans.push(Span::styled("  ↵", theme.style_ui_hint()));
     }
     let mut line = Line::from(spans);
     if width > 0 && line.width() > width {
@@ -521,14 +522,19 @@ fn menu_row_line<'a>(
         };
         let label_budget = width.saturating_sub(marker_width + suffix_width).max(1);
         let mut compact_spans = vec![
-            Span::styled(format!("{marker} "), Style::default().fg(theme.accent())),
+            Span::styled(format!("{marker} "), theme.style_ui_text()),
             Span::styled(truncate_menu_text(&row.label, label_budget), label_style),
         ];
         if !right_text.is_empty() && marker_width + suffix_width < width {
             compact_spans.push(Span::raw("  "));
-            compact_spans.push(Span::styled(right_text, Style::default().fg(theme.muted())));
+            compact_spans.push(Span::styled(right_text, theme.style_ui_secondary()));
         }
         line = Line::from(compact_spans);
+    }
+    if selected {
+        line.spans
+            .push(Span::raw(" ".repeat(width.saturating_sub(line.width()))));
+        line = line.style(theme.style_selection());
     }
     line
 }
@@ -799,6 +805,54 @@ mod tests {
             }],
             safety: None,
             availability: None,
+        }
+    }
+
+    #[test]
+    fn grey_controls_selection_survives_frame_cleanup_and_navigation() {
+        use ratatui::{buffer::Buffer, layout::Rect, style::Color, widgets::Widget};
+        let theme = super::super::theme::TerminalTheme;
+        let projection = projection();
+        let mut state = MenuState::new(&projection);
+        for width in [36, 80] {
+            for selected in [0, 1] {
+                state.selected_row = selected;
+                let area = Rect::new(0, 0, width, 24);
+                let mut buffer = Buffer::empty(area);
+                menu_paragraph(&theme, &projection, &state, width, 24).render(area, &mut buffer);
+                theme.finish_frame(&mut buffer);
+                let find = |label: &str| {
+                    buffer
+                        .content
+                        .chunks(width as usize)
+                        .find(|row| {
+                            row.iter()
+                                .map(|cell| cell.symbol())
+                                .collect::<String>()
+                                .contains(label)
+                        })
+                        .unwrap()
+                        .to_vec()
+                };
+                let current = find(if selected == 0 {
+                    "› Rust"
+                } else {
+                    "› Python"
+                });
+                let other = find(if selected == 0 { "  Python" } else { "  Rust" });
+                assert_ne!(
+                    current[2].bg, other[2].bg,
+                    "selection must have its own surface"
+                );
+                assert_ne!(current[2].bg, Color::Reset);
+                assert_ne!(current[2].fg, current[2].bg);
+                assert_eq!(
+                    current[width as usize - 2].bg,
+                    current[2].bg,
+                    "selection fills row"
+                );
+                assert_ne!(find("description for")[5].fg, current[2].fg);
+            }
         }
     }
 

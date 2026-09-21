@@ -100,6 +100,75 @@ def assert_text_modifier(styled, expected, modifier=1):
     assert observed, f"content has no terminal modifier {modifier}: {expected}"
 
 
+def ansi_spans(capture):
+    """Decode captured terminal foreground/background roles without assuming SGR grouping."""
+    foreground = background = None
+    row = 0
+    spans = []
+    for piece in re.split(r"(\x1b\[[0-9;]*m)", capture):
+        if piece.startswith("\x1b["):
+            params = [int(value or 0) for value in piece[2:-1].split(";")]
+            index = 0
+            while index < len(params):
+                value = params[index]
+                if value == 0:
+                    foreground = background = None
+                elif value == 39:
+                    foreground = None
+                elif value == 49:
+                    background = None
+                elif value in (38, 48) and index + 2 < len(params):
+                    mode = params[index + 1]
+                    color = params[index + 2] if mode == 5 else tuple(params[index + 2:index + 5])
+                    if value == 38:
+                        foreground = color
+                    else:
+                        background = color
+                    index += 2 if mode == 5 else 4
+                elif 30 <= value <= 37 or 90 <= value <= 97:
+                    foreground = value - 30 if value < 90 else value - 90 + 8
+                elif 40 <= value <= 47 or 100 <= value <= 107:
+                    background = value - 40 if value < 100 else value - 100 + 8
+                index += 1
+        else:
+            for index, part in enumerate(piece.split("\n")):
+                if index:
+                    row += 1
+                spans.append({"row": row, "text": part, "fg": foreground, "bg": background})
+    return spans
+
+
+def assert_control_palette(captures):
+    decoded = {name: ansi_spans(value) for name, value in captures.items()}
+    placeholder = [span for span in decoded["composer"] if "Ask anything" in span["text"]]
+    assert placeholder and all(span["fg"] == 244 and span["bg"] is None for span in placeholder), "composer placeholder lacks neutral hint role/default canvas"
+    draft = [span for span in decoded["draft"] if "CONTROLS_DRAFT_PROBE" in span["text"]]
+    assert draft and all(span["fg"] is None and span["bg"] is None for span in draft), "typed operator input does not use terminal defaults"
+    foregrounds = set()
+    for name in ("slash", "connect", "connect-moved", "settings", "think", "help", "help-panel"):
+        spans = decoded[name]
+        assert any(span["bg"] == 235 for span in spans), f"{name} lacks neutral panel background"
+        assert any(span["bg"] is None and len(span["text"]) >= 2 and not span["text"].strip() for span in spans), f"{name} repainted the entire default canvas"
+        foregrounds.update(span["fg"] for span in spans if span["text"].strip())
+    assert {244, 248, 252, 255} <= foregrounds, "controls lack distinct border/hint, secondary, text, and title roles"
+    selected = []
+    for name in ("connect", "connect-moved"):
+        rows = {span["row"] for span in decoded[name] if span["bg"] == 240 and span["fg"] == 255 and span["text"].strip()}
+        assert rows, f"{name} lacks selected-row foreground/background contrast"
+        selected.append(rows)
+    assert selected[0] != selected[1], "arrow key did not move the selected background to another row"
+    for name, label, foreground, background in (("connect", "OpenAI API", 255, 240),
+                                               ("connect-moved", "OpenAI API", 252, 235),
+                                               ("connect-moved", "Free hosted models", 255, 240)):
+        label_spans = [span for span in decoded[name] if label in span["text"]]
+        assert label_spans and all(span["fg"] == foreground and span["bg"] == background for span in label_spans), f"{name} did not apply the correct row role to {label}"
+    if "connect-narrow" in decoded:
+        narrow = [span for span in decoded["connect-narrow"] if "Free hosted models" in span["text"]]
+        assert narrow and all(span["fg"] == 255 and span["bg"] == 240 for span in narrow), "narrow menu lost selected-row contrast"
+    descriptions = [span for span in decoded["think"] if "token budget" in span["text"]]
+    assert descriptions and all(span["fg"] in (244, 248) for span in descriptions), "selector descriptions lack secondary/hint contrast"
+
+
 def tui_command(binary, workspace, log, presentation="fullscreen", detail="active", *, unconfigured=False):
     command = [str(binary), "--cwd", str(workspace), "--no-splash", "--fresh", "--log-level", "debug", "--log-file", str(log)]
     if not unconfigured:
@@ -399,7 +468,9 @@ def assert_streaming_payload(transcript, markers):
         assert normalized.count(marker + body) == 1, f"streamed payload lost or altered nonwhitespace characters: {marker}"
 
 
-def run(binary: Path, output: Path, presentation="fullscreen", detail="active", entry=None, stress=False, fresh_install=False, unconfigured=False, streaming=False, markdown=False):
+def run(binary: Path, output: Path, presentation="fullscreen", detail="active", entry=None, stress=False, fresh_install=False, unconfigured=False, streaming=False, markdown=False, controls=False):
+    if controls and (unconfigured or stress or streaming or markdown):
+        raise ValueError("controls acceptance requires a configured layout without another scenario")
     if markdown and (presentation != "inline" or unconfigured or stress or streaming):
         raise ValueError("Markdown acceptance requires configured inline layout without another scenario")
     if streaming and (presentation != "inline" or unconfigured or stress):
@@ -416,7 +487,7 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
               "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=checkout, text=True).strip(),
               "dirty": subprocess.check_output(["git", "status", "--porcelain"], cwd=checkout, text=True),
               "captures": [], "passed": False, "tui": presentation, "ui": detail, "entry": entry, "stress": stress, "fresh_install": fresh_install,
-              "unconfigured": unconfigured, "streaming": streaming, "markdown": markdown, "terminal_owner": "private-headless-tmux", "gui_windows_created": 0}
+              "unconfigured": unconfigured, "streaming": streaming, "markdown": markdown, "controls": controls, "terminal_owner": "private-headless-tmux", "gui_windows_created": 0}
 
     diff = subprocess.check_output(["git", "diff", "HEAD", "--binary"], cwd=checkout)
     (output / "source.diff").write_bytes(diff)
@@ -493,6 +564,8 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
         command = tui_command(executable, workspace, log, None if entry else presentation, None if entry else detail, unconfigured=unconfigured)
         # Start with an explicit environment, so real credentials/plugins cannot leak into the fixture.
         environment = tui_environment(root, fresh_install=fresh_install, unconfigured=unconfigured)
+        if controls:
+            environment.pop("NO_COLOR", None)
         if entry:
             environment["OMEGON_BIN"] = str(binary)
         launch = ["env", "-i", *(f"{key}={value}" for key, value in environment.items()), *command]
@@ -521,6 +594,77 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
             if "semantic frontend is unavailable" in screen():
                 raise AssertionError("startup exposed an unavailable session projection")
             capture("01-startup")
+            if controls:
+                control_captures = {}
+                def control_capture(name):
+                    capture(f"controls-{name}")
+                    styled = output / f"controls-{name}.ansi"
+                    styled.write_text(tmux("capture-pane", "-e", "-p", "-t", "run:0.0"))
+                    control_captures[name] = styled.read_text()
+                    ledger.setdefault("control_captures", []).append({"name": name, "file": styled.name,
+                        "sha256": digest(styled), "time": time.time()})
+                def open_command(command):
+                    action("send-keys", "-t", "run:0.0", "-l", command)
+                    action("send-keys", "-t", "run:0.0", "Enter")
+                def dismiss_control(marker):
+                    action("send-keys", "-t", "run:0.0", "Escape")
+                    wait_for(lambda: "Ask anything" in screen() and marker not in screen(), f"{marker} dismissed")
+
+                control_capture("composer")
+                action("send-keys", "-t", "run:0.0", "-l", "CONTROLS_DRAFT_PROBE")
+                wait_for(lambda: "CONTROLS_DRAFT_PROBE" in screen(), "typed control draft")
+                assert "Ask anything" not in screen(), "placeholder remained behind operator input"
+                control_capture("draft")
+                action("send-keys", "-t", "run:0.0", "C-u")
+                action("send-keys", "-t", "run:0.0", "-l", "/")
+                wait_for(lambda: "registry autocomplete" in screen(), "slash autocomplete visible")
+                control_capture("slash")
+                action("send-keys", "-t", "run:0.0", "C-u")
+                open_command("/connect")
+                wait_for(lambda: "Existing connections" in screen(), "connection menu visible")
+                control_capture("connect")
+                before_selection = tmux("capture-pane", "-e", "-p", "-t", "run:0.0")
+                action("send-keys", "-t", "run:0.0", "Down")
+                wait_for(lambda: tmux("capture-pane", "-e", "-p", "-t", "run:0.0") != before_selection, "connection selection moved")
+                control_capture("connect-moved")
+                action("resize-window", "-t", "run:0", "-x", "36", "-y", "40")
+                wait_for(lambda: any("Connections" in line and line.rstrip().endswith("╮")
+                                     and len(line.rstrip()) <= 36 for line in screen().splitlines()),
+                         "connection menu redrawn at narrow width")
+                control_capture("connect-narrow")
+                action("resize-window", "-t", "run:0", "-x", "120", "-y", "40")
+                wait_for(lambda: any("Connections" in line and line.rstrip().endswith("╮")
+                                     and len(line.rstrip()) > 80 for line in screen().splitlines()),
+                         "connection menu restored at normal width")
+                dismiss_control("Existing connections")
+                open_command("/settings")
+                wait_for(lambda: "Settings" in screen() and "Thinking" in screen(), "settings menu visible")
+                control_capture("settings")
+                dismiss_control("Settings")
+                open_command("/think")
+                wait_for(lambda: "Thinking level" in screen(), "thinking selector visible")
+                control_capture("think")
+                dismiss_control("Thinking level")
+                open_command("/help")
+                wait_for(lambda: "Slash command inventory" in screen(), "help command inventory visible")
+                control_capture("help")
+                dismiss_control("Slash command inventory")
+                open_command("/help all")
+                wait_for(lambda: "command · /help" in screen(), "help text command panel visible")
+                control_capture("help-panel")
+                dismiss_control("command · /help")
+                assert provider.requests == 0, "control browsing submitted inference"
+                assert_control_palette(control_captures)
+                assert digest(binary) == ledger["binary_sha256"], "binary changed during controls acceptance"
+                ledger["controls_checks"] = {"inference_requests": 0, "neutral_role_palette": True,
+                    "selection_moved": True, "default_canvas_preserved": True, "placeholder_replaced": True,
+                    "surfaces": list(control_captures)}
+                open_command("/quit")
+                wait_for(lambda: "TUI_EXIT_0" in screen(), "controls clean TUI exit")
+                assert tmux("display-message", "-p", "-t", "run:0.0", "#{alternate_on}:#{mouse_any_flag}").strip() == "0:0"
+                capture("controls-shell-return")
+                ledger["passed"] = True
+                return
             if markdown:
                 action("send-keys", "-t", "run:0.0", "-l", "render the deterministic Markdown fixture")
                 action("send-keys", "-t", "run:0.0", "Enter")
@@ -934,10 +1078,11 @@ if __name__ == "__main__":
     parser.add_argument("--tui", choices=["inline", "fullscreen"], default="fullscreen")
     parser.add_argument("--ui", choices=["active", "full"], default="active")
     parser.add_argument("--entry", choices=["om", "omegon"], help="test the fixed-build launcher default without UI flags")
+    parser.add_argument("--controls", action="store_true", help="gate neutral control hierarchy and selection without inference")
     parser.add_argument("--markdown", action="store_true", help="gate live Markdown styles, word wrapping, code indentation, and resize")
     parser.add_argument("--streaming", action="store_true", help="gate stable streamed lines in primary scrollback before completion, resize, and interleave a read tool")
     parser.add_argument("--stress", action="store_true", help="gate a large stream, cancel from Project, and replace the conversation")
     parser.add_argument("--fresh-install", action="store_true", help="verify profile-free non-child startup without a posture wizard")
     parser.add_argument("--unconfigured", action="store_true", help="verify no-model, no-credential startup and draft preservation through connection cancellation")
     arguments = parser.parse_args()
-    run(arguments.binary, arguments.output.resolve(), arguments.tui, arguments.ui, arguments.entry, arguments.stress, arguments.fresh_install, arguments.unconfigured, arguments.streaming, arguments.markdown)
+    run(arguments.binary, arguments.output.resolve(), arguments.tui, arguments.ui, arguments.entry, arguments.stress, arguments.fresh_install, arguments.unconfigured, arguments.streaming, arguments.markdown, arguments.controls)

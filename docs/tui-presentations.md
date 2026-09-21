@@ -75,3 +75,9 @@ that text-limit condition.
 
 See [captured acceptance](tui-captured-acceptance.md) for automated fixture runs and
 [terminal compatibility](tui-terminal-compatibility.md) for native client evidence.
+
+Controls use a neutral grey hierarchy: dark panels, lighter selection bars, bright
+labels, and quieter descriptions and hints. Connection/settings menus, selectors,
+slash suggestions, and command panels share these styles. The composer and
+conversation retain the terminal's base background and input colors. These control
+roles are separate from Markdown styles and can be overridden by future themes.
