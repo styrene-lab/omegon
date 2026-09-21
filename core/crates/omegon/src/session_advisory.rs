@@ -36,6 +36,8 @@ pub(crate) fn generation_is_current(
 ) -> bool {
     binding.snapshot().is_some_and(|current| {
         current.generation == captured.generation
+            && current.binding_id == captured.binding_id
+            && current.snapshot == captured.snapshot
             && current.session_id == captured.session_id
             && current.stream_id == captured.stream_id
     })

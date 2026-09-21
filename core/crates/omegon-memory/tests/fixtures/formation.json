@@ -1,0 +1,18 @@
+{
+  "_type": "episode",
+  "id": "evidence-episode",
+  "mind": "wave3",
+  "date": "2026-09-08",
+  "title": "Migration investigation",
+  "narrative": "The operator corrected the migration constraint.",
+  "created_at": "2026-09-08T00:00:00Z",
+  "formation": {
+    "version": 1,
+    "source": {"state": "available", "session_id": "synthetic-session", "stream_id": "synthetic-stream", "sequence": 8, "event_id": "event-8"},
+    "evidence": [{"event_id": "event-4", "sequence": 4, "recorded_at": "2026-09-08T00:00:00Z", "kind": "user_statement", "excerpt": "Correction: migration must be atomic.", "truncated": false, "outcome": null}],
+    "candidates": [{"section": "Constraints", "content": "Migration must be atomic.", "evidence_ids": ["event-4"]}],
+    "extraction": {"state": "complete", "model": "fixture-model"},
+    "truncated": false,
+    "rejected_candidates": 0
+  }
+}

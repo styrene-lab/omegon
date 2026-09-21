@@ -427,7 +427,7 @@ pub(crate) fn ensure_project_memory_store_ready(
             Ok(Some(result))
         }
         version => anyhow::bail!(
-            "unsupported memory schema v{version} at {}; run `omegon memory migrate --status --path {}` and restore a supported v5-v7 backup or upgrade Omegon",
+            "unsupported memory schema v{version} at {}; run `omegon memory migrate --status --path {}` and restore a supported v5-v12 backup or upgrade Omegon",
             db_path.display(),
             db_path.display()
         ),
@@ -719,9 +719,8 @@ impl AgentSetup {
                 );
                 embed_service = if svc.probe().await {
                     tracing::info!(
-                        url = svc.base_url(),
                         model = svc.model_name(),
-                        "embedding service available — hybrid search enabled"
+                        "embedding service reachable — query identity and index readiness are checked during recall"
                     );
                     Some(std::sync::Arc::new(svc)
                         as std::sync::Arc<dyn omegon_memory::EmbeddingService>)
@@ -764,14 +763,83 @@ impl AgentSetup {
         }
         let mut memory_feature =
             features::memory::MemoryFeature::new(memory_binding.clone(), mind.clone())
-                .with_status_root(project_root.clone());
-        if let Some(ref service) = embed_service {
-            memory_feature = memory_feature
-                .with_embed_service(service.clone())
-                .with_extraction_model("anthropic:claude-haiku-4-5-20251001".into());
+                .with_status_root(project_root.clone())
+                .with_session_binding(deferred_session_view.clone());
+        memory_feature = memory_feature.with_capabilities(
+            &crate::settings::Profile::load(&cwd),
+            is_child,
+            embed_service.clone(),
+        );
+        {
+            use crate::surfaces::memory_status::{
+                CapabilityReason, CapabilityState, ComponentReadiness,
+            };
+            let profile = crate::settings::Profile::load(&cwd);
+            let extraction = if is_child {
+                ComponentReadiness {
+                    state: CapabilityState::Disabled,
+                    reason: Some(CapabilityReason::ChildSession),
+                }
+            } else if profile.memory_extraction_enabled == Some(false) {
+                ComponentReadiness {
+                    state: CapabilityState::Disabled,
+                    reason: Some(CapabilityReason::OperatorDisabled),
+                }
+            } else if profile
+                .memory_extraction_model
+                .as_deref()
+                .is_some_and(|model| {
+                    let model = model.trim();
+                    model.is_empty()
+                        || model.len() > omegon_memory::formation::MAX_IDENTIFIER_BYTES
+                        || model.chars().any(char::is_control)
+                })
+            {
+                ComponentReadiness {
+                    state: CapabilityState::Unavailable,
+                    reason: Some(CapabilityReason::InvalidConfiguration),
+                }
+            } else {
+                ComponentReadiness {
+                    state: CapabilityState::Configured,
+                    reason: None,
+                }
+            };
+            let embeddings = if embed_service.is_some() {
+                ComponentReadiness {
+                    state: CapabilityState::Configured,
+                    reason: None,
+                }
+            } else if !is_child && db_path.is_none() {
+                // Discovery was skipped, so this is not evidence of a provider outage.
+                ComponentReadiness::default()
+            } else {
+                ComponentReadiness {
+                    state: if is_child {
+                        CapabilityState::Disabled
+                    } else {
+                        CapabilityState::Unavailable
+                    },
+                    reason: Some(if is_child {
+                        CapabilityReason::ChildSession
+                    } else {
+                        CapabilityReason::ProviderUnavailable
+                    }),
+                }
+            };
+            crate::status::update_memory_capabilities(&project_root, |status| {
+                status.extraction = extraction;
+                status.embeddings = embeddings;
+                status.pending_indexing = None;
+                status.indexing = None;
+            });
         }
         bus.register(Box::new(memory_feature));
         bus.register_internal_tool(crate::tool_registry::memory::MEMORY_STORE, "memory");
+        bus.register_internal_tool(
+            crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION,
+            "memory",
+        );
 
         // ─── Lifecycle (design-tree + openspec) ──────────────────────────
         // Use project root (git repo root), not cwd — docs/ and openspec/
@@ -1164,6 +1232,8 @@ impl AgentSetup {
                 .expect("project DB and JSONL paths derive from the same memory root");
             match crate::memory_service::start_candidate(
                 crate::memory_service::MemoryWorkerConfig {
+                    workspace_root: Some(project_root.clone()),
+                    memory_token_cap: crate::settings::Profile::load(&cwd).memory_context_tokens,
                     project_memory_root: memory_dir
                         .clone()
                         .expect("project memory paths derive from an initialized root"),
@@ -1266,6 +1336,11 @@ impl AgentSetup {
                 }) => {
                     let authority = status.authority.clone();
                     let index_state = status.index_state;
+                    crate::status::update_memory_capabilities(&project_root, |observed| {
+                        observed.pending_indexing =
+                            Some(status.indexing.pending + status.indexing.untracked);
+                        observed.indexing = Some(status.indexing.clone());
+                    });
                     initial_memory_status = status.into();
                     crate::status::update_managed_memory_status(
                         crate::status::ManagedMemoryStatusSnapshot {
@@ -3219,6 +3294,8 @@ mod tests {
         bus.register(Box::new(crate::memory_service::MemoryDeclarationFeature));
         let candidate =
             crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
+                workspace_root: Some(directory.path().to_path_buf()),
+                memory_token_cap: None,
                 project_memory_root: directory.path().to_path_buf(),
                 project_db_path: directory.path().join("facts.db"),
                 project_jsonl_path: directory.path().join("facts.jsonl"),

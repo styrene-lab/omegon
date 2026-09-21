@@ -1272,6 +1272,7 @@ mod tests {
         .unwrap();
         let store = TelemetryStore::at(directory.path().join("telemetry")).unwrap();
         let target = SessionViewTarget {
+            binding_id: uuid::Uuid::new_v4(),
             snapshot,
             session_id: "fixture-session".into(),
             stream_id: None,
@@ -1348,6 +1349,7 @@ mod tests {
     #[test]
     fn old_event_fence_and_second_prompt_use_current_generation() {
         let first = SessionViewTarget {
+            binding_id: uuid::Uuid::new_v4(),
             snapshot: PathBuf::from("first.json"),
             session_id: "first".into(),
             stream_id: Some(Uuid::new_v4()),
@@ -1355,6 +1357,7 @@ mod tests {
             kind: crate::session_consumers::SessionViewKind::New,
         };
         let second = SessionViewTarget {
+            binding_id: uuid::Uuid::new_v4(),
             snapshot: PathBuf::from("second.json"),
             session_id: "second".into(),
             stream_id: Some(Uuid::new_v4()),

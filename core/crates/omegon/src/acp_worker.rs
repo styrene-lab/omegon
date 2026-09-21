@@ -1045,6 +1045,7 @@ async fn worker_loop(
                             resume_id = Some(session_id.clone());
                             first_prompt = false;
                             let target = crate::session_consumers::SessionViewTarget {
+                                binding_id: uuid::Uuid::new_v4(),
                                 snapshot: path.clone(),
                                 session_id: session_id.clone(),
                                 stream_id: Some(outcome.projection.stream_id),

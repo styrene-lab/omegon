@@ -34,6 +34,9 @@ pub enum MemoryError {
     #[error("No embeddings available — run embedding indexer first")]
     NoEmbeddings,
 
+    #[error("Vector comparison requires an explicit embedding-space identity")]
+    EmbeddingIdentityRequired,
+
     #[error("Memory operation identity conflicts with a different payload: {0}")]
     OperationConflict(String),
 
@@ -61,8 +64,43 @@ pub(crate) fn mutation_payload_hash(mutation: &MemoryMutation) -> Result<String>
 }
 
 fn validate_mutation(mutation: &MemoryMutation) -> Result<()> {
+    if let MemoryMutation::StoreApplicableFact { constraints, .. }
+    | MemoryMutation::SetFactApplicability { constraints, .. } = mutation
+    {
+        constraints.validate()?;
+    }
+    if let MemoryMutation::StoreLifecycleConclusion {
+        request, source, ..
+    } = mutation
+    {
+        source.validate(&request.content, &request.section)?;
+    }
+    if let MemoryMutation::StoreLifecycleInference { request, inference } = mutation {
+        if inference.confirmation.is_some() {
+            return Err(MemoryError::InvalidMutation(
+                "inference ingestion cannot supply confirmation".into(),
+            ));
+        }
+        inference.validate()?;
+        if request.content.trim().is_empty() || request.content.len() > 65_536 {
+            return Err(MemoryError::InvalidMutation(
+                "invalid lifecycle inference content".into(),
+            ));
+        }
+    }
     if let MemoryMutation::StoreEmbedding { embedding, .. } = mutation {
         validate_embedding(embedding)?;
+    }
+    if let MemoryMutation::StoreIdentifiedEmbedding { embedding, .. }
+    | MemoryMutation::CompleteEmbeddingIndexing { embedding, .. } = mutation
+    {
+        embedding.validate()?;
+    }
+    if let MemoryMutation::RecordEmbeddingIndexing { record } = mutation {
+        crate::indexing::validate_record(record)?;
+    }
+    if let MemoryMutation::CompleteEmbeddingIndexing { attempt_id, .. } = mutation {
+        crate::indexing::validate_attempt(attempt_id)?;
     }
     Ok(())
 }
@@ -113,6 +151,34 @@ pub(crate) fn persisted_lamport_version(version: u64) -> Result<i64> {
 /// and potential future async backends.
 #[async_trait]
 pub trait MemoryBackend: Send + Sync {
+    /// Opaque, connection-instance-bound stamp covering all potentially visible writes.
+    /// Backends without reliable invalidation leave caching disabled.
+    async fn selection_revision(
+        &self,
+    ) -> Result<Option<crate::selection_cache::SelectionRevision>> {
+        Ok(None)
+    }
+
+    /// Earliest applicability/floor transitions. Called on cache misses, not hits.
+    async fn selection_time_bounds(
+        &self,
+        _mind: &str,
+        _query_at: chrono::DateTime<chrono::Utc>,
+        _wall_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Option<crate::selection_cache::SelectionTimeBounds>> {
+        Ok(None)
+    }
+    /// Exact mind-scoped lookup across all statuses, without reinforcement.
+    async fn get_fact_record(&self, _mind: &str, _id: &str) -> Result<Option<Fact>> {
+        Err(MemoryError::InvalidMutation(
+            "status-neutral lookup unsupported".into(),
+        ))
+    }
+    async fn get_pending_fact(&self, _mind: &str, _id: &str) -> Result<Option<Fact>> {
+        Err(MemoryError::InvalidMutation(
+            "pending lookup unsupported".into(),
+        ))
+    }
     /// Apply a payload-bound mutation exactly once. Reusing `operation_id` with
     /// the same payload returns the recorded effect; a different payload fails.
     async fn apply_mutation(
@@ -187,9 +253,25 @@ pub trait MemoryBackend: Send + Sync {
     /// Full-text search via FTS5. Returns facts ranked by FTS5 relevance × decay confidence.
     async fn fts_search(&self, mind: &str, query: &str, k: usize) -> Result<Vec<ScoredFact>>;
 
-    /// Vector similarity search. Returns facts ranked by cosine similarity × decay confidence.
-    /// Returns `Err(EmbeddingDimensionMismatch)` if query dims don't match stored model.
-    /// Returns `Err(NoEmbeddings)` if no vectors exist for this mind.
+    /// Apply population and section eligibility before candidate limits.
+    /// Legacy external backends reject unsupported filters rather than leaking results.
+    async fn fts_search_filtered(
+        &self,
+        mind: &str,
+        query: &str,
+        k: usize,
+        filter: &SearchFilter,
+    ) -> Result<Vec<ScoredFact>> {
+        if filter != &SearchFilter::default() {
+            return Err(MemoryError::InvalidMutation(
+                "backend does not support filtered search".into(),
+            ));
+        }
+        self.fts_search(mind, query, k).await
+    }
+
+    /// Legacy unidentified query. Native backends return EmbeddingIdentityRequired;
+    /// use search_identified to compare vectors under an explicit space contract.
     async fn vector_search(
         &self,
         mind: &str,
@@ -216,6 +298,122 @@ pub trait MemoryBackend: Send + Sync {
             .await?;
         if cancelled() {
             return Err(MemoryError::Cancelled);
+        }
+        Ok(results)
+    }
+
+    /// Filter vector candidates before limits, with cooperative cancellation.
+    #[allow(clippy::too_many_arguments)]
+    async fn vector_search_filtered_cancellable(
+        &self,
+        mind: &str,
+        embedding: &[f32],
+        k: usize,
+        min_similarity: f32,
+        filter: &SearchFilter,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<Vec<ScoredFact>> {
+        if filter != &SearchFilter::default() {
+            return Err(MemoryError::InvalidMutation(
+                "backend does not support filtered vectors".into(),
+            ));
+        }
+        self.vector_search_cancellable(mind, embedding, k, min_similarity, cancelled)
+            .await
+    }
+
+    /// Compare only compatible, content-current vectors and report skipped index states.
+    async fn search_identified(
+        &self,
+        mind: &str,
+        query: &IdentifiedEmbedding,
+        k: usize,
+        min_similarity: f32,
+        filter: &SearchFilter,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<VectorSearchReport> {
+        let _ = (mind, query, k, min_similarity, filter, cancelled);
+        Err(MemoryError::EmbeddingIdentityRequired)
+    }
+
+    async fn embedding_index_state(
+        &self,
+        fact_id: &str,
+        space: &EmbeddingSpace,
+    ) -> Result<EmbeddingIndexState> {
+        let _ = (fact_id, space);
+        Err(MemoryError::EmbeddingIdentityRequired)
+    }
+
+    async fn embedding_indexing_record(
+        &self,
+        fact_id: &str,
+    ) -> Result<Option<EmbeddingIndexingRecord>> {
+        let _ = fact_id;
+        Err(MemoryError::InvalidMutation(
+            "indexing attempts unsupported".into(),
+        ))
+    }
+
+    async fn embedding_indexing_summary(&self, mind: &str) -> Result<EmbeddingIndexingSummary> {
+        let _ = mind;
+        Err(MemoryError::InvalidMutation(
+            "indexing attempts unsupported".into(),
+        ))
+    }
+
+    async fn get_fact_filtered(
+        &self,
+        mind: &str,
+        id: &str,
+        filter: &SearchFilter,
+    ) -> Result<Option<Fact>> {
+        let filter = filter.resolved()?;
+        if filter.intent == SearchIntent::Historical {
+            return Err(MemoryError::InvalidMutation(
+                "historical lookup unsupported".into(),
+            ));
+        }
+        Ok(self
+            .get_fact(id)
+            .await?
+            .filter(|fact| fact.mind == mind && filter.matches(fact)))
+    }
+
+    async fn get_edges_filtered(
+        &self,
+        mind: &str,
+        id: &str,
+        filter: &SearchFilter,
+        limit: usize,
+    ) -> Result<Vec<Edge>> {
+        let filter = filter.resolved()?;
+        if filter.intent == SearchIntent::Historical {
+            return Err(MemoryError::InvalidMutation(
+                "filtered edges unsupported".into(),
+            ));
+        }
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let mut results = Vec::new();
+        for edge in self.get_edges(mind, id).await? {
+            let mut eligible = true;
+            for endpoint in [&edge.source_id, &edge.target_id] {
+                if self
+                    .get_fact_filtered(mind, endpoint, &filter)
+                    .await?
+                    .is_none()
+                {
+                    eligible = false;
+                }
+            }
+            if eligible {
+                results.push(edge);
+                if results.len() >= limit.min(1024) {
+                    break;
+                }
+            }
         }
         Ok(results)
     }
@@ -247,6 +445,29 @@ pub trait MemoryBackend: Send + Sync {
 
     /// List the most recent episodes for a mind.
     async fn list_episodes(&self, mind: &str, k: usize) -> Result<Vec<Episode>>;
+
+    /// Local, receipt-backed capture frontier; imported declarations are excluded.
+    async fn formation_cursor(
+        &self,
+        _key: &FormationCaptureKey,
+    ) -> Result<Option<FormationCursor>> {
+        Err(MemoryError::InvalidMutation(
+            "formation cursor is unsupported".into(),
+        ))
+    }
+
+    /// Bounded pending extraction inventory, filtered before the limit. Implementors
+    /// without recovery support return an error rather than claiming an empty queue.
+    async fn pending_formations(
+        &self,
+        _mind: &str,
+        _model: &str,
+        _limit: usize,
+    ) -> Result<Vec<Episode>> {
+        Err(MemoryError::InvalidMutation(
+            "pending formation inventory is unsupported".into(),
+        ))
+    }
 
     /// Search episodes by narrative similarity (FTS5 or embedding).
     async fn search_episodes(&self, mind: &str, query: &str, k: usize) -> Result<Vec<Episode>>;
@@ -280,6 +501,56 @@ pub trait MemoryBackend: Send + Sync {
 /// The default implementation (`MarkdownRenderer`) produces the markdown
 /// block used for LLM system prompt injection.
 pub trait ContextRenderer: Send + Sync {
+    /// Opt in only when this identity captures every rendering-policy dependency.
+    fn memory_cache_identity(&self) -> Option<&str> {
+        None
+    }
+    /// Format already selected evidence. Token packing counts this complete output.
+    fn render_memory_blocks(
+        &self,
+        blocks: &[crate::renderer::MemoryFactBlock<'_>],
+        episodes: &[&Episode],
+        context: &ApplicabilityContext,
+    ) -> String {
+        let facts = blocks
+            .iter()
+            .filter(|block| !block.pinned)
+            .map(|block| block.fact.clone())
+            .collect::<Vec<_>>();
+        let pins = blocks
+            .iter()
+            .filter(|block| block.pinned)
+            .map(|block| block.fact.clone())
+            .collect::<Vec<_>>();
+        let episodes = episodes
+            .iter()
+            .map(|episode| (*episode).clone())
+            .collect::<Vec<_>>();
+        self.render_context_scoped(&facts, &episodes, &pins, usize::MAX, context)
+            .markdown
+    }
+    fn render_context_scoped(
+        &self,
+        facts: &[Fact],
+        episodes: &[Episode],
+        working_memory: &[Fact],
+        max_chars: usize,
+        context: &ApplicabilityContext,
+    ) -> RenderedContext {
+        let eligible = |fact: &&Fact| {
+            fact.status == FactStatus::Active
+                && fact.applicability.as_ref().is_none_or(|record| {
+                    record.constraints.assess(context) != ApplicabilityStatus::Inapplicable
+                })
+        };
+        let facts = facts.iter().filter(eligible).cloned().collect::<Vec<_>>();
+        let working = working_memory
+            .iter()
+            .filter(eligible)
+            .cloned()
+            .collect::<Vec<_>>();
+        self.render_context(&facts, episodes, &working, max_chars)
+    }
     /// Render a context block from the given backend.
     /// Selects facts by priority tier, respects character budget, and
     /// includes episode summaries.

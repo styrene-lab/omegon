@@ -622,10 +622,8 @@ impl App {
                     self.slim_turn_state = SlimTurnState::RequestingProvider;
                 }
             }
-            AgentEvent::AgentEnd => {
-                if self.session_activity_cache.current().is_none() {
-                    self.terminalize_runtime_turn();
-                }
+            AgentEvent::AgentEnd if self.session_activity_cache.current().is_none() => {
+                self.terminalize_runtime_turn();
             }
             AgentEvent::PhaseChanged { phase } => {
                 self.conversation

@@ -373,6 +373,10 @@ pub(crate) async fn run_release_coupled(
                         fallback_reason.clone(),
                     ),
                 );
+                invocation_contract
+                    .runtime()
+                    .before_context_eviction(cancel.clone())
+                    .await;
                 let compaction_authority = context_contract.begin_compaction(
                     &selection,
                     invocation_scope,
@@ -560,6 +564,7 @@ pub(crate) async fn run_release_coupled(
                                 None,
                                 None,
                             ));
+                            invocation_contract.runtime().before_context_eviction(cancel.clone()).await;
                             let compaction_authority = context_contract.begin_compaction(
                                 &plan,
                                 invocation_scope,

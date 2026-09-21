@@ -1301,6 +1301,7 @@ mod tests {
             "fixture-session".into(),
         );
         binding.replace(crate::session_consumers::SessionViewTarget {
+            binding_id: uuid::Uuid::new_v4(),
             snapshot,
             session_id: "fixture-session".into(),
             stream_id: Some(Uuid::parse_str("10000000-0000-4000-8000-000000000001").unwrap()),

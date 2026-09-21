@@ -1,0 +1,10 @@
+{
+  "dev-cutoff":{"required":["d1"],"terms":["atomic"],"forbidden":["rolling"],"repeated_error_terms":[],"abstain":false},
+  "dev-absent":{"required":[],"terms":[],"forbidden":[],"repeated_error_terms":[],"abstain":true},
+  "dev-failure":{"required":["d3"],"terms":["rollback"],"forbidden":["succeeded"],"repeated_error_terms":["retry immediately"],"abstain":false},
+  "dev-constraint":{"required":["d5"],"terms":["linux"],"forbidden":["windows"],"repeated_error_terms":[],"abstain":false},
+  "held-cutoff":{"required":["h1"],"terms":["serial"],"forbidden":["parallel"],"repeated_error_terms":[],"abstain":false},
+  "held-absent":{"required":[],"terms":[],"forbidden":["healthy"],"repeated_error_terms":[],"abstain":true},
+  "held-failure":{"required":["h4"],"terms":["disable cache"],"forbidden":["succeeded"],"repeated_error_terms":["retry immediately"],"abstain":false},
+  "held-constraint":{"required":["h5"],"terms":["macos"],"forbidden":["linux"],"repeated_error_terms":[],"abstain":false}
+}

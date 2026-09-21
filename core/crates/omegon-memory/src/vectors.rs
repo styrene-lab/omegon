@@ -13,16 +13,20 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() {
         return 0.0;
     }
-    let mut dot: f32 = 0.0;
-    let mut norm_a: f32 = 0.0;
-    let mut norm_b: f32 = 0.0;
+    let mut dot: f64 = 0.0;
+    let mut norm_a: f64 = 0.0;
+    let mut norm_b: f64 = 0.0;
     for i in 0..a.len() {
-        dot += a[i] * b[i];
-        norm_a += a[i] * a[i];
-        norm_b += b[i] * b[i];
+        dot += a[i] as f64 * b[i] as f64;
+        norm_a += (a[i] as f64).powi(2);
+        norm_b += (b[i] as f64).powi(2);
     }
     let denom = norm_a.sqrt() * norm_b.sqrt();
-    if denom == 0.0 { 0.0 } else { dot / denom }
+    if denom == 0.0 {
+        0.0
+    } else {
+        (dot / denom).clamp(-1.0, 1.0) as f32
+    }
 }
 
 /// Serialize f32 slice to bytes for SQLite BLOB storage.
@@ -74,7 +78,10 @@ pub fn rrf_merge(
         let contribution = 1.0 / (rrf_k + (rank + 1) as f64);
         scores
             .entry(sf.fact.id.clone())
-            .and_modify(|(s, _)| *s += contribution)
+            .and_modify(|(s, existing)| {
+                *s += contribution;
+                existing.scores.cosine = sf.scores.cosine;
+            })
             .or_insert_with(|| (contribution, sf.clone()));
     }
 
@@ -82,6 +89,7 @@ pub fn rrf_merge(
         .into_values()
         .map(|(rrf_score, mut sf)| {
             sf.score = rrf_score;
+            sf.scores.rrf = Some(rrf_score);
             sf
         })
         .collect();
@@ -166,6 +174,8 @@ mod tests {
 
     fn stub_fact(id: &str) -> Fact {
         Fact {
+            applicability: None,
+            lifecycle_inference: None,
             id: id.into(),
             mind: "test".into(),
             content: format!("fact {id}"),
@@ -193,11 +203,7 @@ mod tests {
     }
 
     fn scored(id: &str, similarity: f64) -> ScoredFact {
-        ScoredFact {
-            fact: stub_fact(id),
-            similarity,
-            score: similarity,
-        }
+        ScoredFact::new(stub_fact(id), similarity, similarity)
     }
 
     #[test]

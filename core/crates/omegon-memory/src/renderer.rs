@@ -6,13 +6,162 @@ use crate::types::*;
 /// Renders facts and episodes as a markdown block for LLM context injection.
 pub struct MarkdownRenderer;
 
+pub struct MemoryFactBlock<'a> {
+    pub fact: &'a Fact,
+    pub pinned: bool,
+    pub applicability: ApplicabilityStatus,
+}
+
+pub(crate) fn selection_markdown(facts: &[MemoryFactBlock<'_>], episodes: &[&Episode]) -> String {
+    if facts.is_empty() && episodes.is_empty() {
+        return String::new();
+    }
+    let mut text = String::from("# Project Memory");
+    let mut heading = String::new();
+    for block in facts {
+        let next = if block.pinned {
+            "Working Memory (pinned)".into()
+        } else {
+            serde_json::to_value(&block.fact.section)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        if heading != next {
+            text.push_str(&format!("\n\n## {next}"));
+            heading = next;
+        }
+        text.push_str(&format!(
+            "\n- [{}] v{}: {}{}",
+            block.fact.id,
+            block.fact.version,
+            block.fact.content,
+            if block.applicability == ApplicabilityStatus::Unknown {
+                " _(applicability unknown)_"
+            } else {
+                ""
+            }
+        ));
+    }
+    if !episodes.is_empty() {
+        text.push_str("\n\n## Relevant Sessions");
+    }
+    for episode in episodes {
+        text.push_str(&format!(
+            "\n\n### [{}] {}: {}\n{}",
+            episode.id, episode.date, episode.title, episode.narrative
+        ));
+    }
+    text
+}
+
+/// Retrieval signals are ranks/proximity, never calibrated truth percentages.
+pub fn recall_score_label(result: &ScoredFact) -> String {
+    let mut labels = Vec::new();
+    for (name, value) in [
+        ("lexical", result.scores.lexical),
+        ("cosine", result.scores.cosine),
+        ("rrf", result.scores.rrf),
+        ("graph proximity", result.scores.graph),
+    ] {
+        if let Some(value) = value {
+            labels.push(format!("{name}={value:.4e}"));
+        }
+    }
+    if labels.is_empty() {
+        labels.push(format!("legacy rank={:.4e}", result.score));
+    }
+    labels.insert(0, format!("version={}", result.fact.version));
+    labels.push(format!(
+        "applicability={}",
+        match result.applicability {
+            ApplicabilityStatus::Unknown => "unknown",
+            ApplicabilityStatus::Matches => "recorded-scope-matches",
+            ApplicabilityStatus::Inapplicable => "inapplicable",
+        }
+    ));
+    if let Some(record) = &result.fact.applicability {
+        labels.push(format!(
+            "valid [{} .. {}), scope recorded {}",
+            record
+                .constraints
+                .valid_from
+                .as_deref()
+                .unwrap_or("unbounded"),
+            record
+                .constraints
+                .valid_until
+                .as_deref()
+                .unwrap_or("unbounded"),
+            record.recorded_at
+        ));
+    }
+    for evidence in &result.graph_evidence {
+        labels.push(format!(
+            "{:?}: {} {} {}",
+            evidence.kind,
+            if evidence.outgoing {
+                "self"
+            } else {
+                &evidence.other_fact_id
+            },
+            evidence.relation,
+            if evidence.outgoing {
+                &evidence.other_fact_id
+            } else {
+                "self"
+            }
+        ));
+    }
+    labels.join(", ")
+}
+
+pub fn vector_diagnostic_label(diagnostics: &VectorDiagnostics) -> String {
+    if diagnostics.identity_unavailable {
+        return "Semantic retrieval unavailable: no verified query identity; keyword results retained.".into();
+    }
+    format!(
+        "Vector index: {} compatible, {} legacy, {} incompatible, {} stale. Missing or outdated vectors can be repaired with embedding backfill.",
+        diagnostics.compatible, diagnostics.legacy, diagnostics.incompatible, diagnostics.stale
+    )
+}
+
 impl ContextRenderer for MarkdownRenderer {
+    fn memory_cache_identity(&self) -> Option<&str> {
+        Some("markdown-memory-v1")
+    }
+    fn render_memory_blocks(
+        &self,
+        blocks: &[MemoryFactBlock<'_>],
+        episodes: &[&Episode],
+        _context: &ApplicabilityContext,
+    ) -> String {
+        selection_markdown(blocks, episodes)
+    }
     fn render_context(
         &self,
         facts: &[Fact],
         episodes: &[Episode],
         working_memory: &[Fact],
         max_chars: usize,
+    ) -> RenderedContext {
+        self.render_context_scoped(
+            facts,
+            episodes,
+            working_memory,
+            max_chars,
+            &ApplicabilityContext::local(),
+        )
+    }
+
+    fn render_context_scoped(
+        &self,
+        facts: &[Fact],
+        episodes: &[Episode],
+        working_memory: &[Fact],
+        max_chars: usize,
+        context: &ApplicabilityContext,
     ) -> RenderedContext {
         const PREAMBLE: &str = "# Project Memory\n_Use `memory_store` proactively when you learn facts worth persisting. Use `memory_recall` before non-trivial tasks to surface relevant context._";
 
@@ -44,112 +193,72 @@ impl ContextRenderer for MarkdownRenderer {
             }
         };
 
-        // Working memory first (highest priority)
-        if !working_memory.is_empty() {
-            let mut block = "## Working Memory (pinned)".to_string();
-            let mut included = 0;
-            for f in working_memory {
-                let line = format!("- [{}] {}", f.id, f.content);
-                let candidate = format!("{block}\n{line}");
-                if char_count
-                    .saturating_add(2)
-                    .saturating_add(candidate.chars().count())
-                    > max_chars
-                {
-                    budget_exhausted = true;
-                    break;
-                }
-                block = candidate;
-                included += 1;
-            }
-            if included > 0 && append_block(&mut markdown, &mut char_count, &block) {
-                facts_injected += included;
-            }
-        }
-
-        // Group facts by section
-        let sections = [
-            Section::Architecture,
-            Section::Decisions,
-            Section::Constraints,
-            Section::KnownIssues,
-            Section::PatternsConventions,
-            Section::Specs,
-            Section::RecentWork,
-        ];
-
-        let section_descriptions = [
-            "_System structure, component relationships, key abstractions_",
-            "_Choices made and their rationale_",
-            "_Requirements, limitations, environment details_",
-            "_Bugs, flaky tests, workarounds_",
-            "_Code style, project conventions, common approaches_",
-            "_Active specifications and design contracts_",
-            "_Recent session activity_",
-        ];
-
-        for (section, desc) in sections.iter().zip(section_descriptions.iter()) {
-            if budget_exhausted {
-                break;
-            }
-            let section_facts: Vec<&Fact> = facts
-                .iter()
-                .filter(|f| &f.section == section && f.status == FactStatus::Active)
-                .collect();
-            if section_facts.is_empty() {
+        // Preserve the domain selector's ordering. Section presentation must not
+        // promote irrelevant Architecture facts ahead of a ranked constraint.
+        let mut included_ids = std::collections::HashSet::new();
+        let mut previous_heading = String::new();
+        for (fact, pinned) in working_memory
+            .iter()
+            .map(|fact| (fact, true))
+            .chain(facts.iter().map(|fact| (fact, false)))
+        {
+            if fact.status != FactStatus::Active || included_ids.contains(&fact.id) {
                 continue;
             }
-
-            let mut block = format!(
-                "## {}\n{}",
-                serde_json::to_string(section)
+            let applicability = fact
+                .applicability
+                .as_ref()
+                .map_or(ApplicabilityStatus::Unknown, |record| {
+                    record.constraints.assess(context)
+                });
+            if applicability == ApplicabilityStatus::Inapplicable {
+                continue;
+            }
+            let heading = if pinned {
+                "Working Memory (pinned)".to_string()
+            } else {
+                serde_json::to_string(&fact.section)
                     .unwrap_or_default()
-                    .trim_matches('"'),
-                desc
-            );
-            let mut included = 0;
-            for f in section_facts {
-                let line = format!("- {}", f.content);
-                let candidate = format!("{block}\n{line}");
-                if char_count
-                    .saturating_add(2)
-                    .saturating_add(candidate.chars().count())
-                    > max_chars
-                {
-                    budget_exhausted = true;
-                    break;
+                    .trim_matches('"')
+                    .to_string()
+            };
+            let line = format!(
+                "- [{}] {}{}",
+                fact.id,
+                fact.content,
+                if applicability == ApplicabilityStatus::Unknown {
+                    " _(applicability unknown)_"
+                } else {
+                    ""
                 }
-                block = candidate;
-                included += 1;
-            }
-            if included > 0 && append_block(&mut markdown, &mut char_count, &block) {
-                facts_injected += included;
-            }
-            if budget_exhausted {
-                break;
+            );
+            let block = if heading == previous_heading {
+                line
+            } else {
+                format!("## {heading}\n{line}")
+            };
+            if append_block(&mut markdown, &mut char_count, &block) {
+                previous_heading = heading;
+                included_ids.insert(&fact.id);
+                facts_injected += 1;
+            } else {
+                budget_exhausted = true;
             }
         }
 
         // Episodes
         let mut episodes_injected = 0;
-        if !episodes.is_empty() && !budget_exhausted {
-            let mut block = "## Recent Sessions".to_string();
-            for ep in episodes {
-                let line = format!("### {}: {}\n{}", ep.date, ep.title, ep.narrative);
-                let candidate = format!("{block}\n{line}");
-                if char_count
-                    .saturating_add(2)
-                    .saturating_add(candidate.chars().count())
-                    > max_chars
-                {
-                    budget_exhausted = true;
-                    break;
-                }
-                block = candidate;
+        for ep in episodes {
+            let heading = if episodes_injected == 0 {
+                "## Recent Sessions\n"
+            } else {
+                ""
+            };
+            let block = format!("{heading}### {}: {}\n{}", ep.date, ep.title, ep.narrative);
+            if append_block(&mut markdown, &mut char_count, &block) {
                 episodes_injected += 1;
-            }
-            if episodes_injected > 0 {
-                append_block(&mut markdown, &mut char_count, &block);
+            } else {
+                budget_exhausted = true;
             }
         }
 
@@ -174,7 +283,9 @@ mod tests {
 
     fn make_fact(section: Section, content: &str) -> Fact {
         Fact {
-            id: "test".into(),
+            applicability: None,
+            lifecycle_inference: None,
+            id: content.into(),
             mind: "test".into(),
             content: content.into(),
             section,

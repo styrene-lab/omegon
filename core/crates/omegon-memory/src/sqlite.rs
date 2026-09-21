@@ -10,10 +10,17 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-pub const MEMORY_SCHEMA_VERSION: i64 = 8;
+pub const MEMORY_SCHEMA_VERSION: i64 = 14;
 pub const PRIMENSUS_MIND: &str = "primensus";
 pub const LEGACY_MIND: &str = "legacy";
-pub const LEGACY_MEMORY_SCHEMA_VERSIONS: std::ops::RangeInclusive<i64> = 5..=7;
+pub const LEGACY_MEMORY_SCHEMA_VERSIONS: std::ops::RangeInclusive<i64> = 5..=13;
+
+const CREATE_INDEXING_ATTEMPTS: &str = "CREATE TABLE IF NOT EXISTS embedding_indexing (
+    fact_id TEXT PRIMARY KEY REFERENCES facts(id) ON DELETE CASCADE,
+    fact_version INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    record_json TEXT NOT NULL
+);";
 use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -81,6 +88,7 @@ use crate::util::{gen_id, now_iso};
 use crate::vectors;
 
 pub struct SqliteBackend {
+    cache_identity: u64,
     conn: Mutex<Connection>,
 }
 
@@ -94,7 +102,7 @@ impl SqliteBackend {
         )?;
         if !LEGACY_MEMORY_SCHEMA_VERSIONS.contains(&source_version) {
             anyhow::bail!(
-                "memory migration only supports schema v5 through v7 sources; found v{source_version}"
+                "memory migration only supports schema v5 through v12 sources; found v{source_version}"
             );
         }
         let integrity_check: String =
@@ -139,6 +147,11 @@ impl SqliteBackend {
                     ),
                     format!("UPDATE facts SET mind = '{LEGACY_MIND}' WHERE mind = 'default'"),
                     format!("UPDATE episodes SET mind = '{LEGACY_MIND}' WHERE mind = 'default'"),
+                    "ALTER TABLE episodes ADD COLUMN formation TEXT; -- if absent".into(),
+                    "ALTER TABLE facts_vec ADD COLUMN space TEXT; -- if absent".into(),
+                    "ALTER TABLE facts_vec ADD COLUMN source_hash TEXT; -- if absent".into(),
+                    "ALTER TABLE facts ADD COLUMN lifecycle_inference TEXT; -- if absent".into(),
+                    "ALTER TABLE facts ADD COLUMN applicability TEXT; -- if absent".into(),
                     format!(
                         "INSERT INTO schema_version (version, applied_at) VALUES ({MEMORY_SCHEMA_VERSION}, datetime('now'))"
                     ),
@@ -147,6 +160,11 @@ impl SqliteBackend {
                 vec![
                     format!("UPDATE facts SET mind = '{PRIMENSUS_MIND}' WHERE mind = 'default'"),
                     format!("UPDATE episodes SET mind = '{PRIMENSUS_MIND}' WHERE mind = 'default'"),
+                    "ALTER TABLE episodes ADD COLUMN formation TEXT; -- if absent".into(),
+                    "ALTER TABLE facts_vec ADD COLUMN space TEXT; -- if absent".into(),
+                    "ALTER TABLE facts_vec ADD COLUMN source_hash TEXT; -- if absent".into(),
+                    "ALTER TABLE facts ADD COLUMN lifecycle_inference TEXT; -- if absent".into(),
+                    "ALTER TABLE facts ADD COLUMN applicability TEXT; -- if absent".into(),
                     format!(
                         "INSERT INTO schema_version (version, applied_at) VALUES ({MEMORY_SCHEMA_VERSION}, datetime('now'))"
                     ),
@@ -441,6 +459,12 @@ impl SqliteBackend {
                 "TEXT NOT NULL DEFAULT '[]'",
             )?;
             Self::add_column_if_missing(&transaction, "episodes", "tool_calls_count", "INTEGER")?;
+            Self::add_column_if_missing(&transaction, "episodes", "formation", "TEXT")?;
+            Self::add_column_if_missing(&transaction, "facts_vec", "space", "TEXT")?;
+            Self::add_column_if_missing(&transaction, "facts_vec", "source_hash", "TEXT")?;
+            Self::add_column_if_missing(&transaction, "facts", "lifecycle_inference", "TEXT")?;
+            Self::add_column_if_missing(&transaction, "facts", "applicability", "TEXT")?;
+            transaction.execute_batch(CREATE_INDEXING_ATTEMPTS)?;
             transaction.execute_batch(
                 "CREATE TABLE IF NOT EXISTS memory_operation_receipts (
                     operation_id TEXT PRIMARY KEY,
@@ -612,6 +636,7 @@ impl SqliteBackend {
         let existed = path.exists();
         let conn = Connection::open(path)?;
         let backend = Self {
+            cache_identity: crate::selection_cache::backend_identity(),
             conn: Mutex::new(conn),
         };
         if let Err(error) = backend.init_schema(existed) {
@@ -639,6 +664,7 @@ impl SqliteBackend {
             anyhow::bail!("existing file is not an initialized memory store");
         }
         let backend = Self {
+            cache_identity: crate::selection_cache::backend_identity(),
             conn: Mutex::new(conn),
         };
         backend.init_schema(true)?;
@@ -649,6 +675,7 @@ impl SqliteBackend {
     pub fn in_memory() -> anyhow::Result<Self> {
         let conn = Connection::open_in_memory()?;
         let backend = Self {
+            cache_identity: crate::selection_cache::backend_identity(),
             conn: Mutex::new(conn),
         };
         backend.init_schema(false)?;
@@ -701,6 +728,8 @@ impl SqliteBackend {
             VALUES ('primensus', 'Authoritative ambient memory', datetime('now'));
 
             CREATE TABLE IF NOT EXISTS facts (
+                applicability TEXT,
+                lifecycle_inference TEXT,
                 id                  TEXT PRIMARY KEY,
                 mind                TEXT NOT NULL DEFAULT 'primensus',
                 section             TEXT NOT NULL,
@@ -738,6 +767,8 @@ impl SqliteBackend {
             CREATE TABLE IF NOT EXISTS facts_vec (
                 fact_id    TEXT PRIMARY KEY,
                 embedding  BLOB NOT NULL,
+                space      TEXT,
+                source_hash TEXT,
                 model_name TEXT NOT NULL DEFAULT '',
                 dims       INTEGER NOT NULL,
                 created_at TEXT NOT NULL,
@@ -783,6 +814,7 @@ impl SqliteBackend {
                 files_changed TEXT NOT NULL DEFAULT '[]',
                 tags TEXT NOT NULL DEFAULT '[]',
                 tool_calls_count INTEGER,
+                formation TEXT,
                 FOREIGN KEY (mind) REFERENCES minds(name) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_episodes_mind ON episodes(mind, date DESC);
@@ -846,6 +878,13 @@ impl SqliteBackend {
                 INSERT INTO episodes_fts(episodes_fts, rowid, id, mind, title, narrative)
                 VALUES ('delete', OLD.rowid, OLD.id, OLD.mind, OLD.title, OLD.narrative);
             END;
+            CREATE TRIGGER IF NOT EXISTS episodes_fts_update AFTER UPDATE ON episodes BEGIN
+                INSERT INTO episodes_fts(episodes_fts, rowid, id, mind, title, narrative)
+                VALUES ('delete', OLD.rowid, OLD.id, OLD.mind, OLD.title, OLD.narrative);
+                INSERT INTO episodes_fts(rowid, id, mind, title, narrative)
+                VALUES (NEW.rowid, NEW.id, NEW.mind, NEW.title, NEW.narrative);
+                DELETE FROM episodes_vec WHERE episode_id = NEW.id AND NEW.narrative != OLD.narrative;
+            END;
 
             -- Schema version tracking (TS compat — factstore.ts checks this)
             CREATE TABLE IF NOT EXISTS schema_version (
@@ -854,6 +893,7 @@ impl SqliteBackend {
             );
         ")?;
 
+        conn.execute_batch(CREATE_INDEXING_ATTEMPTS)?;
         let current: i64 = conn.query_row(
             "SELECT COALESCE(MAX(version), 0) FROM schema_version",
             [],
@@ -872,6 +912,24 @@ impl SqliteBackend {
         }
 
         Ok(())
+    }
+
+    fn indexing_record(
+        conn: &Connection,
+        fact_id: &str,
+    ) -> Result<Option<EmbeddingIndexingRecord>> {
+        let json: Option<String> = conn
+            .query_row(
+                "SELECT record_json FROM embedding_indexing WHERE fact_id = ?1",
+                params![fact_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        json.map(|json| {
+            serde_json::from_str(&json).map_err(|error| MemoryError::Storage(error.into()))
+        })
+        .transpose()
     }
 
     fn ensure_mind(&self, conn: &Connection, mind: &str) -> rusqlite::Result<()> {
@@ -905,15 +963,31 @@ impl SqliteBackend {
                 tracing::warn!(section = %section_str, "unknown section in DB — defaulting to Architecture");
                 Section::Architecture
             });
-        let status = serde_json::from_value::<FactStatus>(serde_json::Value::String(
-            status_str.clone(),
-        ))
-        .unwrap_or_else(|_| {
-            tracing::warn!(status = %status_str, "unknown status in DB — defaulting to Active");
-            FactStatus::Active
-        });
+        let status =
+            serde_json::from_value::<FactStatus>(serde_json::Value::String(status_str.clone()))
+                .map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        row.as_ref().column_index("status").unwrap_or(0),
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?;
 
         Ok(Fact {
+            applicability: row.get::<_,Option<String>>("applicability")?.map(|encoded| {
+                let record:RecordedApplicability=serde_json::from_str(&encoded).map_err(|error|rusqlite::Error::FromSqlConversionFailure(0,rusqlite::types::Type::Text,Box::new(error)))?;
+                record.validate().map_err(|error|rusqlite::Error::FromSqlConversionFailure(0,rusqlite::types::Type::Text,Box::new(error)))?;
+                Ok::<_,rusqlite::Error>(Box::new(record))
+            }).transpose()?,
+            lifecycle_inference: {
+                let inference = row.get::<_, Option<String>>("lifecycle_inference")?.map(|value| {
+                let inference: LifecycleInference = serde_json::from_str(&value).map_err(|error| rusqlite::Error::FromSqlConversionFailure(0,rusqlite::types::Type::Text,Box::new(error)))?;
+                validate_inference_status(&status,Some(&inference),&row.get::<_,String>("content")?).map_err(|error| rusqlite::Error::FromSqlConversionFailure(0,rusqlite::types::Type::Text,Box::new(error)))?;
+                Ok::<_,rusqlite::Error>(Box::new(inference))
+                }).transpose()?;
+                validate_inference_status(&status, inference.as_deref(),&row.get::<_,String>("content")?).map_err(|error| rusqlite::Error::FromSqlConversionFailure(0,rusqlite::types::Type::Text,Box::new(error)))?;
+                inference
+            },
             id: row.get("id")?,
             mind: row.get("mind")?,
             content: row.get("content")?,
@@ -931,7 +1005,7 @@ impl SqliteBackend {
             created_at: row.get("created_at")?,
             version: row.get::<_, i64>("version")? as u64,
             superseded_by: row.get::<_, Option<String>>("supersedes")?,
-            source: row.get("source")?,
+            source: row.get::<_, Option<String>>("source")?.filter(|source| !source.is_empty()),
             content_hash: Some(row.get::<_, String>("content_hash")?),
             last_accessed: row.get("last_accessed")?,
             created_session: row.get("created_session")?,
@@ -965,8 +1039,68 @@ impl SqliteBackend {
             files_changed: json_vec(row, "files_changed")?,
             tags: json_vec(row, "tags")?,
             tool_calls_count: row.get("tool_calls_count")?,
+            formation: row
+                .get::<_, Option<String>>("formation")?
+                .map(|value| {
+                    let formation =
+                        serde_json::from_str::<EpisodeFormation>(&value).map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                0,
+                                rusqlite::types::Type::Text,
+                                Box::new(error),
+                            )
+                        })?;
+                    formation.validate().map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?;
+                    Ok::<_, rusqlite::Error>(Box::new(formation))
+                })
+                .transpose()?,
             jj_change_id: row.get("jj_change_id")?,
         })
+    }
+
+    fn capture_cursor(
+        conn: &Connection,
+        key: &FormationCaptureKey,
+    ) -> Result<Option<FormationCursor>> {
+        let receipt: Option<String> = conn
+            .query_row(
+                "SELECT effect_json FROM memory_operation_receipts
+             WHERE json_extract(effect_json,'$.kind')='coverage_stored'
+               AND json_extract(effect_json,'$.key.mind')=?1
+               AND json_extract(effect_json,'$.key.session_id')=?2
+               AND json_extract(effect_json,'$.key.stream_id')=?3
+               AND json_extract(effect_json,'$.key.policy_version')=?4
+               AND json_extract(effect_json,'$.key.model') IS ?5
+             ORDER BY json_extract(effect_json,'$.cursor.sequence') DESC LIMIT 1",
+                params![
+                    key.mind,
+                    key.session_id,
+                    key.stream_id,
+                    key.policy_version,
+                    key.model
+                ],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        receipt
+            .map(|receipt| {
+                match serde_json::from_str::<MemoryMutationEffect>(&receipt)
+                    .map_err(|error| MemoryError::Storage(error.into()))?
+                {
+                    MemoryMutationEffect::CoverageStored { cursor, .. } => Ok(cursor),
+                    _ => Err(MemoryError::InvalidMutation(
+                        "invalid capture receipt".into(),
+                    )),
+                }
+            })
+            .transpose()
     }
 
     fn check_fact_precondition(conn: &Connection, fact: &FactPrecondition) -> Result<Fact> {
@@ -1001,7 +1135,23 @@ impl SqliteBackend {
                 continue;
             }
             match serde_json::from_str::<JsonlRecord>(trimmed) {
-                Ok(JsonlRecord::Fact(jf)) => {
+                Ok(JsonlRecord::ApplicableFact(ref fact)) if fact.applicability.is_none() => {
+                    return Err(MemoryError::InvalidMutation(
+                        "applicable_fact requires applicability metadata".into(),
+                    ));
+                }
+                Ok(JsonlRecord::Fact(jf) | JsonlRecord::ApplicableFact(jf)) => {
+                    if let Some(applicability) = &jf.applicability {
+                        applicability.validate()?;
+                    }
+                    validate_inference_status(
+                        &jf.status,
+                        jf.lifecycle_inference.as_deref(),
+                        &jf.content,
+                    )?;
+                    if let Some(operational) = &jf.operational {
+                        operational.validate()?;
+                    }
                     let incoming_version = persisted_lamport_version(jf.version)?;
                     self.ensure_mind(tx, &jf.mind)
                         .map_err(|error| MemoryError::Storage(error.into()))?;
@@ -1020,6 +1170,24 @@ impl SqliteBackend {
                     }
                     let section = serde_json::to_string(&jf.section)
                         .map_err(|error| MemoryError::InvalidMutation(error.to_string()))?;
+                    let existing_inference: Option<Option<String>> = tx
+                        .query_row(
+                            "SELECT lifecycle_inference FROM facts WHERE id=?1",
+                            [&jf.id],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .map_err(|error| MemoryError::Storage(error.into()))?;
+                    let prior = existing_inference
+                        .flatten()
+                        .map(|encoded| serde_json::from_str::<LifecycleInference>(&encoded))
+                        .transpose()
+                        .map_err(|error| MemoryError::Storage(error.into()))?;
+                    validate_inference_import(
+                        prior.as_ref(),
+                        jf.lifecycle_inference.as_deref(),
+                        &jf.status,
+                    )?;
                     let profile = serde_json::to_string(&jf.decay_profile)
                         .map_err(|error| MemoryError::InvalidMutation(error.to_string()))?;
                     let status = serde_json::to_string(&jf.status)
@@ -1033,7 +1201,7 @@ impl SqliteBackend {
                         tx.execute(
                             "UPDATE facts SET mind = ?1, content = ?2, section = ?3, status = ?4, source = ?5, content_hash = ?6, supersedes = ?7, decay_profile = ?8, version = ?9, persona_id = ?10, layer = ?11, tags = ?12 WHERE id = ?13",
                             params![jf.mind, jf.content, section.trim_matches('"'),
-                                status.trim_matches('"'), jf.source.as_deref().unwrap_or("manual"),
+                                status.trim_matches('"'), jf.source.as_deref().unwrap_or(""),
                                 content_hash, jf.supersedes, profile.trim_matches('"'), incoming_version,
                                 jf.persona_id, jf.layer, tags, jf.id],
                         ).map_err(|error| MemoryError::Storage(error.into()))?;
@@ -1043,25 +1211,80 @@ impl SqliteBackend {
                             "INSERT INTO facts (id, mind, section, content, status, created_at, source, content_hash, confidence, last_reinforced, reinforcement_count, decay_rate, decay_profile, version, supersedes, persona_id, layer, tags) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,1.0,?6,1,0.05,?9,?10,?11,?12,?13,?14)",
                             params![jf.id, jf.mind, section.trim_matches('"'), jf.content,
                                 status.trim_matches('"'), jf.created_at,
-                                jf.source.as_deref().unwrap_or("manual"), content_hash,
+                                jf.source.as_deref().unwrap_or(""), content_hash,
                                 profile.trim_matches('"'), incoming_version, jf.supersedes,
                                 jf.persona_id, jf.layer, tags],
                         ).map_err(|error| MemoryError::Storage(error.into()))?;
                         stats.imported += 1;
                     }
+                    tx.execute(
+                        "UPDATE facts SET created_at=?1 WHERE id=?2",
+                        params![jf.created_at, jf.id],
+                    )
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                    if let Some(op) = jf.operational {
+                        tx.execute("UPDATE facts SET confidence=?1, reinforcement_count=?2, decay_rate=?3, last_reinforced=?4, last_accessed=?5, created_session=?6, superseded_at=?7, archived_at=?8, jj_change_id=?9 WHERE id=?10",
+                            params![op.confidence,op.reinforcement_count,op.decay_rate,op.last_reinforced,op.last_accessed,op.created_session,op.superseded_at,op.archived_at,op.jj_change_id,jf.id])
+                            .map_err(|error| MemoryError::Storage(error.into()))?;
+                    }
+                    let inference = jf
+                        .lifecycle_inference
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()
+                        .map_err(|error| MemoryError::Storage(error.into()))?;
+                    if let Some(applicability) = &jf.applicability {
+                        let encoded = serde_json::to_string(applicability)
+                            .map_err(|error| MemoryError::Storage(error.into()))?;
+                        tx.execute(
+                            "UPDATE facts SET applicability=?1 WHERE id=?2",
+                            params![encoded, jf.id],
+                        )
+                        .map_err(|error| MemoryError::Storage(error.into()))?;
+                    }
+                    tx.execute(
+                        "UPDATE facts SET lifecycle_inference=?1 WHERE id=?2",
+                        params![inference, jf.id],
+                    )
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
                 }
                 Ok(JsonlRecord::Episode(episode)) => {
+                    if let Some(formation) = &episode.formation {
+                        formation.validate()?;
+                    }
+                    let prior = tx
+                        .query_row(
+                            "SELECT * FROM episodes WHERE id = ?1",
+                            params![episode.id],
+                            Self::row_to_episode,
+                        )
+                        .optional()
+                        .map_err(|error| MemoryError::Storage(error.into()))?;
+                    if let Some(prior) = prior
+                        && crate::formation::completes_import(&prior, &episode)?
+                    {
+                        let formation = episode.formation.as_ref().expect("completed formation");
+                        let encoded = serde_json::to_string(formation)
+                            .map_err(|error| MemoryError::Storage(error.into()))?;
+                        tx.execute(
+                            "UPDATE episodes SET formation = ?1, narrative = ?2 WHERE id = ?3",
+                            params![encoded, formation.narrative(), episode.id],
+                        )
+                        .map_err(|error| MemoryError::Storage(error.into()))?;
+                        stats.imported += 1;
+                        continue;
+                    }
                     self.ensure_mind(tx, &episode.mind)
                         .map_err(|error| MemoryError::Storage(error.into()))?;
                     let inserted = tx.execute(
-                        "INSERT OR IGNORE INTO episodes (id, mind, title, narrative, date, created_at, jj_change_id, affected_nodes, affected_changes, files_changed, tags, tool_calls_count) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+                        "INSERT OR IGNORE INTO episodes (id, mind, title, narrative, date, created_at, jj_change_id, affected_nodes, affected_changes, files_changed, tags, tool_calls_count, formation) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
                         params![episode.id, episode.mind, episode.title, episode.narrative,
                             episode.date, episode.created_at, episode.jj_change_id,
                             serde_json::to_string(&episode.affected_nodes).unwrap_or_else(|_| "[]".into()),
                             serde_json::to_string(&episode.affected_changes).unwrap_or_else(|_| "[]".into()),
                             serde_json::to_string(&episode.files_changed).unwrap_or_else(|_| "[]".into()),
                             serde_json::to_string(&episode.tags).unwrap_or_else(|_| "[]".into()),
-                            episode.tool_calls_count],
+                            episode.tool_calls_count, episode.formation.as_ref().map(serde_json::to_string).transpose().map_err(|error| MemoryError::Storage(error.into()))?],
                     ).map_err(|error| MemoryError::Storage(error.into()))?;
                     stats.imported += inserted;
                     stats.skipped += usize::from(inserted == 0);
@@ -1085,6 +1308,100 @@ impl SqliteBackend {
 
 #[async_trait]
 impl MemoryBackend for SqliteBackend {
+    async fn selection_revision(
+        &self,
+    ) -> Result<Option<crate::selection_cache::SelectionRevision>> {
+        if self.cache_identity == u64::MAX {
+            return Ok(None);
+        }
+        let conn = self.conn.lock().unwrap();
+        let external = conn
+            .query_row("PRAGMA data_version", [], |row| row.get(0))
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        Ok(Some(crate::selection_cache::SelectionRevision {
+            instance: self.cache_identity,
+            local: conn.total_changes(),
+            external,
+        }))
+    }
+    async fn selection_time_bounds(
+        &self,
+        mind: &str,
+        query_at: chrono::DateTime<chrono::Utc>,
+        wall_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Option<crate::selection_cache::SelectionTimeBounds>> {
+        let conn = self.conn.lock().unwrap();
+        let mut bounds = crate::selection_cache::SelectionTimeBounds::default();
+        let mut statement=conn.prepare("SELECT applicability,confidence,reinforcement_count,decay_profile,last_reinforced FROM facts WHERE mind=?1 AND status='active'").map_err(|error|MemoryError::Storage(error.into()))?;
+        let rows = statement
+            .query_map([mind], |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, f64>(1)?,
+                    row.get::<_, u32>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        for row in rows {
+            let (encoded, confidence, count, profile, reinforced) =
+                row.map_err(|error| MemoryError::Storage(error.into()))?;
+            let applicability = match encoded
+                .map(|text| serde_json::from_str::<RecordedApplicability>(&text))
+                .transpose()
+            {
+                Ok(value) => value,
+                Err(_) => return Ok(None),
+            };
+            if applicability
+                .as_ref()
+                .is_some_and(|record| record.validate().is_err())
+            {
+                return Ok(None);
+            }
+            let profile = match serde_json::from_value::<DecayProfileName>(
+                serde_json::Value::String(profile),
+            ) {
+                Ok(profile) => profile,
+                Err(_) => return Ok(None),
+            };
+            bounds.observe(
+                applicability.as_ref(),
+                confidence,
+                count,
+                &profile,
+                &reinforced,
+                query_at,
+                wall_at,
+            );
+        }
+        Ok(Some(bounds))
+    }
+    async fn get_fact_record(&self, mind: &str, id: &str) -> Result<Option<Fact>> {
+        self.conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT * FROM facts WHERE id=?1 AND mind=?2",
+                params![id, mind],
+                Self::row_to_fact,
+            )
+            .optional()
+            .map_err(|error| MemoryError::Storage(error.into()))
+    }
+    async fn get_pending_fact(&self, mind: &str, id: &str) -> Result<Option<Fact>> {
+        self.conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT * FROM facts WHERE id=?1 AND mind=?2 AND status='pending'",
+                params![id, mind],
+                Self::row_to_fact,
+            )
+            .optional()
+            .map_err(|error| MemoryError::Storage(error.into()))
+    }
     async fn mutation_receipt(
         &self,
         operation_id: &str,
@@ -1160,22 +1477,161 @@ impl MemoryBackend for SqliteBackend {
             });
         }
 
+        let mutation = crate::lifecycle::lower(mutation)?;
+        let completing_index =
+            matches!(&mutation, MemoryMutation::CompleteEmbeddingIndexing { .. });
+        if let MemoryMutation::CompleteEmbeddingIndexing {
+            fact,
+            attempt_id,
+            embedding,
+        } = &mutation
+        {
+            crate::indexing::admit_completion(
+                Self::indexing_record(&transaction, &fact.id)?.as_ref(),
+                fact,
+                embedding,
+                Some(attempt_id),
+            )?;
+        }
+        let capture = if let MemoryMutation::StoreCoveragePage { request, expected } = &mutation {
+            let key = crate::formation::capture_key(request)?;
+            let actual = Self::capture_cursor(&transaction, &key)?;
+            let cursor =
+                crate::formation::advance_capture(request, expected.as_ref(), actual.as_ref())?;
+            Some((key, cursor))
+        } else {
+            None
+        };
+        let applicability = match &mutation {
+            MemoryMutation::StoreApplicableFact { constraints, .. } => {
+                Some(Box::new(RecordedApplicability::new(*constraints.clone())?))
+            }
+            _ => None,
+        };
+        let inference = match &mutation {
+            MemoryMutation::StoreLifecycleInference { inference, .. } => Some(inference.clone()),
+            _ => None,
+        };
         let effect = match mutation {
+            MemoryMutation::SetFactApplicability { fact, constraints } => {
+                Self::check_fact_precondition(&transaction, &fact)?;
+                let applicability = RecordedApplicability::new(*constraints)?;
+                let encoded = serde_json::to_string(&applicability)
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                let version = Self::next_version_static(&transaction)?;
+                transaction
+                    .execute(
+                        "UPDATE facts SET applicability=?1,version=?2 WHERE id=?3",
+                        params![encoded, version as i64, fact.id],
+                    )
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                MemoryMutationEffect::ApplicabilityUpdated {
+                    fact: FactPrecondition {
+                        id: fact.id,
+                        expected_version: version,
+                    },
+                }
+            }
+            MemoryMutation::ConfirmLifecycleCandidate {
+                candidate,
+                snapshot_hash,
+                session_id,
+                request_id,
+                surface,
+                supersedes,
+            } => {
+                let mut fact = Self::check_fact_precondition(&transaction, &candidate)?;
+                if let Some(target) = &supersedes {
+                    let old = Self::check_fact_precondition(&transaction, target)?;
+                    if old.mind != fact.mind || old.status != FactStatus::Active {
+                        return Err(MemoryError::InvalidMutation(
+                            "confirmation correction requires an active fact in the same mind"
+                                .into(),
+                        ));
+                    }
+                }
+                crate::lifecycle::confirm_candidate(
+                    &mut fact,
+                    &snapshot_hash,
+                    session_id,
+                    request_id,
+                    surface,
+                    supersedes.as_ref(),
+                )?;
+                let mut original = None;
+                if let Some(target) = supersedes {
+                    let version = Self::next_version_static(&transaction)?;
+                    transaction.execute("UPDATE facts SET status='superseded',version=?1,superseded_at=?2 WHERE id=?3",params![version as i64,fact.last_reinforced,target.id]).map_err(|error|MemoryError::Storage(error.into()))?;
+                    original = Some(FactPrecondition {
+                        id: target.id,
+                        expected_version: version,
+                    });
+                }
+                let version = Self::next_version_static(&transaction)?;
+                let inference = serde_json::to_string(&fact.lifecycle_inference)
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                transaction.execute("UPDATE facts SET status='active',confidence=1.0,reinforcement_count=1,last_reinforced=?1,version=?2,lifecycle_inference=?3,supersedes=?4 WHERE id=?5",
+                    params![fact.last_reinforced,version as i64,inference,fact.superseded_by,candidate.id]).map_err(|error| MemoryError::Storage(error.into()))?;
+                match original {
+                    Some(original) => MemoryMutationEffect::FactSuperseded {
+                        original,
+                        replacement: FactPrecondition {
+                            id: candidate.id,
+                            expected_version: version,
+                        },
+                    },
+                    None => MemoryMutationEffect::FactStored {
+                        fact_id: candidate.id,
+                        version,
+                        action: StoreAction::Stored,
+                    },
+                }
+            }
+            MemoryMutation::StoreLifecycleConclusion { .. } => {
+                return Err(MemoryError::InvalidMutation(
+                    "unlowered lifecycle conclusion".into(),
+                ));
+            }
             MemoryMutation::ImportJsonl { jsonl } => {
                 jsonl_import_effect(self.import_jsonl_transaction(&transaction, &jsonl)?)
             }
-            MemoryMutation::StoreFact { request } => {
+            MemoryMutation::StoreFact { request }
+            | MemoryMutation::StoreApplicableFact { request, .. }
+            | MemoryMutation::StoreLifecycleInference { request, .. } => {
                 self.ensure_mind(&transaction, &request.mind)
                     .map_err(|error| MemoryError::Storage(error.into()))?;
                 let content_hash = hash::content_hash(&request.content);
-                let existing_id: Option<String> = transaction
-                    .query_row(
-                        "SELECT id FROM facts WHERE mind = ?1 AND content_hash = ?2 AND status = 'active'",
-                        params![request.mind, content_hash],
-                        |row| row.get(0),
+                let mut candidates=transaction.prepare("SELECT * FROM facts WHERE mind = ?1 AND content_hash = ?2 AND status = 'active' AND ?3=0 AND (?4=0 OR (content=?5 AND source=?6 AND section=?7)) ORDER BY id").map_err(|error|MemoryError::Storage(error.into()))?;
+                let rows = candidates
+                    .query_map(
+                        params![
+                            request.mind,
+                            content_hash,
+                            inference.is_some(),
+                            crate::lifecycle::requires_exact_source(request.source.as_deref()),
+                            request.content,
+                            request.source,
+                            serde_json::to_string(&request.section)
+                                .unwrap()
+                                .trim_matches('"')
+                        ],
+                        Self::row_to_fact,
                     )
-                    .optional()
                     .map_err(|error| MemoryError::Storage(error.into()))?;
+                let mut existing_id = None;
+                for row in rows {
+                    let existing = row.map_err(|error| MemoryError::Storage(error.into()))?;
+                    if existing
+                        .applicability
+                        .as_ref()
+                        .map(|record| &record.constraints)
+                        == applicability.as_ref().map(|record| &record.constraints)
+                    {
+                        existing_id = Some(existing.id);
+                        break;
+                    }
+                }
+                drop(candidates);
                 let version = Self::next_version_static(&transaction)?;
                 if let Some(fact_id) = existing_id {
                     transaction.execute(
@@ -1194,12 +1650,28 @@ impl MemoryBackend for SqliteBackend {
                         .map_err(|error| MemoryError::InvalidMutation(error.to_string()))?;
                     let profile = serde_json::to_string(&request.decay_profile)
                         .map_err(|error| MemoryError::InvalidMutation(error.to_string()))?;
+                    let pending = inference.is_some();
+                    let encoded = inference
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()
+                        .map_err(|error| MemoryError::Storage(error.into()))?;
                     transaction.execute(
-                        "INSERT INTO facts (id, mind, section, content, status, created_at, source, content_hash, confidence, last_reinforced, reinforcement_count, decay_rate, decay_profile, version) VALUES (?1,?2,?3,?4,'active',?5,?6,?7,1.0,?5,1,0.05,?8,?9)",
+                        "INSERT INTO facts (id, mind, section, content, status, created_at, source, content_hash, confidence, last_reinforced, reinforcement_count, decay_rate, decay_profile, version, lifecycle_inference) VALUES (?1,?2,?3,?4,?10,?5,?6,?7,?11,?5,?11,0.05,?8,?9,?12)",
                         params![fact_id, request.mind, section.trim_matches('"'), request.content,
                             timestamp, request.source.as_deref().unwrap_or("manual"), content_hash,
-                            profile.trim_matches('"'), version as i64],
+                            profile.trim_matches('"'), version as i64, if pending {"pending"} else {"active"}, if pending {0} else {1}, encoded],
                     ).map_err(|error| MemoryError::Storage(error.into()))?;
+                    if let Some(applicability) = &applicability {
+                        let encoded = serde_json::to_string(applicability)
+                            .map_err(|error| MemoryError::Storage(error.into()))?;
+                        transaction
+                            .execute(
+                                "UPDATE facts SET applicability=?1 WHERE id=?2",
+                                params![encoded, fact_id],
+                            )
+                            .map_err(|error| MemoryError::Storage(error.into()))?;
+                    }
                     MemoryMutationEffect::FactStored {
                         fact_id,
                         version,
@@ -1284,6 +1756,11 @@ impl MemoryBackend for SqliteBackend {
             }
             MemoryMutation::SupersedeFact { fact, replacement } => {
                 let existing = Self::check_fact_precondition(&transaction, &fact)?;
+                if existing.mind != replacement.mind {
+                    return Err(MemoryError::InvalidMutation(
+                        "supersession must remain in the same mind".into(),
+                    ));
+                }
                 if existing.status != FactStatus::Active {
                     return Err(MemoryError::FactNotFound(fact.id));
                 }
@@ -1369,7 +1846,12 @@ impl MemoryBackend for SqliteBackend {
                 model_name,
                 embedding,
             } => {
-                Self::check_fact_precondition(&transaction, &fact)?;
+                if Self::check_fact_precondition(&transaction, &fact)?.status == FactStatus::Pending
+                {
+                    return Err(MemoryError::InvalidMutation(
+                        "pending candidates cannot be indexed".into(),
+                    ));
+                }
                 let dims = embedding.len() as u32;
                 let recorded_dims: Option<u32> = transaction
                     .query_row(
@@ -1403,6 +1885,74 @@ impl MemoryBackend for SqliteBackend {
                     dims,
                 }
             }
+            MemoryMutation::RecordEmbeddingIndexing { record } => {
+                let source = Self::check_fact_precondition(&transaction, &record.fact)?;
+                if source.status != FactStatus::Active {
+                    return Err(MemoryError::InvalidMutation(
+                        "embedding source must be active".into(),
+                    ));
+                }
+                crate::indexing::admit_record(
+                    Self::indexing_record(&transaction, &record.fact.id)?.as_ref(),
+                    &record,
+                )?;
+                let json = serde_json::to_string(&record)
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                let reason = serde_json::to_string(&record.reason)
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                transaction.execute("INSERT OR REPLACE INTO embedding_indexing (fact_id,fact_version,reason,record_json) VALUES (?1,?2,?3,?4)",
+                    params![record.fact.id, record.fact.expected_version, reason, json])
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                MemoryMutationEffect::EmbeddingIndexingRecorded {
+                    fact: record.fact,
+                    attempt_id: record.attempt_id,
+                }
+            }
+            MemoryMutation::StoreIdentifiedEmbedding { fact, embedding }
+            | MemoryMutation::CompleteEmbeddingIndexing {
+                fact, embedding, ..
+            } => {
+                embedding.validate()?;
+                let source = Self::check_fact_precondition(&transaction, &fact)?;
+                crate::indexing::admit_completion(
+                    Self::indexing_record(&transaction, &fact.id)?.as_ref(),
+                    &fact,
+                    &embedding,
+                    None,
+                )?;
+                if source.status != FactStatus::Active {
+                    return Err(MemoryError::InvalidMutation(
+                        "embedding source must be active".into(),
+                    ));
+                }
+                let space = serde_json::to_string(&embedding.space)
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                let source_hash = crate::retrieval::raw_content_hash(&source.content);
+                let timestamp = now_iso();
+                let unchanged = completing_index && transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM facts_vec WHERE fact_id=?1 AND space=?2 AND source_hash=?3 AND model_name=?4 AND dims=?5 AND embedding=?6)",
+                    params![fact.id, space, source_hash, embedding.space.model, embedding.space.dimensions, vectors::vector_to_blob(&embedding.values)],
+                    |row| row.get::<_, bool>(0),
+                ).map_err(|error| MemoryError::Storage(error.into()))?;
+                if !unchanged {
+                    transaction.execute("INSERT OR REPLACE INTO facts_vec (fact_id,embedding,model_name,dims,created_at,space,source_hash) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                    params![fact.id, vectors::vector_to_blob(&embedding.values), embedding.space.model, embedding.space.dimensions, timestamp, space, source_hash])
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                }
+                transaction.execute("INSERT OR IGNORE INTO embedding_metadata (model_name,dims,inserted_at) VALUES (?1,?2,?3)", params![embedding.space.model,embedding.space.dimensions,timestamp])
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                transaction
+                    .execute(
+                        "DELETE FROM embedding_indexing WHERE fact_id = ?1",
+                        params![fact.id],
+                    )
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                MemoryMutationEffect::EmbeddingStored {
+                    fact_id: fact.id,
+                    model_name: embedding.space.model,
+                    dims: embedding.space.dimensions,
+                }
+            }
             MemoryMutation::CreateEdge { mind, request } => {
                 for fact_id in [&request.source_id, &request.target_id] {
                     let endpoint: Option<(String, String)> = transaction
@@ -1429,22 +1979,59 @@ impl MemoryBackend for SqliteBackend {
                 ).map_err(|error| MemoryError::Storage(error.into()))?;
                 MemoryMutationEffect::EdgeCreated { edge_id }
             }
-            MemoryMutation::StoreEpisode { request } => {
+            MemoryMutation::StoreEpisode { request }
+            | MemoryMutation::StoreCoveragePage { request, .. } => {
+                if let Some(formation) = &request.formation {
+                    formation.validate()?;
+                }
                 self.ensure_mind(&transaction, &request.mind)
                     .map_err(|error| MemoryError::Storage(error.into()))?;
                 let episode_id = gen_id();
                 let timestamp = now_iso();
                 let date = request.date.unwrap_or_else(|| timestamp[..10].to_string());
                 transaction.execute(
-                    "INSERT INTO episodes (id, mind, title, narrative, date, created_at, affected_nodes, affected_changes, files_changed, tags, tool_calls_count) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                    "INSERT INTO episodes (id, mind, title, narrative, date, created_at, affected_nodes, affected_changes, files_changed, tags, tool_calls_count, formation) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
                     params![episode_id, request.mind, request.title, request.narrative, date, timestamp,
                         serde_json::to_string(&request.affected_nodes).unwrap_or_else(|_| "[]".into()),
                         serde_json::to_string(&request.affected_changes).unwrap_or_else(|_| "[]".into()),
                         serde_json::to_string(&request.files_changed).unwrap_or_else(|_| "[]".into()),
                         serde_json::to_string(&request.tags).unwrap_or_else(|_| "[]".into()),
-                        request.tool_calls_count],
+                        request.tool_calls_count, request.formation.as_ref().map(serde_json::to_string).transpose().map_err(|error| MemoryError::Storage(error.into()))?],
                 ).map_err(|error| MemoryError::Storage(error.into()))?;
-                MemoryMutationEffect::EpisodeStored { episode_id }
+                match capture {
+                    Some((key, cursor)) => MemoryMutationEffect::CoverageStored {
+                        episode_id,
+                        key,
+                        cursor,
+                    },
+                    None => MemoryMutationEffect::EpisodeStored { episode_id },
+                }
+            }
+            MemoryMutation::CompleteFormation {
+                episode_id,
+                formation,
+            } => {
+                let episode = transaction
+                    .query_row(
+                        "SELECT * FROM episodes WHERE id = ?1",
+                        params![episode_id],
+                        Self::row_to_episode,
+                    )
+                    .optional()
+                    .map_err(|error| MemoryError::Storage(error.into()))?
+                    .ok_or_else(|| {
+                        MemoryError::InvalidMutation("formation episode not found".into())
+                    })?;
+                crate::formation::validate_completion(episode.formation.as_deref(), &formation)?;
+                let encoded = serde_json::to_string(&formation)
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                transaction
+                    .execute(
+                        "UPDATE episodes SET formation = ?1, narrative = ?2 WHERE id = ?3",
+                        params![encoded, formation.narrative(), episode_id],
+                    )
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                MemoryMutationEffect::FormationCompleted { episode_id }
             }
         };
 
@@ -1479,7 +2066,7 @@ impl MemoryBackend for SqliteBackend {
         // Check dedup
         let existing: Option<String> = transaction
             .query_row(
-                "SELECT id FROM facts WHERE mind = ?1 AND content_hash = ?2 AND status = 'active'",
+                "SELECT id FROM facts WHERE mind = ?1 AND content_hash = ?2 AND status = 'active' AND applicability IS NULL",
                 params![req.mind, ch],
                 |r| r.get(0),
             )
@@ -1588,8 +2175,8 @@ impl MemoryBackend for SqliteBackend {
             let facts = stmt
                 .query_map(params![mind, status_str, section_param], Self::row_to_fact)
                 .map_err(|e| MemoryError::Storage(e.into()))?
-                .filter_map(|r| r.map_err(|e| tracing::debug!("row deser error: {e}")).ok())
-                .collect();
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|error| MemoryError::Storage(error.into()))?;
             Ok(facts)
         } else {
             sql = "SELECT * FROM facts WHERE mind = ?1 AND status = ?2 ORDER BY created_at DESC";
@@ -1599,8 +2186,8 @@ impl MemoryBackend for SqliteBackend {
             let facts = stmt
                 .query_map(params![mind, status_str], Self::row_to_fact)
                 .map_err(|e| MemoryError::Storage(e.into()))?
-                .filter_map(|r| r.map_err(|e| tracing::debug!("row deser error: {e}")).ok())
-                .collect();
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|error| MemoryError::Storage(error.into()))?;
             Ok(facts)
         }
     }
@@ -1895,43 +2482,77 @@ impl MemoryBackend for SqliteBackend {
     }
 
     async fn fts_search(&self, mind: &str, query: &str, k: usize) -> Result<Vec<ScoredFact>> {
+        self.fts_search_filtered(mind, query, k, &SearchFilter::default())
+            .await
+    }
+
+    async fn fts_search_filtered(
+        &self,
+        mind: &str,
+        query: &str,
+        k: usize,
+        filter: &SearchFilter,
+    ) -> Result<Vec<ScoredFact>> {
+        let filter = filter.resolved()?;
         let conn = self.conn.lock().unwrap();
         // Use FTS5 OR mode for broader matching
         let fts_query = query
             .split_whitespace()
-            .map(|w| format!("\"{w}\""))
+            .map(|w| format!("\"{}\"", w.replace('"', "\"\"")))
             .collect::<Vec<_>>()
             .join(" OR ");
+
+        if fts_query.is_empty() || k == 0 {
+            return Ok(Vec::new());
+        }
+        let section = filter.section.as_ref().map(|section| {
+            serde_json::to_string(section)
+                .unwrap_or_default()
+                .trim_matches('"')
+                .to_string()
+        });
 
         let mut stmt = conn
             .prepare(
                 "SELECT f.*, rank FROM facts_fts fts \
              JOIN facts f ON f.id = fts.id \
-             WHERE facts_fts MATCH ?1 AND fts.mind = ?2 AND f.status = 'active' \
-             ORDER BY rank, f.id LIMIT ?3",
+             WHERE facts_fts MATCH ?1 AND f.mind = ?2 \
+              AND ((?3 = 0 AND f.status = 'active') OR (?3 = 1 AND f.status IN ('archived','dormant','superseded'))) \
+              AND (?4 IS NULL OR f.section = ?4) \
+              ORDER BY rank, f.id",
             )
             .map_err(|e| MemoryError::Storage(e.into()))?;
 
-        let mut results: Vec<ScoredFact> = stmt
-            .query_map(
-                params![fts_query, mind, (k.saturating_mul(8).max(k)) as i64],
-                |row| {
-                    let fact = Self::row_to_fact(row)?;
-                    let rank: f64 = row.get("rank")?;
-                    Ok((fact, -rank))
-                },
-            )
-            .map_err(|e| MemoryError::Storage(e.into()))?
-            .filter_map(|r| r.map_err(|e| tracing::debug!("row deser: {e}")).ok())
-            .filter_map(|(fact, relevance)| {
-                let score = crate::decay::ambient_score(relevance, &fact)?;
-                Some(ScoredFact {
-                    fact,
-                    similarity: relevance,
-                    score,
-                })
-            })
-            .collect();
+        let mut rows = stmt
+            .query(params![
+                fts_query,
+                mind,
+                filter.intent == SearchIntent::Historical,
+                section
+            ])
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        let mut results = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .map_err(|error| MemoryError::Storage(error.into()))?
+        {
+            let fact =
+                Self::row_to_fact(row).map_err(|error| MemoryError::Storage(error.into()))?;
+            let relevance = -row
+                .get::<_, f64>("rank")
+                .map_err(|error| MemoryError::Storage(error.into()))?;
+            let Some(score) = filter.score(relevance, &fact) else {
+                continue;
+            };
+            let applicability = filter.applicability_status(&fact);
+            let mut result = ScoredFact::new(fact, relevance, score);
+            result.applicability = applicability;
+            result.scores.lexical = Some(relevance);
+            results.push(result);
+            if results.len() >= k.saturating_mul(8) {
+                break;
+            }
+        }
         results.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
@@ -1950,77 +2571,8 @@ impl MemoryBackend for SqliteBackend {
         k: usize,
         min_similarity: f32,
     ) -> Result<Vec<ScoredFact>> {
-        let conn = self.conn.lock().unwrap();
-
-        // Check if any embeddings exist for this mind
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM facts_vec fv JOIN facts f ON f.id = fv.fact_id WHERE f.mind = ?1",
-            params![mind], |r| r.get(0),
-        ).map_err(|e| MemoryError::Storage(e.into()))?;
-
-        if count == 0 {
-            return Err(MemoryError::NoEmbeddings);
-        }
-
-        // Check dimension match
-        let stored_dims: u32 = conn.query_row(
-            "SELECT dims FROM facts_vec fv JOIN facts f ON f.id = fv.fact_id WHERE f.mind = ?1 LIMIT 1",
-            params![mind], |r| r.get(0),
-        ).map_err(|e| MemoryError::Storage(e.into()))?;
-
-        let query_dims = embedding.len() as u32;
-        if stored_dims != query_dims {
-            let model: String = conn.query_row(
-                "SELECT model_name FROM facts_vec fv JOIN facts f ON f.id = fv.fact_id WHERE f.mind = ?1 LIMIT 1",
-                params![mind], |r| r.get(0),
-            ).map_err(|e| MemoryError::Storage(e.into()))?;
-            return Err(MemoryError::EmbeddingDimensionMismatch {
-                expected: stored_dims,
-                got: query_dims,
-                stored_model: model,
-            });
-        }
-
-        // Linear scan — load all vectors and compute cosine similarity
-        let mut stmt = conn
-            .prepare(
-                "SELECT fv.fact_id, fv.embedding, f.* FROM facts_vec fv \
-             JOIN facts f ON f.id = fv.fact_id \
-             WHERE f.mind = ?1 AND f.status = 'active'",
-            )
-            .map_err(|e| MemoryError::Storage(e.into()))?;
-
-        let mut results: Vec<ScoredFact> = stmt
-            .query_map(params![mind], |row| {
-                let blob: Vec<u8> = row.get("embedding")?;
-                let fact = Self::row_to_fact(row)?;
-                Ok((blob, fact))
-            })
-            .map_err(|e| MemoryError::Storage(e.into()))?
-            .filter_map(|r| r.map_err(|e| tracing::debug!("row deser: {e}")).ok())
-            .filter_map(|(blob, fact)| {
-                let vec = vectors::blob_to_vector(&blob);
-                let sim = vectors::cosine_similarity(&vec, embedding);
-                if sim < min_similarity {
-                    return None;
-                }
-                let score = crate::decay::ambient_score(sim as f64, &fact)?;
-                Some(ScoredFact {
-                    similarity: sim as f64,
-                    score,
-                    fact,
-                })
-            })
-            .collect();
-
-        results.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.fact.id.cmp(&b.fact.id))
-        });
-        results.truncate(k);
-        Ok(results)
+        let _ = (mind, embedding, k, min_similarity);
+        Err(MemoryError::EmbeddingIdentityRequired)
     }
 
     async fn vector_search_cancellable(
@@ -2031,69 +2583,31 @@ impl MemoryBackend for SqliteBackend {
         min_similarity: f32,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> Result<Vec<ScoredFact>> {
-        let conn = self.conn.lock().unwrap();
-        let mut statement = conn
-            .prepare(
-                "SELECT fv.embedding, fv.model_name, fv.dims, f.* FROM facts_vec fv \
-                 JOIN facts f ON f.id = fv.fact_id \
-                 WHERE f.mind = ?1 AND f.status = 'active' ORDER BY fv.fact_id",
-            )
-            .map_err(|error| MemoryError::Storage(error.into()))?;
-        let mut rows = statement
-            .query(params![mind])
-            .map_err(|error| MemoryError::Storage(error.into()))?;
-        let mut found = false;
-        let mut results = Vec::new();
-        while let Some(row) = rows
-            .next()
-            .map_err(|error| MemoryError::Storage(error.into()))?
-        {
-            if cancelled() {
-                return Err(MemoryError::Cancelled);
-            }
-            found = true;
-            let dimensions = row
-                .get::<_, u32>("dims")
-                .map_err(|error| MemoryError::Storage(error.into()))?;
-            if dimensions != embedding.len() as u32 {
-                return Err(MemoryError::EmbeddingDimensionMismatch {
-                    expected: dimensions,
-                    got: embedding.len() as u32,
-                    stored_model: row
-                        .get("model_name")
-                        .map_err(|error| MemoryError::Storage(error.into()))?,
-                });
-            }
-            let blob: Vec<u8> = row
-                .get("embedding")
-                .map_err(|error| MemoryError::Storage(error.into()))?;
-            let fact =
-                Self::row_to_fact(row).map_err(|error| MemoryError::Storage(error.into()))?;
-            let similarity = vectors::cosine_similarity(&vectors::blob_to_vector(&blob), embedding);
-            if similarity < min_similarity {
-                continue;
-            }
-            let Some(score) = crate::decay::ambient_score(similarity as f64, &fact) else {
-                continue;
-            };
-            results.push(ScoredFact {
-                fact,
-                similarity: similarity as f64,
-                score,
-            });
+        self.vector_search_filtered_cancellable(
+            mind,
+            embedding,
+            k,
+            min_similarity,
+            &SearchFilter::default(),
+            cancelled,
+        )
+        .await
+    }
+
+    async fn vector_search_filtered_cancellable(
+        &self,
+        mind: &str,
+        embedding: &[f32],
+        k: usize,
+        min_similarity: f32,
+        filter: &SearchFilter,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<Vec<ScoredFact>> {
+        let _ = (mind, embedding, k, min_similarity, filter);
+        if cancelled() {
+            return Err(MemoryError::Cancelled);
         }
-        if !found {
-            return Err(MemoryError::NoEmbeddings);
-        }
-        results.sort_by(|left, right| {
-            right
-                .score
-                .partial_cmp(&left.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| left.fact.id.cmp(&right.fact.id))
-        });
-        results.truncate(k);
-        Ok(results)
+        Err(MemoryError::EmbeddingIdentityRequired)
     }
 
     async fn store_embedding(
@@ -2113,7 +2627,7 @@ impl MemoryBackend for SqliteBackend {
 
         let fact_exists: bool = transaction
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM facts WHERE id = ?1)",
+                "SELECT EXISTS(SELECT 1 FROM facts WHERE id = ?1 AND status != 'pending')",
                 params![fact_id],
                 |row| row.get(0),
             )
@@ -2160,8 +2674,7 @@ impl MemoryBackend for SqliteBackend {
     async fn embedding_metadata(&self, mind: &str) -> Result<Option<EmbeddingMetadata>> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT em.model_name, em.dims, em.inserted_at FROM embedding_metadata em \
-             JOIN facts_vec fv ON fv.model_name = em.model_name \
+            "SELECT fv.model_name, fv.dims, fv.created_at FROM facts_vec fv \
              JOIN facts f ON f.id = fv.fact_id \
              WHERE f.mind = ?1 LIMIT 1",
             params![mind],
@@ -2175,6 +2688,251 @@ impl MemoryBackend for SqliteBackend {
         )
         .optional()
         .map_err(|e| MemoryError::Storage(e.into()))
+    }
+
+    async fn search_identified(
+        &self,
+        mind: &str,
+        query: &IdentifiedEmbedding,
+        k: usize,
+        minimum: f32,
+        filter: &SearchFilter,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<VectorSearchReport> {
+        let filter = filter.resolved()?;
+        let mut top = crate::retrieval::VectorAccumulator::new(query, k, minimum)?;
+        if cancelled() {
+            return Err(MemoryError::Cancelled);
+        }
+        if k == 0 {
+            return Ok(top.finish());
+        }
+        let conn = self.conn.lock().unwrap();
+        let section = filter.section.as_ref().map(|section| {
+            serde_json::to_string(section)
+                .unwrap()
+                .trim_matches('"')
+                .to_string()
+        });
+        let mut statement = conn.prepare("SELECT f.*, fv.embedding, fv.space, fv.source_hash, fv.dims AS vector_dims, fv.model_name AS vector_model FROM facts f JOIN facts_vec fv ON fv.fact_id=f.id WHERE f.mind=?1 AND ((?2=0 AND f.status='active') OR (?2=1 AND f.status IN ('dormant','archived','superseded'))) AND (?3 IS NULL OR f.section=?3) ORDER BY f.id")
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        let mut rows = statement
+            .query(params![
+                mind,
+                filter.intent == SearchIntent::Historical,
+                section
+            ])
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        while let Some(row) = rows
+            .next()
+            .map_err(|error| MemoryError::Storage(error.into()))?
+        {
+            if cancelled() {
+                return Err(MemoryError::Cancelled);
+            }
+            let fact =
+                Self::row_to_fact(row).map_err(|error| MemoryError::Storage(error.into()))?;
+            if !filter.matches(&fact) {
+                continue;
+            }
+            let space = crate::retrieval::stored_space(
+                row.get("space")
+                    .map_err(|error| MemoryError::Storage(error.into()))?,
+            )?;
+            let source_hash: Option<String> = row
+                .get("source_hash")
+                .map_err(|error| MemoryError::Storage(error.into()))?;
+            if let Some(space) = &space {
+                let dims: u32 = row
+                    .get("vector_dims")
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                let model: String = row
+                    .get("vector_model")
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                if dims != space.dimensions || model != space.model {
+                    return Err(MemoryError::Storage(anyhow::anyhow!(
+                        "inconsistent vector metadata"
+                    )));
+                }
+            }
+            if !top.eligible(crate::retrieval::index_state(
+                space.as_ref(),
+                source_hash.as_deref(),
+                &fact.content,
+                &query.space,
+            )) {
+                continue;
+            }
+            let blob: Vec<u8> = row
+                .get("embedding")
+                .map_err(|error| MemoryError::Storage(error.into()))?;
+            let vector = crate::retrieval::decode(&blob, &query.space)?;
+            let similarity = vectors::cosine_similarity(&vector, &query.values);
+            if similarity >= minimum {
+                top.push(fact, similarity as f64, &filter);
+            }
+        }
+        Ok(top.finish())
+    }
+
+    async fn embedding_indexing_record(
+        &self,
+        fact_id: &str,
+    ) -> Result<Option<EmbeddingIndexingRecord>> {
+        Self::indexing_record(&self.conn.lock().unwrap(), fact_id)
+    }
+
+    async fn embedding_indexing_summary(&self, mind: &str) -> Result<EmbeddingIndexingSummary> {
+        let conn = self.conn.lock().unwrap();
+        let mut summary = EmbeddingIndexingSummary::default();
+        let mut stmt = conn.prepare("SELECT i.reason, f.version != i.fact_version AS stale, COUNT(*) FROM embedding_indexing i JOIN facts f ON f.id = i.fact_id WHERE f.mind = ?1 AND f.status = 'active' GROUP BY i.reason, stale")
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        let rows = stmt
+            .query_map(params![mind], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, bool>(1)?,
+                    row.get::<_, usize>(2)?,
+                ))
+            })
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        for row in rows {
+            let (reason, stale, count) = row.map_err(|error| MemoryError::Storage(error.into()))?;
+            let reason = if stale {
+                EmbeddingIndexingReason::SourceChanged
+            } else {
+                serde_json::from_str(&reason).map_err(|error| MemoryError::Storage(error.into()))?
+            };
+            summary.observe(reason, count);
+        }
+        summary.untracked = conn.query_row("SELECT COUNT(*) FROM facts f LEFT JOIN embedding_indexing i ON i.fact_id = f.id LEFT JOIN facts_vec v ON v.fact_id = f.id WHERE f.mind = ?1 AND f.status = 'active' AND i.fact_id IS NULL AND (v.fact_id IS NULL OR v.space IS NULL)", params![mind], |row| row.get(0))
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        Ok(summary)
+    }
+
+    async fn embedding_index_state(
+        &self,
+        id: &str,
+        space: &EmbeddingSpace,
+    ) -> Result<EmbeddingIndexState> {
+        space.validate()?;
+        let conn = self.conn.lock().unwrap();
+        type IndexRow = (
+            String,
+            Option<String>,
+            Option<String>,
+            Option<Vec<u8>>,
+            Option<u32>,
+            Option<String>,
+        );
+        let row: Option<IndexRow> = conn.query_row(
+            "SELECT f.content,v.space,v.source_hash,v.embedding,v.dims,v.model_name FROM facts f LEFT JOIN facts_vec v ON v.fact_id=f.id WHERE f.id=?1", params![id],
+            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?))).optional().map_err(|error| MemoryError::Storage(error.into()))?;
+        let Some((content, encoded, hash, blob, dims, model)) = row else {
+            return Err(MemoryError::FactNotFound(id.into()));
+        };
+        let Some(blob) = blob else {
+            return Ok(EmbeddingIndexState::Missing);
+        };
+        let stored = crate::retrieval::stored_space(encoded)?;
+        if stored.as_ref().is_some_and(|stored| {
+            dims != Some(stored.dimensions) || model.as_deref() != Some(stored.model.as_str())
+        }) {
+            return Err(MemoryError::Storage(anyhow::anyhow!(
+                "inconsistent vector metadata"
+            )));
+        }
+        let state =
+            crate::retrieval::index_state(stored.as_ref(), hash.as_deref(), &content, space);
+        if state == EmbeddingIndexState::Ready {
+            crate::retrieval::decode(&blob, space)?;
+        }
+        Ok(state)
+    }
+
+    async fn get_fact_filtered(
+        &self,
+        mind: &str,
+        id: &str,
+        filter: &SearchFilter,
+    ) -> Result<Option<Fact>> {
+        let filter = filter.resolved()?;
+        let conn = self.conn.lock().unwrap();
+        let fact = conn
+            .query_row(
+                "SELECT * FROM facts WHERE id=?1 AND mind=?2",
+                params![id, mind],
+                Self::row_to_fact,
+            )
+            .optional()
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        Ok(fact.filter(|fact| filter.matches(fact)))
+    }
+
+    async fn get_edges_filtered(
+        &self,
+        mind: &str,
+        id: &str,
+        filter: &SearchFilter,
+        limit: usize,
+    ) -> Result<Vec<Edge>> {
+        let filter = filter.resolved()?;
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().unwrap();
+        let section = filter.section.as_ref().map(|section| {
+            serde_json::to_string(section)
+                .unwrap()
+                .trim_matches('"')
+                .to_string()
+        });
+        let mut stmt = conn.prepare("SELECT e.*,s.applicability AS source_app,t.applicability AS target_app FROM edges e JOIN facts s ON s.id=e.source_fact_id JOIN facts t ON t.id=e.target_fact_id WHERE (s.id=?1 OR t.id=?1) AND s.mind=?2 AND t.mind=?2 AND e.status='active' AND ((?3=0 AND s.status='active' AND t.status='active') OR (?3=1 AND s.status IN ('archived','dormant','superseded') AND t.status IN ('archived','dormant','superseded'))) AND (?4 IS NULL OR (s.section=?4 AND t.section=?4)) ORDER BY e.confidence DESC,e.id")
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        let rows = stmt
+            .query_map(
+                params![id, mind, filter.intent == SearchIntent::Historical, section],
+                |row| {
+                    Ok((
+                        Edge {
+                            id: row.get("id")?,
+                            source_id: row.get("source_fact_id")?,
+                            target_id: row.get("target_fact_id")?,
+                            relation: row.get("relation")?,
+                            description: row.get("description")?,
+                            confidence: row.get("confidence")?,
+                            created_at: row.get("created_at")?,
+                        },
+                        row.get::<_, Option<String>>("source_app")?,
+                        row.get::<_, Option<String>>("target_app")?,
+                    ))
+                },
+            )
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        let mut edges = Vec::new();
+        for row in rows {
+            let (edge, source, target) = row.map_err(|error| MemoryError::Storage(error.into()))?;
+            let mut eligible = true;
+            for encoded in [source, target].into_iter().flatten() {
+                let record: RecordedApplicability = serde_json::from_str(&encoded)
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                record.validate()?;
+                if record
+                    .constraints
+                    .assess(filter.context.as_ref().expect("resolved context"))
+                    == ApplicabilityStatus::Inapplicable
+                {
+                    eligible = false;
+                }
+            }
+            if eligible {
+                edges.push(edge);
+                if edges.len() >= limit.min(1024) {
+                    break;
+                }
+            }
+        }
+        Ok(edges)
     }
 
     async fn create_edge(&self, req: CreateEdge) -> Result<Edge> {
@@ -2248,6 +3006,9 @@ impl MemoryBackend for SqliteBackend {
     }
 
     async fn store_episode(&self, req: StoreEpisode) -> Result<Episode> {
+        if let Some(formation) = &req.formation {
+            formation.validate()?;
+        }
         let mut conn = self.conn.lock().unwrap();
         let transaction = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2259,13 +3020,13 @@ impl MemoryBackend for SqliteBackend {
         let date = req.date.unwrap_or_else(|| ts[..10].to_string());
 
         transaction.execute(
-            "INSERT INTO episodes (id, mind, title, narrative, date, created_at, affected_nodes, affected_changes, files_changed, tags, tool_calls_count) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+            "INSERT INTO episodes (id, mind, title, narrative, date, created_at, affected_nodes, affected_changes, files_changed, tags, tool_calls_count, formation) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
             params![id, req.mind, req.title, req.narrative, date, ts,
                 serde_json::to_string(&req.affected_nodes).unwrap_or_else(|_| "[]".into()),
                 serde_json::to_string(&req.affected_changes).unwrap_or_else(|_| "[]".into()),
                 serde_json::to_string(&req.files_changed).unwrap_or_else(|_| "[]".into()),
                 serde_json::to_string(&req.tags).unwrap_or_else(|_| "[]".into()),
-                req.tool_calls_count],
+                req.tool_calls_count, req.formation.as_ref().map(serde_json::to_string).transpose().map_err(|error| MemoryError::Storage(error.into()))?],
         ).map_err(|e| MemoryError::Storage(e.into()))?;
 
         let episode = Episode {
@@ -2280,6 +3041,7 @@ impl MemoryBackend for SqliteBackend {
             files_changed: req.files_changed,
             tags: req.tags,
             tool_calls_count: req.tool_calls_count,
+            formation: req.formation,
             jj_change_id: None,
         };
         transaction
@@ -2297,8 +3059,36 @@ impl MemoryBackend for SqliteBackend {
         let episodes = stmt
             .query_map(params![mind, k as i64], Self::row_to_episode)
             .map_err(|e| MemoryError::Storage(e.into()))?
-            .filter_map(|r| r.map_err(|e| tracing::debug!("row deser: {e}")).ok())
-            .collect();
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        Ok(episodes)
+    }
+
+    async fn formation_cursor(&self, key: &FormationCaptureKey) -> Result<Option<FormationCursor>> {
+        Self::capture_cursor(&self.conn.lock().unwrap(), key)
+    }
+
+    async fn pending_formations(
+        &self,
+        mind: &str,
+        model: &str,
+        limit: usize,
+    ) -> Result<Vec<Episode>> {
+        crate::formation::validate_recovery_limit(limit)?;
+        let conn = self.conn.lock().unwrap();
+        let mut statement=conn.prepare("SELECT * FROM episodes WHERE mind=?1 AND json_extract(formation, '$.extraction.state')='pending' AND json_extract(formation, '$.extraction.model')=?2 ORDER BY created_at, id LIMIT ?3").map_err(|error|MemoryError::Storage(error.into()))?;
+        let episodes = statement
+            .query_map(params![mind, model, limit as i64], Self::row_to_episode)
+            .map_err(|error| MemoryError::Storage(error.into()))?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        for episode in &episodes {
+            episode
+                .formation
+                .as_ref()
+                .ok_or_else(|| MemoryError::InvalidMutation("missing pending formation".into()))?
+                .validate()?;
+        }
         Ok(episodes)
     }
 
@@ -2306,15 +3096,19 @@ impl MemoryBackend for SqliteBackend {
         let conn = self.conn.lock().unwrap();
         let fts_query = query
             .split_whitespace()
-            .map(|w| format!("\"{w}\""))
+            .map(|w| format!("\"{}\"", w.replace('"', "\"\"")))
             .collect::<Vec<_>>()
             .join(" OR ");
+
+        if fts_query.is_empty() || k == 0 {
+            return Ok(Vec::new());
+        }
 
         let mut stmt = conn
             .prepare(
                 "SELECT e.* FROM episodes_fts efts \
              JOIN episodes e ON e.id = efts.id \
-             WHERE episodes_fts MATCH ?1 AND efts.mind = ?2 \
+              WHERE episodes_fts MATCH ?1 AND e.mind = ?2 \
               ORDER BY rank, e.id LIMIT ?3",
             )
             .map_err(|e| MemoryError::Storage(e.into()))?;
@@ -2322,8 +3116,8 @@ impl MemoryBackend for SqliteBackend {
         let episodes = stmt
             .query_map(params![fts_query, mind, k as i64], Self::row_to_episode)
             .map_err(|e| MemoryError::Storage(e.into()))?
-            .filter_map(|r| r.map_err(|e| tracing::debug!("row deser: {e}")).ok())
-            .collect();
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| MemoryError::Storage(error.into()))?;
         Ok(episodes)
     }
 
@@ -2333,15 +3127,19 @@ impl MemoryBackend for SqliteBackend {
 
         // Facts
         let mut stmt = conn
-            .prepare("SELECT * FROM facts WHERE mind = ?1 AND status = 'active' ORDER BY id")
+            .prepare("SELECT * FROM facts WHERE mind = ?1 ORDER BY id")
             .map_err(|e| MemoryError::Storage(e.into()))?;
         let facts: Vec<Fact> = stmt
             .query_map(params![mind], Self::row_to_fact)
             .map_err(|e| MemoryError::Storage(e.into()))?
-            .filter_map(|r| r.map_err(|e| tracing::debug!("row deser: {e}")).ok())
-            .collect();
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| MemoryError::Storage(error.into()))?;
         for f in &facts {
-            let record = JsonlRecord::Fact(JsonlFact {
+            FactOperationalState::from(f).validate()?;
+            let record = JsonlFact {
+                applicability: f.applicability.clone(),
+                lifecycle_inference: f.lifecycle_inference.clone(),
+                operational: Some(Box::new(FactOperationalState::from(f))),
                 id: f.id.clone(),
                 mind: f.mind.clone(),
                 content: f.content.clone(),
@@ -2356,7 +3154,12 @@ impl MemoryBackend for SqliteBackend {
                 persona_id: f.persona_id.clone(),
                 layer: f.layer.clone(),
                 tags: f.tags.clone(),
-            });
+            };
+            let record = if record.applicability.is_some() {
+                JsonlRecord::ApplicableFact(record)
+            } else {
+                JsonlRecord::Fact(record)
+            };
             lines.push(serde_json::to_string(&record).unwrap());
         }
 
@@ -2390,8 +3193,8 @@ impl MemoryBackend for SqliteBackend {
         let episodes: Vec<Episode> = stmt
             .query_map(params![mind], Self::row_to_episode)
             .map_err(|e| MemoryError::Storage(e.into()))?
-            .filter_map(|r| r.map_err(|e| tracing::debug!("row deser: {e}")).ok())
-            .collect();
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| MemoryError::Storage(error.into()))?;
         for ep in &episodes {
             lines.push(serde_json::to_string(&JsonlRecord::Episode(ep.clone())).unwrap());
         }
@@ -2465,8 +3268,7 @@ impl MemoryBackend for SqliteBackend {
 
         let meta: Option<(String, u32)> = conn
             .query_row(
-                "SELECT em.model_name, em.dims FROM embedding_metadata em \
-             JOIN facts_vec fv ON fv.model_name = em.model_name \
+                "SELECT fv.model_name, fv.dims FROM facts_vec fv \
              JOIN facts f ON f.id = fv.fact_id \
              WHERE f.mind = ?1 LIMIT 1",
                 params![mind],
@@ -2559,15 +3361,32 @@ mod tests {
             params![version],
         )
         .unwrap();
-        conn.execute_batch(
-            "DROP TABLE memory_operation_receipts;
+        if version < 11 {
+            conn.execute_batch("ALTER TABLE facts DROP COLUMN lifecycle_inference;")
+                .unwrap();
+        }
+        if version < 13 {
+            conn.execute_batch("ALTER TABLE facts DROP COLUMN applicability;")
+                .unwrap();
+        }
+        if version < 10 {
+            conn.execute_batch("ALTER TABLE facts_vec DROP COLUMN space; ALTER TABLE facts_vec DROP COLUMN source_hash;").unwrap();
+        }
+        if version < 9 {
+            conn.execute_batch("ALTER TABLE episodes DROP COLUMN formation;")
+                .unwrap();
+        }
+        if version < 8 {
+            conn.execute_batch(
+                "DROP TABLE memory_operation_receipts;
              ALTER TABLE episodes DROP COLUMN affected_nodes;
              ALTER TABLE episodes DROP COLUMN affected_changes;
              ALTER TABLE episodes DROP COLUMN files_changed;
              ALTER TABLE episodes DROP COLUMN tags;
              ALTER TABLE episodes DROP COLUMN tool_calls_count;",
-        )
-        .unwrap();
+            )
+            .unwrap();
+        }
         if version == 5 {
             conn.execute_batch(
                 "DROP INDEX idx_facts_persona;
@@ -2627,6 +3446,7 @@ mod tests {
             };
             assert!(episode_columns.contains(&"affected_nodes".to_string()));
             assert!(episode_columns.contains(&"tool_calls_count".to_string()));
+            assert!(episode_columns.contains(&"formation".to_string()));
             let migrated_mind: String = migrated
                 .query_row(
                     "SELECT mind FROM facts WHERE id = 'legacy-fact'",

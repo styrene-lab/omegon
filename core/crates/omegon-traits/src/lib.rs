@@ -2746,11 +2746,30 @@ pub trait Feature: Send + Sync {
         vec![]
     }
 
+    /// Await feature-owned evidence persistence before a host context-eviction
+    /// operation. This is a bounded snapshot opportunity, not a claim of complete
+    /// history coverage. Unavailable optional features do not veto compaction.
+    async fn before_context_eviction(
+        &mut self,
+        _cancel: tokio_util::sync::CancellationToken,
+    ) -> ContextCheckpointOutcome {
+        ContextCheckpointOutcome::NotApplicable
+    }
+
     /// Close feature-owned background admission and settle all accepted work
     /// before managed services begin draining.
     async fn prepare_managed_shutdown(&mut self) -> anyhow::Result<()> {
         Ok(())
     }
+}
+
+/// Renderer-neutral acknowledgment of a pre-eviction evidence checkpoint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum ContextCheckpointOutcome {
+    NotApplicable,
+    Persisted,
+    Unavailable { reason: String },
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3516,6 +3535,27 @@ pub trait SessionHook: Send + Sync {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn context_checkpoint_outcomes_round_trip_with_named_states() {
+        use super::ContextCheckpointOutcome;
+        for (value, state) in [
+            (ContextCheckpointOutcome::NotApplicable, "not_applicable"),
+            (ContextCheckpointOutcome::Persisted, "persisted"),
+            (
+                ContextCheckpointOutcome::Unavailable {
+                    reason: "capture_busy".into(),
+                },
+                "unavailable",
+            ),
+        ] {
+            let encoded = serde_json::to_value(&value).unwrap();
+            assert_eq!(encoded["state"], state);
+            assert_eq!(
+                serde_json::from_value::<ContextCheckpointOutcome>(encoded).unwrap(),
+                value
+            );
+        }
+    }
     use super::*;
     use serde_json::json;
 

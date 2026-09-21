@@ -1937,10 +1937,10 @@ impl EventBus {
                         service.capability.id.as_str()
                     );
                 }
-                if !graph
+                if graph
                     .capability_owners
                     .get(&service.capability.id)
-                    .is_some_and(|owner| owner == &feature.contribution_id)
+                    .is_none_or(|owner| owner != &feature.contribution_id)
                 {
                     self.pending_features.clear();
                     self.pending_internal_tools.clear();
@@ -2248,6 +2248,34 @@ impl EventBus {
 
     /// Deliver an event to all features. Requests are accumulated
     /// and can be drained with `drain_requests()`.
+    /// Give optional features an awaited, cancellable snapshot opportunity before
+    /// context eviction. Failure never masquerades as a persistence acknowledgment.
+    pub(crate) async fn before_context_eviction(
+        &mut self,
+        cancel: tokio_util::sync::CancellationToken,
+    ) {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        for feature in &mut self.features[..self.published_feature_count] {
+            if cancel.is_cancelled() || tokio::time::Instant::now() >= deadline {
+                break;
+            }
+            let worker = cancel.child_token();
+            let _cancel_on_drop = worker.clone().drop_guard();
+            let result = tokio::select! {biased;_=cancel.cancelled()=>break,result=tokio::time::timeout_at(deadline,feature.before_context_eviction(worker))=>result};
+            match result {
+                Ok(omegon_traits::ContextCheckpointOutcome::Unavailable { .. }) => tracing::debug!(
+                    feature = feature.name(),
+                    "pre-eviction checkpoint unavailable; canonical source retained"
+                ),
+                Err(_) => tracing::debug!(
+                    feature = feature.name(),
+                    "pre-eviction checkpoint deadline reached"
+                ),
+                _ => {}
+            }
+        }
+    }
+
     pub fn emit(&mut self, event: &BusEvent) {
         for feature in &mut self.features[..self.published_feature_count] {
             let requests = feature.on_event(event);
@@ -3179,6 +3207,111 @@ mod tests {
     use serde_json::json;
 
     struct FailingShutdownFeature;
+
+    struct CheckpointObserver {
+        events: std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>,
+        release: Option<tokio::sync::oneshot::Receiver<()>>,
+        entered: Option<tokio::sync::oneshot::Sender<()>>,
+    }
+    #[async_trait]
+    impl Feature for CheckpointObserver {
+        fn name(&self) -> &str {
+            "checkpoint-observer"
+        }
+        async fn before_context_eviction(
+            &mut self,
+            _: tokio_util::sync::CancellationToken,
+        ) -> omegon_traits::ContextCheckpointOutcome {
+            self.events.lock().unwrap().push("capture-started");
+            let _ = self.entered.take().unwrap().send(());
+            self.release.take().unwrap().await.unwrap();
+            self.events.lock().unwrap().push("persisted");
+            omegon_traits::ContextCheckpointOutcome::Persisted
+        }
+        fn on_event(&mut self, event: &BusEvent) -> Vec<BusRequest> {
+            if matches!(event, BusEvent::Compacted) {
+                self.events.lock().unwrap().push("evicted");
+            }
+            vec![]
+        }
+    }
+
+    #[tokio::test]
+    async fn pre_eviction_hook_is_awaited_before_following_eviction() {
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (send, receive) = tokio::sync::oneshot::channel();
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let mut bus = EventBus::new();
+        bus.register(Box::new(CheckpointObserver {
+            events: events.clone(),
+            release: Some(receive),
+            entered: Some(entered),
+        }));
+        bus.try_finalize().unwrap();
+        let worker = tokio::spawn(async move {
+            bus.before_context_eviction(tokio_util::sync::CancellationToken::new())
+                .await;
+            bus.emit(&BusEvent::Compacted);
+        });
+        started.await.unwrap();
+        assert_eq!(*events.lock().unwrap(), vec!["capture-started"]);
+        send.send(()).unwrap();
+        worker.await.unwrap();
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec!["capture-started", "persisted", "evicted"]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn pre_eviction_hook_timeout_cancels_optional_work_and_allows_progress() {
+        struct Waiting {
+            dropped: std::sync::Arc<AtomicBool>,
+            token: std::sync::Arc<std::sync::Mutex<Option<tokio_util::sync::CancellationToken>>>,
+        }
+        #[async_trait]
+        impl Feature for Waiting {
+            fn name(&self) -> &str {
+                "waiting-checkpoint"
+            }
+            async fn before_context_eviction(
+                &mut self,
+                cancel: tokio_util::sync::CancellationToken,
+            ) -> omegon_traits::ContextCheckpointOutcome {
+                *self.token.lock().unwrap() = Some(cancel);
+                struct Guard(std::sync::Arc<AtomicBool>);
+                impl Drop for Guard {
+                    fn drop(&mut self) {
+                        self.0.store(true, Ordering::SeqCst);
+                    }
+                }
+                let _guard = Guard(self.dropped.clone());
+                std::future::pending().await
+            }
+        }
+        let dropped = std::sync::Arc::new(AtomicBool::new(false));
+        let token = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let mut bus = EventBus::new();
+        bus.register(Box::new(Waiting {
+            dropped: dropped.clone(),
+            token: token.clone(),
+        }));
+        bus.before_context_eviction(tokio_util::sync::CancellationToken::new())
+            .await;
+        assert!(
+            token.lock().unwrap().is_none(),
+            "unpublished features must not run checkpoint hooks"
+        );
+        bus.try_finalize().unwrap();
+        bus.before_context_eviction(tokio_util::sync::CancellationToken::new())
+            .await;
+        assert!(dropped.load(Ordering::SeqCst));
+        assert!(token.lock().unwrap().as_ref().unwrap().is_cancelled());
+        let mut absent = EventBus::new();
+        absent
+            .before_context_eviction(tokio_util::sync::CancellationToken::new())
+            .await;
+    }
 
     #[async_trait]
     impl Feature for FailingShutdownFeature {

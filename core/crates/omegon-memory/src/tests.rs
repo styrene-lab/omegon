@@ -20,7 +20,7 @@ pub async fn run_backend_tests(b: &dyn MemoryBackend) {
     test_vault_source_lineage_fallback(b).await;
     test_fts_search(b).await;
     test_vector_store_and_search(b).await;
-    test_vector_dimension_mismatch(b).await;
+    test_unidentified_vector_query_rejected(b).await;
     test_vector_search_cancellation(b).await;
     test_edges(b).await;
     test_episodes(b).await;
@@ -51,6 +51,9 @@ async fn test_page_snapshot_excludes_late_old_version_import(b: &dyn MemoryBacke
         .unwrap();
     assert_eq!(first.total, 3);
     let late = JsonlRecord::Fact(JsonlFact {
+        applicability: None,
+        lifecycle_inference: None,
+        operational: None,
         id: "late-old-version-import".into(),
         mind: "page-snapshot".into(),
         content: "late import with old Lamport version".into(),
@@ -97,6 +100,12 @@ async fn test_page_snapshot_excludes_late_old_version_import(b: &dyn MemoryBacke
 }
 
 async fn test_vector_search_cancellation(b: &dyn MemoryBackend) {
+    let space = EmbeddingSpace {
+        model: "test-model".into(),
+        revision: "fixture-v1".into(),
+        preprocessing: "raw-v1".into(),
+        dimensions: 4,
+    };
     for index in 0..16 {
         let fact = b
             .store_fact(store_request(
@@ -105,18 +114,34 @@ async fn test_vector_search_cancellation(b: &dyn MemoryBackend) {
             ))
             .await
             .unwrap();
-        b.store_embedding(&fact.fact.id, "test-model", &[1.0, index as f32, 0.0, 0.0])
-            .await
-            .unwrap();
+        b.apply_mutation(
+            &format!("cancel-index-{index}"),
+            MemoryMutation::StoreIdentifiedEmbedding {
+                fact: FactPrecondition {
+                    id: fact.fact.id,
+                    expected_version: fact.fact.version,
+                },
+                embedding: IdentifiedEmbedding {
+                    space: space.clone(),
+                    values: vec![1.0, index as f32, 0.0, 0.0],
+                },
+            },
+        )
+        .await
+        .unwrap();
     }
     let checks = std::sync::atomic::AtomicUsize::new(0);
     let cancelled = || checks.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 3;
     let result = b
-        .vector_search_cancellable(
+        .search_identified(
             "vector-cancellation",
-            &[1.0, 1.0, 0.0, 0.0],
+            &IdentifiedEmbedding {
+                space,
+                values: vec![1.0, 1.0, 0.0, 0.0],
+            },
             16,
             -1.0,
+            &Default::default(),
             &cancelled,
         )
         .await;
@@ -603,13 +628,45 @@ async fn test_vector_store_and_search(b: &dyn MemoryBackend) {
 
     // Store an embedding
     let embedding = vec![1.0f32, 0.0, 0.0, 0.5];
-    b.store_embedding(&stored.fact.id, "test-model", &embedding)
-        .await
-        .unwrap();
+    let space = EmbeddingSpace {
+        model: "test-model".into(),
+        revision: "fixture-v1".into(),
+        preprocessing: "raw-v1".into(),
+        dimensions: 4,
+    };
+    b.apply_mutation(
+        "vec-test-index",
+        MemoryMutation::StoreIdentifiedEmbedding {
+            fact: FactPrecondition {
+                id: stored.fact.id.clone(),
+                expected_version: stored.fact.version,
+            },
+            embedding: IdentifiedEmbedding {
+                space: space.clone(),
+                values: embedding,
+            },
+        },
+    )
+    .await
+    .unwrap();
 
     // Search with similar vector
     let query = vec![0.9f32, 0.1, 0.0, 0.4];
-    let results = b.vector_search("vec-test", &query, 10, 0.5).await.unwrap();
+    let results = b
+        .search_identified(
+            "vec-test",
+            &IdentifiedEmbedding {
+                space,
+                values: query,
+            },
+            10,
+            0.5,
+            &Default::default(),
+            &|| false,
+        )
+        .await
+        .unwrap()
+        .results;
     assert!(
         !results.is_empty(),
         "should find the fact by vector similarity"
@@ -626,7 +683,7 @@ async fn test_vector_store_and_search(b: &dyn MemoryBackend) {
     assert_eq!(meta.dims, 4);
 }
 
-async fn test_vector_dimension_mismatch(b: &dyn MemoryBackend) {
+async fn test_unidentified_vector_query_rejected(b: &dyn MemoryBackend) {
     // Store a fact with a 4-dim embedding
     let stored = b
         .store_fact(StoreFact {
@@ -642,15 +699,11 @@ async fn test_vector_dimension_mismatch(b: &dyn MemoryBackend) {
         .await
         .unwrap();
 
-    // Search with wrong dimensions — should error
+    // The legacy query cannot establish a model identity, irrespective of dimensions.
     let result = b.vector_search("dim-test", &[1.0, 0.0], 10, 0.0).await;
     match result {
-        Err(MemoryError::EmbeddingDimensionMismatch {
-            expected: 4,
-            got: 2,
-            ..
-        }) => {}
-        other => panic!("expected EmbeddingDimensionMismatch, got {other:?}"),
+        Err(MemoryError::EmbeddingIdentityRequired) => {}
+        other => panic!("expected EmbeddingIdentityRequired, got {other:?}"),
     }
 }
 
@@ -705,6 +758,7 @@ async fn test_episodes(b: &dyn MemoryBackend) {
         files_changed: vec!["core/crates/omegon-memory/src/lib.rs".into()],
         tags: vec!["architecture".into()],
         tool_calls_count: Some(42),
+        formation: None,
     })
     .await
     .unwrap();
@@ -873,6 +927,9 @@ async fn test_mutation_replay_and_conflict(b: &dyn MemoryBackend) {
     ));
 
     let jsonl = serde_json::to_string(&JsonlRecord::Fact(JsonlFact {
+        applicability: None,
+        lifecycle_inference: None,
+        operational: None,
         id: "operation-jsonl-fact".into(),
         mind: "operation-jsonl".into(),
         content: "Imported exactly once".into(),
@@ -1063,6 +1120,7 @@ async fn test_mutation_replay_and_conflict(b: &dyn MemoryBackend) {
             files_changed: vec![],
             tags: vec![],
             tool_calls_count: None,
+            formation: None,
         },
     };
     let episode = b
@@ -1148,6 +1206,9 @@ async fn test_duplicate_target_and_nonfinite_embedding_rejected(b: &dyn MemoryBa
 
 async fn test_jsonl_batch_rollback(b: &dyn MemoryBackend) {
     let fact = JsonlRecord::Fact(JsonlFact {
+        applicability: None,
+        lifecycle_inference: None,
+        operational: None,
         id: "rollback-fact".into(),
         mind: "jsonl-rollback".into(),
         content: "Must roll back".into(),
@@ -1184,6 +1245,9 @@ async fn test_jsonl_batch_rollback(b: &dyn MemoryBackend) {
 async fn test_jsonl_import_advances_lamport_clock(b: &dyn MemoryBackend) {
     let imported = JsonlRecord::Fact(JsonlFact {
         id: "lamport-high-water".into(),
+        applicability: None,
+        lifecycle_inference: None,
+        operational: None,
         mind: "lamport-high-water".into(),
         content: "Imported high version".into(),
         section: Section::Architecture,
@@ -1211,6 +1275,9 @@ async fn test_jsonl_import_advances_lamport_clock(b: &dyn MemoryBackend) {
 async fn test_jsonl_rejects_unpersistable_lamport_version(b: &dyn MemoryBackend) {
     let imported = JsonlRecord::Fact(JsonlFact {
         id: "lamport-overflow".into(),
+        applicability: None,
+        lifecycle_inference: None,
+        operational: None,
         mind: "lamport-overflow".into(),
         content: "Outside SQLite integer domain".into(),
         section: Section::Architecture,
@@ -1239,6 +1306,9 @@ async fn test_deterministic_fts_fallback(b: &dyn MemoryBackend) {
         .map(|index| {
             let id = format!("deterministic-{index:02}");
             JsonlRecord::Fact(JsonlFact {
+                applicability: None,
+                lifecycle_inference: None,
+                operational: None,
                 id: id.clone(),
                 mind: "deterministic-fts".into(),
                 content: "identical fallback terms".into(),
@@ -1298,6 +1368,7 @@ async fn test_episode_metadata_round_trip(b: &dyn MemoryBackend) {
             files_changed: vec!["src/lib.rs".into()],
             tags: vec!["test".into()],
             tool_calls_count: Some(3),
+            formation: None,
         })
         .await
         .unwrap();
@@ -1322,6 +1393,7 @@ async fn test_episode_metadata_round_trip(b: &dyn MemoryBackend) {
             files_changed: vec![],
             tags: vec![],
             tool_calls_count: None,
+            formation: None,
         })
         .await
         .unwrap();

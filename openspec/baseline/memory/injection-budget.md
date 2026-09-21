@@ -1,39 +1,42 @@
-+++
-id = "71fcf0db-cf35-4dbe-b580-3eca3afbd8ee"
-tags = []
-aliases = []
-imported_reference = false
-
-[publication]
-enabled = false
-visibility = "private"
-+++
-
-# Spec
+# memory/injection-budget - Baseline
 
 ### Requirement: Memory injection stays within a tighter routine-turn budget
-Omegon MUST reduce routine project-memory prompt injection so normal turns do not prepend an oversized memory block by default.
 
-#### Scenario: routine turn uses a reduced default budget
-- **GIVEN** project memory is available for the active mind
-- **WHEN** Omegon prepares a normal per-turn memory injection
-- **THEN** the default project-memory selection budget is materially lower than the previous 15%-of-context policy
-- **AND** high-priority working-memory facts still take precedence over lower-priority filler content
+Routine memory SHALL use a configurable memory-specific token cap bounded by the
+host allocation, rather than a percentage-based full dump. All emitted formatting
+and evidence metadata SHALL count toward the budget.
+
+#### Scenario: Multilingual content respects token allocation
+Given multilingual facts, code identifiers, headings, and provenance metadata
+When a memory block is packed into its allocated token budget
+Then the emitted block's accounted token count does not exceed the allocation
+And a zero budget produces no memory block
+
+#### Scenario: Oversized candidate does not starve a smaller fact
+Given the first candidate cannot fit and a later relevant fact can fit
+When packing executes
+Then the later fact is considered and included if eligible
+And truncation does not emit a partial misleading claim
 
 ### Requirement: Low-value additive memory is conditional
-Omegon MUST avoid appending episodic, global, or structural filler memory unless those additions are justified by the current turn and remaining budget.
 
-#### Scenario: filler content is skipped on low-signal turns
-- **GIVEN** a short or low-signal user turn with no strong cross-project need
-- **WHEN** project-memory builds the injected context block
-- **THEN** episodic memory and cross-project global facts are omitted by default
-- **AND** structural filler facts are only added when enough budget remains after higher-priority content
+Episodes, global facts, and structural filler SHALL require relevance and remaining
+budget. Routine low-signal turns SHALL avoid unrequested cross-scope expansion.
+
+#### Scenario: Low-signal turn has no relevant episode
+Given a short turn without relevant episodic or cross-project evidence
+When ambient memory is selected
+Then irrelevant recent episodes and global facts are omitted
+And only justified core or pinned facts consume memory budget
 
 ### Requirement: Memory telemetry remains operator-auditable
-Omegon MUST continue surfacing enough telemetry to validate the effect of memory-budget changes.
 
-#### Scenario: injection metrics still expose payload size
-- **GIVEN** a turn that injects project memory
-- **WHEN** Omegon records the last memory injection snapshot
-- **THEN** the snapshot includes payload size and estimated token cost
-- **AND** operators can compare the injected payload against baseline prompt usage
+Selection telemetry SHALL expose selected IDs/counts, exclusion reasons, token
+accounting method, budget exhaustion, and retrieval degradation through existing
+inspection surfaces without logging fact contents at info level.
+
+#### Scenario: Operator inspects a constrained selection
+Given selection excluded facts for budget, applicability, and lifecycle status
+When the operator inspects the last memory selection
+Then the report distinguishes those reasons and the selected evidence handles
+And it identifies whether token accounting is exact or conservative

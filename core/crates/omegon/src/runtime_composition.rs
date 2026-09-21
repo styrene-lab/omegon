@@ -199,9 +199,9 @@ pub(crate) async fn execute_composition_probe(
                     cancellation,
                 )
                 .await?;
-            if !result.details["results"]
+            if result.details["results"]
                 .as_array()
-                .is_some_and(|results| !results.is_empty())
+                .is_none_or(|results| results.is_empty())
             {
                 anyhow::bail!("additive codescan probe did not restore search");
             }

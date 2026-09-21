@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{collections::HashMap, path::Path, time::Instant};
 
 use uuid::Uuid;
 
@@ -10,6 +10,22 @@ use crate::session_authority::{
 use crate::session_blob_store::{ContentRef, ProjectionClass};
 
 type Result<T> = std::result::Result<T, AuthorityError>;
+
+/// Caller-selected resource budget for a complete, validated capture snapshot.
+/// Exceeding any limit fails closed; a partial prefix is never returned as complete.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ReplayLimits {
+    pub max_records: usize,
+    pub max_log_bytes: usize,
+    pub max_record_bytes: usize,
+    pub max_file_bytes: usize,
+    /// Includes the canonical log, attachment bytes, and blob metadata/content.
+    pub max_total_bytes: usize,
+    pub deadline: Instant,
+}
+
+#[cfg(test)]
+pub(crate) use tests::open_joined_request as test_open_joined_request;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReplayEnd {
@@ -145,9 +161,110 @@ pub(crate) struct SessionReplay {
     records: Vec<ReplayRecord>,
     state: SessionAuthorityState,
     frontier: AuthorityFrontier,
+    bounded_content: Option<HashMap<String, Vec<u8>>>,
 }
 
 impl SessionReplay {
+    pub(crate) fn replay_bounded(
+        session_snapshot: &Path,
+        expected_session_id: &str,
+        expected_stream: Option<Uuid>,
+        limits: ReplayLimits,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<Self> {
+        use crate::session_blob_store::SessionBlobError;
+        let mut remaining = limits.max_total_bytes;
+        let mut check = |bytes: usize| -> crate::session_blob_store::Result<()> {
+            let reason = if cancelled() {
+                Some("bounded replay cancelled")
+            } else if Instant::now() >= limits.deadline {
+                Some("bounded replay deadline exceeded")
+            } else if bytes > remaining {
+                Some("bounded replay total byte limit exceeded")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                return Err(SessionBlobError::Invalid(reason.into()));
+            }
+            remaining -= bytes;
+            Ok(())
+        };
+        check(0)?;
+        let store = SessionAuthorityStore::adjacent_to(session_snapshot)?;
+        let facts = store.read_bounded_facts(
+            limits.max_log_bytes,
+            limits.max_records,
+            limits.max_record_bytes,
+            &mut check,
+        )?;
+        let first = facts
+            .first()
+            .ok_or_else(|| AuthorityError::Invalid("empty authority stream".into()))?;
+        if first.session_id != expected_session_id
+            || expected_stream.is_some_and(|stream| first.stream_id != stream)
+        {
+            return Err(AuthorityError::Invalid(
+                "authority replay session or stream identity does not match".into(),
+            ));
+        }
+        let mut state = SessionAuthorityState::default();
+        for fact in &facts {
+            check(0)?;
+            if let SessionFactPayload::PromptAdmitted(prompt) = &fact.payload {
+                for attachment in &prompt.content.attachments {
+                    store.validate_bounded_attachment(
+                        attachment,
+                        limits.max_file_bytes,
+                        &mut check,
+                    )?;
+                }
+            }
+            state.apply(fact)?;
+        }
+        let mut content = HashMap::new();
+        store.validate_state_content_with(&state, &mut |reference, projection| {
+            check(0)?;
+            if reference.projection_class() != projection {
+                return Err(AuthorityError::Invalid(
+                    "content projection is not authorized".into(),
+                ));
+            }
+            let key = serde_json::to_string(reference)?;
+            if let Some(bytes) = content.get(&key) {
+                return Ok(Vec::clone(bytes));
+            }
+            let bytes = store.read_bounded_content(
+                reference,
+                projection,
+                limits.max_file_bytes,
+                &mut check,
+            )?;
+            content.insert(key, bytes.clone());
+            Ok(bytes)
+        })?;
+        check(0)?;
+        let last = facts.last().expect("nonempty validated stream");
+        let frontier = AuthorityFrontier {
+            session_id: last.session_id.clone(),
+            stream_id: last.stream_id,
+            sequence: last.sequence,
+            event_id: last.event_id,
+        };
+        let mut records = Vec::with_capacity(facts.len());
+        for fact in facts {
+            check(0)?;
+            records.push(ReplayRecord::from(fact));
+        }
+        Ok(Self {
+            store,
+            records,
+            state,
+            frontier,
+            bounded_content: Some(content),
+        })
+    }
+
     pub(crate) fn replay_session(
         session_snapshot: &Path,
         expected_session_id: &str,
@@ -240,6 +357,7 @@ impl SessionReplay {
             records,
             state,
             frontier,
+            bounded_content: None,
         })
     }
 
@@ -357,6 +475,21 @@ impl SessionReplay {
     }
 
     pub(crate) fn read_default_content(&self, content_ref: &ContentRef) -> Result<Vec<u8>> {
+        if let Some(content) = &self.bounded_content {
+            if content_ref.projection_class() != ProjectionClass::Default {
+                return Err(AuthorityError::Invalid(
+                    "content projection is not authorized".into(),
+                ));
+            }
+            return content
+                .get(&serde_json::to_string(content_ref)?)
+                .cloned()
+                .ok_or_else(|| {
+                    AuthorityError::Invalid(
+                        "content is outside the validated replay snapshot".into(),
+                    )
+                });
+        }
         self.store
             .read_content(content_ref, ProjectionClass::Default)
     }
@@ -508,6 +641,240 @@ mod tests {
         SessionReplay::replay_prefix(&snapshot, SESSION_ID, STREAM_ID, end)
     }
 
+    fn capture_limits() -> ReplayLimits {
+        ReplayLimits {
+            max_records: 1024,
+            max_log_bytes: 4 * 1024 * 1024,
+            max_record_bytes: 1024 * 1024,
+            max_file_bytes: 1024 * 1024,
+            max_total_bytes: 8 * 1024 * 1024,
+            deadline: Instant::now() + std::time::Duration::from_secs(10),
+        }
+    }
+
+    #[test]
+    fn bounded_replay_checks_attachment_bytes_and_digest() {
+        let directory = tempfile::tempdir().unwrap();
+        let snapshot = directory.path().join("session.json");
+        let (mut authority, _, _, _) = open_joined_request(&directory);
+        let source = directory.path().join("image.png");
+        fs::write(&source, vec![b'x'; 128_000]).unwrap();
+        let attachment = authority.stage_attachment(&source).unwrap();
+        authority
+            .admit_prompt(
+                Uuid::new_v4(),
+                NOW,
+                PromptAdmitted {
+                    submission_id: Uuid::new_v4(),
+                    prompt_id: Uuid::new_v4(),
+                    principal: "operator".into(),
+                    ingress: "fixture".into(),
+                    queue_mode: QueueMode::UntilReady,
+                    content: PromptContent {
+                        text: "Inspect attached data".into(),
+                        attachments: vec![attachment.clone()],
+                    },
+                    metadata: serde_json::json!({}),
+                },
+            )
+            .unwrap();
+        SessionReplay::replay_bounded(&snapshot, SESSION_ID, None, capture_limits(), &|| false)
+            .unwrap();
+        assert!(
+            SessionReplay::replay_bounded(
+                &snapshot,
+                SESSION_ID,
+                None,
+                ReplayLimits {
+                    max_file_bytes: 127_999,
+                    ..capture_limits()
+                },
+                &|| false
+            )
+            .is_err()
+        );
+        fs::write(attachment.storage_ref, vec![b'y'; 128_000]).unwrap();
+        assert!(
+            SessionReplay::replay_bounded(&snapshot, SESSION_ID, None, capture_limits(), &|| false)
+                .unwrap_err()
+                .to_string()
+                .contains("attachment content changed")
+        );
+    }
+
+    #[test]
+    fn bounded_replay_limits_and_cancellation_fail_without_partial_snapshot() {
+        use std::cell::Cell;
+        let directory = tempfile::tempdir().unwrap();
+        let snapshot = directory.path().join("session.json");
+        let bytes = fixture("full-spine-crash-prefix.authority.jsonl");
+        fs::write(directory.path().join("session.authority.jsonl"), &bytes).unwrap();
+        let ordinary =
+            SessionReplay::replay_session(&snapshot, SESSION_ID, ReplayEnd::EndOfStream).unwrap();
+        let polls = Cell::new(0);
+        let bounded =
+            SessionReplay::replay_bounded(&snapshot, SESSION_ID, None, capture_limits(), &|| {
+                polls.set(polls.get() + 1);
+                false
+            })
+            .unwrap();
+        assert_eq!(bounded.records(), ordinary.records());
+        assert_eq!(bounded.frontier(), ordinary.frontier());
+        let count = polls.get();
+        // Interrupt every checkpoint, including loading and reconstruction.
+        for stop in 1..=count {
+            let calls = Cell::new(0);
+            let error = SessionReplay::replay_bounded(
+                &snapshot,
+                SESSION_ID,
+                None,
+                capture_limits(),
+                &|| {
+                    calls.set(calls.get() + 1);
+                    calls.get() >= stop
+                },
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("cancelled"), "{error}");
+        }
+        for limits in [
+            ReplayLimits {
+                max_records: ordinary.records().len() - 1,
+                ..capture_limits()
+            },
+            ReplayLimits {
+                max_log_bytes: bytes.len() - 1,
+                ..capture_limits()
+            },
+            ReplayLimits {
+                max_record_bytes: 1,
+                ..capture_limits()
+            },
+            ReplayLimits {
+                max_total_bytes: bytes.len() - 1,
+                ..capture_limits()
+            },
+            ReplayLimits {
+                deadline: Instant::now(),
+                ..capture_limits()
+            },
+        ] {
+            assert!(
+                SessionReplay::replay_bounded(&snapshot, SESSION_ID, None, limits, &|| false)
+                    .is_err()
+            );
+        }
+        assert!(
+            SessionReplay::replay_bounded(
+                &snapshot,
+                SESSION_ID,
+                Some(Uuid::new_v4()),
+                capture_limits(),
+                &|| false
+            )
+            .is_err()
+        );
+        assert!(
+            SessionReplay::replay_bounded(
+                &snapshot,
+                "another-session",
+                None,
+                capture_limits(),
+                &|| false
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn bounded_replay_content_is_budgeted_verified_and_frozen() {
+        use std::cell::Cell;
+        let directory = tempfile::tempdir().unwrap();
+        let snapshot = directory.path().join("session.json");
+        let (mut authority, request, step_id, _) = open_joined_request(&directory);
+        let bytes = vec![b'a'; 64 * 1024];
+        let reference = authority
+            .write_content(&bytes, "text/plain", ProjectionClass::Default)
+            .unwrap();
+        authority
+            .append_assistant_content(
+                Uuid::new_v4(),
+                NOW,
+                AssistantContentAppended {
+                    message_id: Uuid::new_v4(),
+                    request_id: request.request_id,
+                    step_id,
+                    response_attempt_ordinal: 0,
+                    content_kind: AssistantContentKind::Text,
+                    chunk_ordinal: 0,
+                    content_ref: reference.clone(),
+                },
+            )
+            .unwrap();
+        let log_len = fs::metadata(directory.path().join("session.authority.jsonl"))
+            .unwrap()
+            .len() as usize;
+        assert!(
+            SessionReplay::replay_bounded(
+                &snapshot,
+                SESSION_ID,
+                None,
+                ReplayLimits {
+                    max_total_bytes: log_len + bytes.len() - 1,
+                    ..capture_limits()
+                },
+                &|| false
+            )
+            .is_err()
+        );
+        assert!(
+            SessionReplay::replay_bounded(
+                &snapshot,
+                SESSION_ID,
+                None,
+                ReplayLimits {
+                    max_file_bytes: bytes.len() - 1,
+                    ..capture_limits()
+                },
+                &|| false
+            )
+            .is_err()
+        );
+        let polls = Cell::new(0);
+        let replay =
+            SessionReplay::replay_bounded(&snapshot, SESSION_ID, None, capture_limits(), &|| {
+                polls.set(polls.get() + 1);
+                false
+            })
+            .unwrap();
+        for stop in 1..=polls.get() {
+            let calls = Cell::new(0);
+            let error = SessionReplay::replay_bounded(
+                &snapshot,
+                SESSION_ID,
+                None,
+                capture_limits(),
+                &|| {
+                    calls.set(calls.get() + 1);
+                    calls.get() >= stop
+                },
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("cancelled"), "{error}");
+        }
+        let path = directory
+            .path()
+            .join("session.authority.blobs/sha256")
+            .join(reference.digest());
+        fs::write(&path, vec![b'b'; bytes.len()]).unwrap();
+        assert!(
+            SessionReplay::replay_bounded(&snapshot, SESSION_ID, None, capture_limits(), &|| false)
+                .is_err()
+        );
+        fs::remove_file(path).unwrap();
+        assert_eq!(replay.read_default_content(&reference).unwrap(), bytes);
+    }
+
     fn request(
         request_id: Uuid,
         step_id: Uuid,
@@ -562,7 +929,7 @@ mod tests {
         }
     }
 
-    fn open_joined_request(
+    pub(crate) fn open_joined_request(
         directory: &tempfile::TempDir,
     ) -> (SessionAuthority, ModelRequestPrepared, Uuid, Uuid) {
         let snapshot = directory.path().join("session.json");

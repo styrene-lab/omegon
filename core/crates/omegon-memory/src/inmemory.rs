@@ -17,34 +17,42 @@ struct EmbeddingEntry {
     model_name: String,
     embedding: Vec<f32>,
     inserted_at: String,
+    space: Option<EmbeddingSpace>,
+    source_hash: Option<String>,
 }
 
 #[derive(Clone)]
 struct State {
+    cache_revision: u64,
     facts: HashMap<String, Fact>,
     fact_insertion_sequences: HashMap<String, u64>,
     next_fact_insertion_sequence: u64,
     edges: Vec<Edge>,
     episodes: Vec<Episode>,
     embeddings: Vec<EmbeddingEntry>,
+    indexing: HashMap<String, EmbeddingIndexingRecord>,
     version_clock: u64,
     operation_receipts: HashMap<String, (String, MemoryMutationEffect)>,
 }
 
 pub struct InMemoryBackend {
+    cache_identity: u64,
     state: Mutex<State>,
 }
 
 impl InMemoryBackend {
     pub fn new() -> Self {
         Self {
+            cache_identity: crate::selection_cache::backend_identity(),
             state: Mutex::new(State {
+                cache_revision: 0,
                 facts: HashMap::new(),
                 fact_insertion_sequences: HashMap::new(),
                 next_fact_insertion_sequence: 0,
                 edges: Vec::new(),
                 episodes: Vec::new(),
                 embeddings: Vec::new(),
+                indexing: HashMap::new(),
                 version_clock: 0,
                 operation_receipts: HashMap::new(),
             }),
@@ -64,6 +72,12 @@ impl InMemoryBackend {
             });
         }
         Ok(())
+    }
+
+    fn state_for_write(&self) -> std::sync::MutexGuard<'_, State> {
+        let mut state = self.state.lock().unwrap();
+        state.cache_revision = state.cache_revision.saturating_add(1);
+        state
     }
 
     fn insert_fact(state: &mut State, id: String, fact: Fact) -> Result<()> {
@@ -92,22 +106,152 @@ impl InMemoryBackend {
     }
 
     fn apply_to_state(state: &mut State, mutation: MemoryMutation) -> Result<MemoryMutationEffect> {
+        let mutation = crate::lifecycle::lower(mutation)?;
+        let completing_index =
+            matches!(&mutation, MemoryMutation::CompleteEmbeddingIndexing { .. });
+        if let MemoryMutation::CompleteEmbeddingIndexing {
+            fact,
+            attempt_id,
+            embedding,
+        } = &mutation
+        {
+            crate::indexing::admit_completion(
+                state.indexing.get(&fact.id),
+                fact,
+                embedding,
+                Some(attempt_id),
+            )?;
+        }
+        let capture = if let MemoryMutation::StoreCoveragePage { request, expected } = &mutation {
+            let key = crate::formation::capture_key(request)?;
+            let actual = Self::capture_cursor(state, &key);
+            let cursor =
+                crate::formation::advance_capture(request, expected.as_ref(), actual.as_ref())?;
+            Some((key, cursor))
+        } else {
+            None
+        };
+        let applicability = match &mutation {
+            MemoryMutation::StoreApplicableFact { constraints, .. } => {
+                Some(Box::new(RecordedApplicability::new(*constraints.clone())?))
+            }
+            _ => None,
+        };
+        let inference = match &mutation {
+            MemoryMutation::StoreLifecycleInference { inference, .. } => Some(inference.clone()),
+            _ => None,
+        };
         match mutation {
+            MemoryMutation::SetFactApplicability { fact, constraints } => {
+                Self::check_fact_precondition(state, &fact)?;
+                let applicability = Box::new(RecordedApplicability::new(*constraints)?);
+                let version = Self::next_version(state)?;
+                let record = state.facts.get_mut(&fact.id).unwrap();
+                record.applicability = Some(applicability);
+                record.version = version;
+                Ok(MemoryMutationEffect::ApplicabilityUpdated {
+                    fact: FactPrecondition {
+                        id: fact.id,
+                        expected_version: version,
+                    },
+                })
+            }
+            MemoryMutation::ConfirmLifecycleCandidate {
+                candidate,
+                snapshot_hash,
+                session_id,
+                request_id,
+                surface,
+                supersedes,
+            } => {
+                Self::check_fact_precondition(state, &candidate)?;
+                let mut fact = state
+                    .facts
+                    .get(&candidate.id)
+                    .cloned()
+                    .ok_or_else(|| MemoryError::FactNotFound(candidate.id.clone()))?;
+                if let Some(target) = &supersedes {
+                    Self::check_fact_precondition(state, target)?;
+                    if state
+                        .facts
+                        .get(&target.id)
+                        .is_none_or(|old| old.mind != fact.mind || old.status != FactStatus::Active)
+                    {
+                        return Err(MemoryError::InvalidMutation(
+                            "confirmation correction requires an active fact in the same mind"
+                                .into(),
+                        ));
+                    }
+                }
+                crate::lifecycle::confirm_candidate(
+                    &mut fact,
+                    &snapshot_hash,
+                    session_id,
+                    request_id,
+                    surface,
+                    supersedes.as_ref(),
+                )?;
+                let mut original = None;
+                if let Some(target) = supersedes {
+                    let version = Self::next_version(state)?;
+                    let old = state.facts.get_mut(&target.id).unwrap();
+                    old.status = FactStatus::Superseded;
+                    old.version = version;
+                    old.superseded_at = Some(fact.last_reinforced.clone());
+                    original = Some(FactPrecondition {
+                        id: target.id,
+                        expected_version: version,
+                    });
+                }
+                let version = Self::next_version(state)?;
+                fact.version = version;
+                Self::insert_fact(state, candidate.id.clone(), fact)?;
+                Ok(match original {
+                    Some(original) => MemoryMutationEffect::FactSuperseded {
+                        original,
+                        replacement: FactPrecondition {
+                            id: candidate.id,
+                            expected_version: version,
+                        },
+                    },
+                    None => MemoryMutationEffect::FactStored {
+                        fact_id: candidate.id,
+                        version,
+                        action: StoreAction::Stored,
+                    },
+                })
+            }
+            MemoryMutation::StoreLifecycleConclusion { .. } => Err(MemoryError::InvalidMutation(
+                "unlowered lifecycle conclusion".into(),
+            )),
             MemoryMutation::ImportJsonl { jsonl } => {
                 let stats = Self::import_jsonl_to_state(state, &jsonl)?;
                 Ok(jsonl_import_effect(stats))
             }
-            MemoryMutation::StoreFact { request } => {
+            MemoryMutation::StoreFact { request }
+            | MemoryMutation::StoreApplicableFact { request, .. }
+            | MemoryMutation::StoreLifecycleInference { request, .. } => {
                 let content_hash = hash::content_hash(&request.content);
                 let existing_id = state
                     .facts
                     .iter()
-                    .find(|(_, fact)| {
-                        fact.mind == request.mind
+                    .filter(|(_, fact)| {
+                        inference.is_none()
+                            && fact.mind == request.mind
                             && fact.content_hash.as_deref() == Some(content_hash.as_str())
                             && fact.status == FactStatus::Active
+                            && fact
+                                .applicability
+                                .as_ref()
+                                .map(|record| &record.constraints)
+                                == applicability.as_ref().map(|record| &record.constraints)
+                            && (!crate::lifecycle::requires_exact_source(request.source.as_deref())
+                                || (fact.content == request.content
+                                    && fact.source == request.source
+                                    && fact.section == request.section))
                     })
-                    .map(|(id, _)| id.clone());
+                    .map(|(id, _)| id.clone())
+                    .min();
                 let version = Self::next_version(state)?;
                 if let Some(fact_id) = existing_id {
                     let fact = state.facts.get_mut(&fact_id).ok_or_else(|| {
@@ -129,13 +273,19 @@ impl InMemoryBackend {
                     state,
                     fact_id.clone(),
                     Fact {
+                        applicability,
                         id: fact_id.clone(),
                         mind: request.mind,
                         content: request.content,
                         section: request.section,
-                        status: FactStatus::Active,
-                        confidence: 1.0,
-                        reinforcement_count: 1,
+                        status: if inference.is_some() {
+                            FactStatus::Pending
+                        } else {
+                            FactStatus::Active
+                        },
+                        confidence: if inference.is_some() { 0.0 } else { 1.0 },
+                        reinforcement_count: if inference.is_some() { 0 } else { 1 },
+                        lifecycle_inference: inference,
                         decay_rate: 0.05,
                         decay_profile: request.decay_profile,
                         last_reinforced: timestamp.clone(),
@@ -236,6 +386,15 @@ impl InMemoryBackend {
                 if state
                     .facts
                     .get(&fact.id)
+                    .is_some_and(|existing| existing.mind != replacement.mind)
+                {
+                    return Err(MemoryError::InvalidMutation(
+                        "supersession must remain in the same mind".into(),
+                    ));
+                }
+                if state
+                    .facts
+                    .get(&fact.id)
                     .is_none_or(|existing| existing.status != FactStatus::Active)
                 {
                     return Err(MemoryError::FactNotFound(fact.id));
@@ -255,6 +414,8 @@ impl InMemoryBackend {
                     replacement_id.clone(),
                     Fact {
                         id: replacement_id.clone(),
+                        applicability: None,
+                        lifecycle_inference: None,
                         mind: replacement.mind,
                         content_hash: Some(hash::content_hash(&replacement.content)),
                         content: replacement.content,
@@ -333,6 +494,15 @@ impl InMemoryBackend {
                 embedding,
             } => {
                 Self::check_fact_precondition(state, &fact)?;
+                if state
+                    .facts
+                    .get(&fact.id)
+                    .is_some_and(|fact| fact.status == FactStatus::Pending)
+                {
+                    return Err(MemoryError::InvalidMutation(
+                        "pending candidates cannot be indexed".into(),
+                    ));
+                }
                 if let Some(existing) = state
                     .embeddings
                     .iter()
@@ -352,11 +522,72 @@ impl InMemoryBackend {
                     model_name: model_name.clone(),
                     embedding,
                     inserted_at: now_iso(),
+                    space: None,
+                    source_hash: None,
                 });
                 Ok(MemoryMutationEffect::EmbeddingStored {
                     fact_id: fact.id,
                     model_name,
                     dims,
+                })
+            }
+            MemoryMutation::RecordEmbeddingIndexing { record } => {
+                Self::check_fact_precondition(state, &record.fact)?;
+                if state.facts[&record.fact.id].status != FactStatus::Active {
+                    return Err(MemoryError::InvalidMutation(
+                        "embedding source must be active".into(),
+                    ));
+                }
+                crate::indexing::admit_record(state.indexing.get(&record.fact.id), &record)?;
+                let effect = MemoryMutationEffect::EmbeddingIndexingRecorded {
+                    fact: record.fact.clone(),
+                    attempt_id: record.attempt_id.clone(),
+                };
+                state.indexing.insert(record.fact.id.clone(), record);
+                Ok(effect)
+            }
+            MemoryMutation::StoreIdentifiedEmbedding { fact, embedding }
+            | MemoryMutation::CompleteEmbeddingIndexing {
+                fact, embedding, ..
+            } => {
+                embedding.validate()?;
+                Self::check_fact_precondition(state, &fact)?;
+                crate::indexing::admit_completion(
+                    state.indexing.get(&fact.id),
+                    &fact,
+                    &embedding,
+                    None,
+                )?;
+                let source = state.facts.get(&fact.id).unwrap();
+                if source.status != FactStatus::Active {
+                    return Err(MemoryError::InvalidMutation(
+                        "embedding source must be active".into(),
+                    ));
+                }
+                let source_hash = crate::retrieval::raw_content_hash(&source.content);
+                let unchanged = completing_index
+                    && state.embeddings.iter().any(|entry| {
+                        entry.fact_id == fact.id
+                            && entry.space.as_ref() == Some(&embedding.space)
+                            && entry.source_hash.as_ref() == Some(&source_hash)
+                            && entry.embedding == embedding.values
+                    });
+                if !unchanged {
+                    state.embeddings.retain(|entry| entry.fact_id != fact.id);
+                    state.embeddings.push(EmbeddingEntry {
+                        fact_id: fact.id.clone(),
+                        model_name: embedding.space.model.clone(),
+                        embedding: embedding.values,
+                        inserted_at: now_iso(),
+                        source_hash: Some(source_hash),
+                        space: Some(embedding.space.clone()),
+                    });
+                }
+                state.indexing.remove(&fact.id);
+                Ok(MemoryMutationEffect::EmbeddingStored {
+                    fact_id: fact.id,
+                    model_name: embedding.space.model,
+                    dims: embedding.space.dimensions,
                 })
             }
             MemoryMutation::CreateEdge { mind, request } => {
@@ -383,7 +614,11 @@ impl InMemoryBackend {
                 });
                 Ok(MemoryMutationEffect::EdgeCreated { edge_id })
             }
-            MemoryMutation::StoreEpisode { request } => {
+            MemoryMutation::StoreEpisode { request }
+            | MemoryMutation::StoreCoveragePage { request, .. } => {
+                if let Some(formation) = &request.formation {
+                    formation.validate()?;
+                }
                 let episode_id = gen_id();
                 let timestamp = now_iso();
                 state.episodes.push(Episode {
@@ -398,11 +633,51 @@ impl InMemoryBackend {
                     files_changed: request.files_changed,
                     tags: request.tags,
                     tool_calls_count: request.tool_calls_count,
+                    formation: request.formation,
                     jj_change_id: None,
                 });
-                Ok(MemoryMutationEffect::EpisodeStored { episode_id })
+                Ok(match capture {
+                    Some((key, cursor)) => MemoryMutationEffect::CoverageStored {
+                        episode_id,
+                        key,
+                        cursor,
+                    },
+                    None => MemoryMutationEffect::EpisodeStored { episode_id },
+                })
+            }
+            MemoryMutation::CompleteFormation {
+                episode_id,
+                formation,
+            } => {
+                let episode = state
+                    .episodes
+                    .iter_mut()
+                    .find(|episode| episode.id == episode_id)
+                    .ok_or_else(|| {
+                        MemoryError::InvalidMutation("formation episode not found".into())
+                    })?;
+                crate::formation::validate_completion(episode.formation.as_deref(), &formation)?;
+                episode.narrative = formation.narrative();
+                episode.formation = Some(formation);
+                Ok(MemoryMutationEffect::FormationCompleted { episode_id })
             }
         }
+    }
+
+    fn capture_cursor(state: &State, key: &FormationCaptureKey) -> Option<FormationCursor> {
+        state
+            .operation_receipts
+            .values()
+            .filter_map(|(_, effect)| match effect {
+                MemoryMutationEffect::CoverageStored {
+                    key: stored,
+                    cursor,
+                    ..
+                } if stored == key => Some(cursor),
+                _ => None,
+            })
+            .max_by_key(|cursor| cursor.sequence)
+            .cloned()
     }
 
     fn import_jsonl_to_state(state: &mut State, jsonl: &str) -> Result<ImportStats> {
@@ -413,7 +688,23 @@ impl InMemoryBackend {
                 continue;
             }
             match serde_json::from_str::<JsonlRecord>(trimmed) {
-                Ok(JsonlRecord::Fact(jf)) => {
+                Ok(JsonlRecord::ApplicableFact(ref fact)) if fact.applicability.is_none() => {
+                    return Err(MemoryError::InvalidMutation(
+                        "applicable_fact requires applicability metadata".into(),
+                    ));
+                }
+                Ok(JsonlRecord::Fact(jf) | JsonlRecord::ApplicableFact(jf)) => {
+                    if let Some(applicability) = &jf.applicability {
+                        applicability.validate()?;
+                    }
+                    validate_inference_status(
+                        &jf.status,
+                        jf.lifecycle_inference.as_deref(),
+                        &jf.content,
+                    )?;
+                    if let Some(operational) = &jf.operational {
+                        operational.validate()?;
+                    }
                     persisted_lamport_version(jf.version)?;
                     let content_hash = jf
                         .content_hash
@@ -421,12 +712,17 @@ impl InMemoryBackend {
                         .unwrap_or_else(|| hash::content_hash(&jf.content));
                     if let Some(existing) = state.facts.get(&jf.id) {
                         if jf.version > existing.version {
+                            validate_inference_import(
+                                existing.lifecycle_inference.as_deref(),
+                                jf.lifecycle_inference.as_deref(),
+                                &jf.status,
+                            )?;
                             let mut updated = existing.clone();
                             updated.content = jf.content;
                             updated.section = jf.section;
                             updated.mind = jf.mind;
                             updated.status = jf.status;
-                            updated.source = jf.source;
+                            updated.source = jf.source.filter(|source| !source.is_empty());
                             updated.content_hash = Some(content_hash);
                             updated.superseded_by = jf.supersedes;
                             updated.decay_profile = jf.decay_profile;
@@ -434,6 +730,14 @@ impl InMemoryBackend {
                             updated.layer = jf.layer;
                             updated.tags = jf.tags;
                             updated.version = jf.version;
+                            if jf.applicability.is_some() {
+                                updated.applicability = jf.applicability;
+                            }
+                            updated.lifecycle_inference = jf.lifecycle_inference;
+                            updated.created_at = jf.created_at;
+                            if let Some(operational) = jf.operational {
+                                operational.apply_to(&mut updated);
+                            }
                             state.version_clock = state.version_clock.max(jf.version);
                             Self::insert_fact(state, jf.id, updated)?;
                             stats.reinforced += 1;
@@ -442,7 +746,9 @@ impl InMemoryBackend {
                         }
                     } else {
                         state.version_clock = state.version_clock.max(jf.version);
-                        let fact = Fact {
+                        let mut fact = Fact {
+                            applicability: jf.applicability,
+                            lifecycle_inference: jf.lifecycle_inference,
                             id: jf.id.clone(),
                             mind: jf.mind,
                             content: jf.content,
@@ -456,7 +762,7 @@ impl InMemoryBackend {
                             created_at: jf.created_at,
                             version: jf.version,
                             superseded_by: jf.supersedes,
-                            source: jf.source,
+                            source: jf.source.filter(|source| !source.is_empty()),
                             content_hash: Some(content_hash),
                             last_accessed: None,
                             created_session: None,
@@ -467,13 +773,33 @@ impl InMemoryBackend {
                             layer: jf.layer,
                             tags: jf.tags,
                         };
+                        if let Some(operational) = jf.operational {
+                            operational.apply_to(&mut fact);
+                        }
                         Self::insert_fact(state, jf.id, fact)?;
                         stats.imported += 1;
                     }
                 }
                 Ok(JsonlRecord::Episode(ep)) => {
-                    if state.episodes.iter().any(|existing| existing.id == ep.id) {
-                        stats.skipped += 1;
+                    if let Some(formation) = &ep.formation {
+                        formation.validate()?;
+                    }
+                    if let Some(existing) = state
+                        .episodes
+                        .iter_mut()
+                        .find(|existing| existing.id == ep.id)
+                    {
+                        if crate::formation::completes_import(existing, &ep)? {
+                            existing.formation = ep.formation;
+                            existing.narrative = existing
+                                .formation
+                                .as_ref()
+                                .expect("completed formation")
+                                .narrative();
+                            stats.imported += 1;
+                        } else {
+                            stats.skipped += 1;
+                        }
                     } else {
                         state.episodes.push(ep);
                         stats.imported += 1;
@@ -507,6 +833,64 @@ impl Default for InMemoryBackend {
 
 #[async_trait]
 impl MemoryBackend for InMemoryBackend {
+    async fn selection_revision(
+        &self,
+    ) -> Result<Option<crate::selection_cache::SelectionRevision>> {
+        let state = self.state.lock().unwrap();
+        if self.cache_identity == u64::MAX || state.cache_revision == u64::MAX {
+            return Ok(None);
+        }
+        Ok(Some(crate::selection_cache::SelectionRevision {
+            instance: self.cache_identity,
+            local: state.cache_revision,
+            external: 0,
+        }))
+    }
+    async fn selection_time_bounds(
+        &self,
+        mind: &str,
+        query_at: chrono::DateTime<chrono::Utc>,
+        wall_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Option<crate::selection_cache::SelectionTimeBounds>> {
+        let state = self.state.lock().unwrap();
+        let mut bounds = crate::selection_cache::SelectionTimeBounds::default();
+        for fact in state
+            .facts
+            .values()
+            .filter(|fact| fact.mind == mind && fact.status == FactStatus::Active)
+        {
+            bounds.observe(
+                fact.applicability.as_deref(),
+                fact.confidence,
+                fact.reinforcement_count,
+                &fact.decay_profile,
+                &fact.last_reinforced,
+                query_at,
+                wall_at,
+            );
+        }
+        Ok(Some(bounds))
+    }
+    async fn get_fact_record(&self, mind: &str, id: &str) -> Result<Option<Fact>> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .facts
+            .get(id)
+            .filter(|fact| fact.mind == mind)
+            .cloned())
+    }
+    async fn get_pending_fact(&self, mind: &str, id: &str) -> Result<Option<Fact>> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .facts
+            .get(id)
+            .filter(|fact| fact.mind == mind && fact.status == FactStatus::Pending)
+            .cloned())
+    }
     async fn mutation_receipt(
         &self,
         operation_id: &str,
@@ -563,6 +947,7 @@ impl MemoryBackend for InMemoryBackend {
         staged
             .operation_receipts
             .insert(operation_id.into(), (payload_hash.into(), effect.clone()));
+        staged.cache_revision = state.cache_revision.saturating_add(1);
         *state = staged;
         Ok(MemoryMutationOutcome {
             effect,
@@ -571,7 +956,7 @@ impl MemoryBackend for InMemoryBackend {
     }
 
     async fn store_fact(&self, req: StoreFact) -> Result<StoreResult> {
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state_for_write();
         let ch = hash::content_hash(&req.content);
 
         // Check for dedup by content hash within same mind — find ID first, then mutate
@@ -582,6 +967,7 @@ impl MemoryBackend for InMemoryBackend {
                 f.mind == req.mind
                     && f.content_hash.as_deref() == Some(ch.as_str())
                     && f.status == FactStatus::Active
+                    && f.applicability.is_none()
             })
             .map(|(id, _)| id.clone());
 
@@ -600,6 +986,8 @@ impl MemoryBackend for InMemoryBackend {
 
         let version = Self::next_version(&mut s)?;
         let fact = Fact {
+            applicability: None,
+            lifecycle_inference: None,
             id: gen_id(),
             mind: req.mind,
             content: req.content,
@@ -718,7 +1106,7 @@ impl MemoryBackend for InMemoryBackend {
     }
 
     async fn reinforce_fact(&self, id: &str) -> Result<Fact> {
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state_for_write();
         if s.facts
             .get(id)
             .is_none_or(|fact| fact.status != FactStatus::Active)
@@ -735,7 +1123,7 @@ impl MemoryBackend for InMemoryBackend {
     }
 
     async fn dormancy_facts(&self, ids: &[&str]) -> Result<usize> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state_for_write();
         let mut transitioned = 0;
         for id in ids {
             let is_active = state
@@ -756,7 +1144,7 @@ impl MemoryBackend for InMemoryBackend {
     }
 
     async fn archive_facts(&self, ids: &[&str]) -> Result<usize> {
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state_for_write();
         let mut count = 0;
         for id in ids {
             // Check if active first, then update
@@ -776,7 +1164,7 @@ impl MemoryBackend for InMemoryBackend {
     }
 
     async fn supersede_fact(&self, id: &str, replacement: StoreFact) -> Result<Fact> {
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state_for_write();
 
         if s.facts
             .get(id)
@@ -798,6 +1186,8 @@ impl MemoryBackend for InMemoryBackend {
         let new_id = gen_id();
         let ch = hash::content_hash(&replacement.content);
         let new_fact = Fact {
+            applicability: None,
+            lifecycle_inference: None,
             id: new_id.clone(),
             mind: replacement.mind,
             content: replacement.content,
@@ -903,14 +1293,26 @@ impl MemoryBackend for InMemoryBackend {
     }
 
     async fn fts_search(&self, mind: &str, query: &str, k: usize) -> Result<Vec<ScoredFact>> {
+        self.fts_search_filtered(mind, query, k, &SearchFilter::default())
+            .await
+    }
+
+    async fn fts_search_filtered(
+        &self,
+        mind: &str,
+        query: &str,
+        k: usize,
+        filter: &SearchFilter,
+    ) -> Result<Vec<ScoredFact>> {
+        let filter = filter.resolved()?;
         let s = self.state.lock().unwrap();
-        let query_lower = query.to_lowercase();
+        let query_lower = query.replace('"', " ").to_lowercase();
         let terms: Vec<&str> = query_lower.split_whitespace().collect();
 
         let mut results: Vec<ScoredFact> = s
             .facts
             .values()
-            .filter(|f| f.mind == mind && f.status == FactStatus::Active)
+            .filter(|f| f.mind == mind && filter.matches(f))
             .filter_map(|f| {
                 let content_lower = f.content.to_lowercase();
                 let matches = terms.iter().filter(|t| content_lower.contains(**t)).count();
@@ -918,11 +1320,17 @@ impl MemoryBackend for InMemoryBackend {
                     return None;
                 }
                 let relevance = matches as f64 / terms.len().max(1) as f64;
-                let score = crate::decay::ambient_score(relevance, f)?;
+                let score = filter.score(relevance, f)?;
                 Some(ScoredFact {
+                    applicability: filter.applicability_status(f),
                     fact: f.clone(),
                     similarity: relevance,
                     score,
+                    scores: RetrievalScores {
+                        lexical: Some(relevance),
+                        ..Default::default()
+                    },
+                    graph_evidence: vec![],
                 })
             })
             .collect();
@@ -944,59 +1352,8 @@ impl MemoryBackend for InMemoryBackend {
         k: usize,
         min_similarity: f32,
     ) -> Result<Vec<ScoredFact>> {
-        let s = self.state.lock().unwrap();
-
-        // Find embeddings for this mind
-        let mind_embeddings: Vec<&EmbeddingEntry> = s
-            .embeddings
-            .iter()
-            .filter(|e| {
-                s.facts
-                    .get(&e.fact_id)
-                    .is_some_and(|f| f.mind == mind && f.status == FactStatus::Active)
-            })
-            .collect();
-
-        if mind_embeddings.is_empty() {
-            return Err(MemoryError::NoEmbeddings);
-        }
-
-        // Check dimension
-        let expected_dims = mind_embeddings[0].embedding.len() as u32;
-        let got_dims = embedding.len() as u32;
-        if expected_dims != got_dims {
-            return Err(MemoryError::EmbeddingDimensionMismatch {
-                expected: expected_dims,
-                got: got_dims,
-                stored_model: mind_embeddings[0].model_name.clone(),
-            });
-        }
-
-        let mut results: Vec<ScoredFact> = mind_embeddings
-            .iter()
-            .filter_map(|e| {
-                let sim = vectors::cosine_similarity(&e.embedding, embedding);
-                if sim < min_similarity {
-                    return None;
-                }
-                let fact = s.facts.get(&e.fact_id)?.clone();
-                let score = crate::decay::ambient_score(sim as f64, &fact)?;
-                Some(ScoredFact {
-                    fact,
-                    similarity: sim as f64,
-                    score,
-                })
-            })
-            .collect();
-
-        results.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.fact.id.cmp(&b.fact.id))
-        });
-        results.truncate(k);
-        Ok(results)
+        let _ = (mind, embedding, k, min_similarity);
+        Err(MemoryError::EmbeddingIdentityRequired)
     }
 
     async fn vector_search_cancellable(
@@ -1007,53 +1364,31 @@ impl MemoryBackend for InMemoryBackend {
         min_similarity: f32,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> Result<Vec<ScoredFact>> {
-        let state = self.state.lock().unwrap();
-        let mut matching = state.embeddings.iter().filter(|entry| {
-            state
-                .facts
-                .get(&entry.fact_id)
-                .is_some_and(|fact| fact.mind == mind && fact.status == FactStatus::Active)
-        });
-        let Some(first) = matching.next() else {
-            return Err(MemoryError::NoEmbeddings);
-        };
-        if first.embedding.len() != embedding.len() {
-            return Err(MemoryError::EmbeddingDimensionMismatch {
-                expected: first.embedding.len() as u32,
-                got: embedding.len() as u32,
-                stored_model: first.model_name.clone(),
-            });
+        self.vector_search_filtered_cancellable(
+            mind,
+            embedding,
+            k,
+            min_similarity,
+            &SearchFilter::default(),
+            cancelled,
+        )
+        .await
+    }
+
+    async fn vector_search_filtered_cancellable(
+        &self,
+        mind: &str,
+        embedding: &[f32],
+        k: usize,
+        min_similarity: f32,
+        filter: &SearchFilter,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<Vec<ScoredFact>> {
+        let _ = (mind, embedding, k, min_similarity, filter);
+        if cancelled() {
+            return Err(MemoryError::Cancelled);
         }
-        let mut results = Vec::new();
-        for entry in std::iter::once(first).chain(matching) {
-            if cancelled() {
-                return Err(MemoryError::Cancelled);
-            }
-            let similarity = vectors::cosine_similarity(&entry.embedding, embedding);
-            if similarity < min_similarity {
-                continue;
-            }
-            let Some(fact) = state.facts.get(&entry.fact_id).cloned() else {
-                continue;
-            };
-            let Some(score) = crate::decay::ambient_score(similarity as f64, &fact) else {
-                continue;
-            };
-            results.push(ScoredFact {
-                fact,
-                similarity: similarity as f64,
-                score,
-            });
-        }
-        results.sort_by(|left, right| {
-            right
-                .score
-                .partial_cmp(&left.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| left.fact.id.cmp(&right.fact.id))
-        });
-        results.truncate(k);
-        Ok(results)
+        Err(MemoryError::EmbeddingIdentityRequired)
     }
 
     async fn store_embedding(
@@ -1063,8 +1398,11 @@ impl MemoryBackend for InMemoryBackend {
         embedding: &[f32],
     ) -> Result<()> {
         validate_embedding(embedding)?;
-        let mut s = self.state.lock().unwrap();
-        if !s.facts.contains_key(fact_id) {
+        let mut s = self.state_for_write();
+        if s.facts
+            .get(fact_id)
+            .is_none_or(|fact| fact.status == FactStatus::Pending)
+        {
             return Err(MemoryError::FactNotFound(fact_id.into()));
         }
         if let Some(existing) = s
@@ -1086,6 +1424,8 @@ impl MemoryBackend for InMemoryBackend {
             model_name: model_name.into(),
             embedding: embedding.to_vec(),
             inserted_at: now_iso(),
+            space: None,
+            source_hash: None,
         });
         Ok(())
     }
@@ -1103,8 +1443,166 @@ impl MemoryBackend for InMemoryBackend {
         }))
     }
 
+    async fn search_identified(
+        &self,
+        mind: &str,
+        query: &IdentifiedEmbedding,
+        k: usize,
+        minimum: f32,
+        filter: &SearchFilter,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<VectorSearchReport> {
+        let filter = filter.resolved()?;
+        let mut top = crate::retrieval::VectorAccumulator::new(query, k, minimum)?;
+        if cancelled() {
+            return Err(MemoryError::Cancelled);
+        }
+        if k == 0 {
+            return Ok(top.finish());
+        }
+        let state = self.state.lock().unwrap();
+        for entry in &state.embeddings {
+            if cancelled() {
+                return Err(MemoryError::Cancelled);
+            }
+            let Some(fact) = state
+                .facts
+                .get(&entry.fact_id)
+                .filter(|fact| fact.mind == mind && filter.matches(fact))
+            else {
+                continue;
+            };
+            if !top.eligible(crate::retrieval::index_state(
+                entry.space.as_ref(),
+                entry.source_hash.as_deref(),
+                &fact.content,
+                &query.space,
+            )) {
+                continue;
+            }
+            IdentifiedEmbedding {
+                space: query.space.clone(),
+                values: entry.embedding.clone(),
+            }
+            .validate()?;
+            let similarity = vectors::cosine_similarity(&entry.embedding, &query.values);
+            if similarity >= minimum {
+                top.push(fact.clone(), similarity as f64, &filter);
+            }
+        }
+        Ok(top.finish())
+    }
+
+    async fn embedding_indexing_record(
+        &self,
+        fact_id: &str,
+    ) -> Result<Option<EmbeddingIndexingRecord>> {
+        Ok(self.state.lock().unwrap().indexing.get(fact_id).cloned())
+    }
+
+    async fn embedding_indexing_summary(&self, mind: &str) -> Result<EmbeddingIndexingSummary> {
+        let state = self.state.lock().unwrap();
+        let mut summary = EmbeddingIndexingSummary::default();
+        let identified: HashSet<&str> = state
+            .embeddings
+            .iter()
+            .filter(|entry| entry.space.is_some())
+            .map(|entry| entry.fact_id.as_str())
+            .collect();
+        for fact in state
+            .facts
+            .values()
+            .filter(|fact| fact.mind == mind && fact.status == FactStatus::Active)
+        {
+            if let Some(record) = state.indexing.get(&fact.id) {
+                summary.observe(
+                    if fact.version == record.fact.expected_version {
+                        record.reason
+                    } else {
+                        EmbeddingIndexingReason::SourceChanged
+                    },
+                    1,
+                );
+            } else if !identified.contains(fact.id.as_str()) {
+                summary.untracked += 1;
+            }
+        }
+        Ok(summary)
+    }
+
+    async fn embedding_index_state(
+        &self,
+        id: &str,
+        space: &EmbeddingSpace,
+    ) -> Result<EmbeddingIndexState> {
+        space.validate()?;
+        let state = self.state.lock().unwrap();
+        let fact = state
+            .facts
+            .get(id)
+            .ok_or_else(|| MemoryError::FactNotFound(id.into()))?;
+        let Some(entry) = state.embeddings.iter().find(|entry| entry.fact_id == id) else {
+            return Ok(EmbeddingIndexState::Missing);
+        };
+        Ok(crate::retrieval::index_state(
+            entry.space.as_ref(),
+            entry.source_hash.as_deref(),
+            &fact.content,
+            space,
+        ))
+    }
+
+    async fn get_fact_filtered(
+        &self,
+        mind: &str,
+        id: &str,
+        filter: &SearchFilter,
+    ) -> Result<Option<Fact>> {
+        let filter = filter.resolved()?;
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .facts
+            .get(id)
+            .filter(|fact| fact.mind == mind && filter.matches(fact))
+            .cloned())
+    }
+
+    async fn get_edges_filtered(
+        &self,
+        mind: &str,
+        id: &str,
+        filter: &SearchFilter,
+        limit: usize,
+    ) -> Result<Vec<Edge>> {
+        let filter = filter.resolved()?;
+        let state = self.state.lock().unwrap();
+        let mut edges = state
+            .edges
+            .iter()
+            .filter(|edge| edge.source_id == id || edge.target_id == id)
+            .filter(|edge| {
+                [&edge.source_id, &edge.target_id].iter().all(|id| {
+                    state
+                        .facts
+                        .get(*id)
+                        .is_some_and(|fact| fact.mind == mind && filter.matches(fact))
+                })
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        edges.sort_by(|a, b| {
+            b.confidence
+                .total_cmp(&a.confidence)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        edges.truncate(limit.min(1024));
+        Ok(edges)
+    }
+
     async fn create_edge(&self, req: CreateEdge) -> Result<Edge> {
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state_for_write();
         let source = s
             .facts
             .get(&req.source_id)
@@ -1157,7 +1655,10 @@ impl MemoryBackend for InMemoryBackend {
     }
 
     async fn store_episode(&self, req: StoreEpisode) -> Result<Episode> {
-        let mut s = self.state.lock().unwrap();
+        if let Some(formation) = &req.formation {
+            formation.validate()?;
+        }
+        let mut s = self.state_for_write();
         let episode = Episode {
             id: gen_id(),
             mind: req.mind,
@@ -1170,6 +1671,7 @@ impl MemoryBackend for InMemoryBackend {
             files_changed: req.files_changed,
             tags: req.tags,
             tool_calls_count: req.tool_calls_count,
+            formation: req.formation,
             jj_change_id: None,
         };
         s.episodes.push(episode.clone());
@@ -1194,17 +1696,63 @@ impl MemoryBackend for InMemoryBackend {
         Ok(eps)
     }
 
+    async fn formation_cursor(&self, key: &FormationCaptureKey) -> Result<Option<FormationCursor>> {
+        Ok(Self::capture_cursor(&self.state.lock().unwrap(), key))
+    }
+
+    async fn pending_formations(
+        &self,
+        mind: &str,
+        model: &str,
+        limit: usize,
+    ) -> Result<Vec<Episode>> {
+        crate::formation::validate_recovery_limit(limit)?;
+        let state = self.state.lock().unwrap();
+        let mut episodes:Vec<_>=state.episodes.iter().filter(|episode| episode.mind==mind && episode.formation.as_ref().is_some_and(|formation| matches!(&formation.extraction,ExtractionOutcome::Pending {model:expected} if expected==model))).collect();
+        episodes.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
+        episodes
+            .into_iter()
+            .take(limit)
+            .map(|episode| {
+                episode
+                    .formation
+                    .as_ref()
+                    .expect("pending formation")
+                    .validate()?;
+                Ok(episode.clone())
+            })
+            .collect()
+    }
+
     async fn search_episodes(&self, mind: &str, query: &str, k: usize) -> Result<Vec<Episode>> {
         let s = self.state.lock().unwrap();
-        let query_lower = query.to_lowercase();
-        let mut results: Vec<Episode> = s
+        let query_lower = query.replace('"', " ").to_lowercase();
+        let terms: Vec<&str> = query_lower.split_whitespace().collect();
+        if terms.is_empty() || k == 0 {
+            return Ok(Vec::new());
+        }
+        let mut results: Vec<(usize, &Episode)> = s
             .episodes
             .iter()
-            .filter(|e| e.mind == mind && e.narrative.to_lowercase().contains(&query_lower))
-            .cloned()
+            .filter(|episode| episode.mind == mind)
+            .filter_map(|episode| {
+                let text = format!("{} {}", episode.title, episode.narrative).to_lowercase();
+                let hits = terms.iter().filter(|term| text.contains(**term)).count();
+                (hits > 0).then_some((hits, episode))
+            })
             .collect();
+        results.sort_by(|(left_score, left), (right_score, right)| {
+            right_score
+                .cmp(left_score)
+                .then_with(|| right.date.cmp(&left.date))
+                .then_with(|| right.created_at.cmp(&left.created_at))
+                .then_with(|| left.id.cmp(&right.id))
+        });
         results.truncate(k);
-        Ok(results)
+        Ok(results
+            .into_iter()
+            .map(|(_, episode)| episode.clone())
+            .collect())
     }
 
     async fn export_jsonl(&self, mind: &str) -> Result<String> {
@@ -1212,14 +1760,14 @@ impl MemoryBackend for InMemoryBackend {
         let mut lines = Vec::new();
 
         // Facts (sorted by id for determinism)
-        let mut facts: Vec<&Fact> = s
-            .facts
-            .values()
-            .filter(|f| f.mind == mind && f.status == FactStatus::Active)
-            .collect();
+        let mut facts: Vec<&Fact> = s.facts.values().filter(|f| f.mind == mind).collect();
         facts.sort_by(|a, b| a.id.cmp(&b.id));
         for fact in facts {
-            let record = JsonlRecord::Fact(JsonlFact {
+            FactOperationalState::from(fact).validate()?;
+            let record = JsonlFact {
+                applicability: fact.applicability.clone(),
+                lifecycle_inference: fact.lifecycle_inference.clone(),
+                operational: Some(Box::new(FactOperationalState::from(fact))),
                 id: fact.id.clone(),
                 mind: fact.mind.clone(),
                 content: fact.content.clone(),
@@ -1234,7 +1782,12 @@ impl MemoryBackend for InMemoryBackend {
                 persona_id: fact.persona_id.clone(),
                 layer: fact.layer.clone(),
                 tags: fact.tags.clone(),
-            });
+            };
+            let record = if record.applicability.is_some() {
+                JsonlRecord::ApplicableFact(record)
+            } else {
+                JsonlRecord::Fact(record)
+            };
             lines.push(serde_json::to_string(&record).unwrap());
         }
 
@@ -1263,6 +1816,7 @@ impl MemoryBackend for InMemoryBackend {
         let mut state = self.state.lock().unwrap();
         let mut staged = state.clone();
         let stats = Self::import_jsonl_to_state(&mut staged, jsonl)?;
+        staged.cache_revision = state.cache_revision.saturating_add(1);
         *state = staged;
         Ok(stats)
     }

@@ -751,6 +751,24 @@ pub async fn quick_completion(
     model_spec: &str,
     prompt: &str,
 ) -> anyhow::Result<QuickCompletionResult> {
+    quick_completion_internal(model_spec, prompt, None).await
+}
+
+/// Bounded classification response requiring an explicit successful terminal event.
+pub(crate) async fn quick_completion_bounded(
+    model_spec: &str,
+    prompt: &str,
+    max_bytes: usize,
+) -> anyhow::Result<QuickCompletionResult> {
+    anyhow::ensure!(max_bytes > 0, "completion byte budget must be positive");
+    quick_completion_internal(model_spec, prompt, Some(max_bytes)).await
+}
+
+async fn quick_completion_internal(
+    model_spec: &str,
+    prompt: &str,
+    max_bytes: Option<usize>,
+) -> anyhow::Result<QuickCompletionResult> {
     let route = crate::session_execution::boot_execution_binding()
         .resolve_provider_route(model_spec, None)
         .await
@@ -771,7 +789,7 @@ pub async fn quick_completion(
         extra_body: std::collections::HashMap::new(),
     };
 
-    let mut rx = route
+    let rx = route
         .stream(
             crate::provider_route_service::RouteLeaseOwner::Step(&recorder),
             "You are a concise classification assistant.",
@@ -781,13 +799,26 @@ pub async fn quick_completion(
         )
         .await?;
 
+    collect_quick_completion(rx, max_bytes).await
+}
+
+async fn collect_quick_completion(
+    mut rx: tokio::sync::mpsc::Receiver<crate::bridge::LlmEvent>,
+    max_bytes: Option<usize>,
+) -> anyhow::Result<QuickCompletionResult> {
     let mut text = String::new();
     let mut input_tokens = 0u64;
     let mut output_tokens = 0u64;
 
     while let Some(event) = rx.recv().await {
         match event {
-            crate::bridge::LlmEvent::TextDelta { delta } => text.push_str(&delta),
+            crate::bridge::LlmEvent::TextDelta { delta } => {
+                anyhow::ensure!(
+                    max_bytes.is_none_or(|limit| text.len().saturating_add(delta.len()) <= limit),
+                    "completion exceeded its byte budget"
+                );
+                text.push_str(&delta);
+            }
             crate::bridge::LlmEvent::Done {
                 input_tokens: i,
                 output_tokens: o,
@@ -795,6 +826,13 @@ pub async fn quick_completion(
             } => {
                 input_tokens = i;
                 output_tokens = o;
+                if max_bytes.is_some() {
+                    return Ok(QuickCompletionResult {
+                        text,
+                        input_tokens,
+                        output_tokens,
+                    });
+                }
             }
             crate::bridge::LlmEvent::Error { message } => {
                 return Err(anyhow::anyhow!("LLM error: {message}"));
@@ -806,6 +844,10 @@ pub async fn quick_completion(
         }
     }
 
+    anyhow::ensure!(
+        max_bytes.is_none(),
+        "completion ended without a terminal Done event"
+    );
     Ok(QuickCompletionResult {
         text,
         input_tokens,
@@ -817,6 +859,77 @@ pub struct QuickCompletionResult {
     pub text: String,
     pub input_tokens: u64,
     pub output_tokens: u64,
+}
+
+#[cfg(test)]
+mod memory_completion_adversarial_tests {
+    use super::*;
+    use crate::bridge::LlmEvent;
+
+    fn done() -> LlmEvent {
+        LlmEvent::Done {
+            message: serde_json::json!({}),
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            provider_telemetry: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn adversarial_bounded_completion_rejects_oversized_utf8() {
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        tx.send(LlmEvent::TextDelta { delta: "é".into() })
+            .await
+            .unwrap();
+        tx.send(LlmEvent::TextDelta { delta: "é".into() })
+            .await
+            .unwrap();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            collect_quick_completion(rx, Some(3)),
+        )
+        .await;
+        assert!(
+            result.expect("overflow must stop before EOF").is_err(),
+            "byte limit must apply during collection"
+        );
+        assert!(tx.is_closed());
+    }
+
+    #[tokio::test]
+    async fn adversarial_bounded_completion_rejects_eof_without_done() {
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        tx.send(LlmEvent::TextDelta { delta: "[]".into() })
+            .await
+            .unwrap();
+        drop(tx);
+        assert!(
+            collect_quick_completion(rx, Some(1024)).await.is_err(),
+            "valid JSON does not prove provider completion"
+        );
+    }
+
+    #[tokio::test]
+    async fn adversarial_bounded_completion_closes_at_done() {
+        let (tx, rx) = tokio::sync::mpsc::channel(2);
+        tx.send(LlmEvent::TextDelta { delta: "[]".into() })
+            .await
+            .unwrap();
+        tx.send(done()).await.unwrap();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            collect_quick_completion(rx, Some(2)),
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "Done must finish without waiting for transport EOF"
+        );
+        assert_eq!(result.unwrap().unwrap().text, "[]");
+        assert!(tx.is_closed());
+    }
 }
 
 fn server_retry_delay_ms(headers: &reqwest::header::HeaderMap) -> Option<u64> {

@@ -25,9 +25,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use omegon_memory::{
-    ContextRenderer, CreateEdge, DecayProfileName, EmbeddingService, FactPrecondition,
-    MarkdownRenderer, MemoryMutation, MemoryMutationEffect, Section, StoreAction, StoreEpisode,
-    StoreFact,
+    CreateEdge, DecayProfileName, EmbeddingService, FactPrecondition, MemoryMutation,
+    MemoryMutationEffect, Section, StoreAction, StoreEpisode, StoreFact,
 };
 
 struct SessionEndTask {
@@ -90,10 +89,17 @@ impl std::fmt::Display for MemoryFeatureInvokeError {
 
 impl std::error::Error for MemoryFeatureInvokeError {}
 
+mod checkpoint;
+pub(crate) mod confirmation;
+mod finalization;
+mod formation;
+mod lifecycle;
+mod recovery;
+
 /// Memory feature that provides all memory_* tools and context injection.
 pub struct MemoryFeature {
     /// Renderer for context injection
-    renderer: MarkdownRenderer,
+    last_selection: Mutex<Option<omegon_memory::MemorySelectionReport>>,
     /// Mind identifier (normally `primensus` for automatic LLM memory).
     mind: String,
     /// Pinned fact IDs for working memory
@@ -113,18 +119,43 @@ pub struct MemoryFeature {
     context_dirty: AtomicBool,
     /// Boot-captured managed owner for every durable memory operation.
     memory_binding: crate::memory_service::MemoryBinding,
-    /// Model for session-end fact extraction. When set, SessionEnd uses
-    /// quick_completion to extract novel facts from the session summary.
-    extraction_model: Option<String>,
+    /// Host-routed extraction of pending candidates from attributed session evidence.
+    extractor: Option<Arc<dyn formation::Extractor>>,
+    session_binding: Option<crate::session_consumers::DeferredSessionViewBinding>,
     session_id: Mutex<Option<String>>,
     session_end_tasks: Arc<Mutex<SessionEndTaskState>>,
+    finalization_running: Arc<AtomicBool>,
+    finalization_sender: Option<tokio::sync::mpsc::Sender<finalization::Message>>,
+    recovery_started: bool,
+    recovery_status: tokio::sync::watch::Sender<recovery::Status>,
+    checkpoint_turns: u32,
+    checkpoint_task: Option<SessionEndTask>,
+    checkpoint_backlog: Arc<AtomicBool>,
+    last_pre_eviction: Option<omegon_traits::ContextCheckpointOutcome>,
     status_root: std::path::PathBuf,
+}
+
+impl Drop for MemoryFeature {
+    fn drop(&mut self) {
+        // Managed shutdown joins owned threads. A discarded feature must still
+        // cancel its long-lived scheduler, even when shutdown was not invoked.
+        let tasks = self
+            .session_end_tasks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for task in &tasks.tasks {
+            task.cancellation.cancel();
+        }
+        if let Some(task) = &self.checkpoint_task {
+            task.cancellation.cancel();
+        }
+    }
 }
 
 impl MemoryFeature {
     pub(crate) fn new(memory_binding: crate::memory_service::MemoryBinding, mind: String) -> Self {
         Self {
-            renderer: MarkdownRenderer,
+            last_selection: Mutex::new(None),
             mind,
             working_memory: Mutex::new(Vec::new()),
             pending_status_refresh: AtomicBool::new(false),
@@ -133,15 +164,60 @@ impl MemoryFeature {
             last_context_turn: Mutex::new(None),
             context_dirty: AtomicBool::new(true), // force initial render
             memory_binding,
-            extraction_model: None,
+            extractor: None,
+            session_binding: None,
             session_id: Mutex::new(None),
             session_end_tasks: Arc::new(Mutex::new(SessionEndTaskState::default())),
+            finalization_running: Arc::new(AtomicBool::new(false)),
+            finalization_sender: None,
+            recovery_started: false,
+            recovery_status: tokio::sync::watch::channel(recovery::Status::default()).0,
+            checkpoint_turns: 0,
+            checkpoint_task: None,
+            checkpoint_backlog: Arc::new(AtomicBool::new(false)),
+            last_pre_eviction: None,
             status_root: std::env::current_dir().unwrap_or_default(),
         }
     }
 
     pub fn with_extraction_model(mut self, model: String) -> Self {
-        self.extraction_model = Some(model);
+        let model = model.trim();
+        if model.is_empty()
+            || model.len() > omegon_memory::formation::MAX_IDENTIFIER_BYTES
+            || model.chars().any(char::is_control)
+        {
+            self.extractor = None;
+            tracing::warn!("invalid memory extraction model configuration; extraction disabled");
+        } else {
+            self.extractor = Some(Arc::new(formation::ModelExtractor(model.into())));
+        }
+        self
+    }
+
+    pub(crate) fn with_capabilities(
+        mut self,
+        profile: &crate::settings::Profile,
+        child: bool,
+        embeddings: Option<Arc<dyn EmbeddingService>>,
+    ) -> Self {
+        self.extractor = None;
+        self.embed_service = embeddings;
+        if !child && profile.memory_extraction_enabled != Some(false) {
+            let model = profile
+                .memory_extraction_model
+                .as_deref()
+                .unwrap_or(formation::DEFAULT_EXTRACTION_MODEL)
+                .trim();
+            self = self.with_extraction_model(model.into());
+        }
+        self
+    }
+
+    pub(crate) fn with_session_binding(
+        mut self,
+        binding: crate::session_consumers::DeferredSessionViewBinding,
+    ) -> Self {
+        self.session_binding = Some(binding);
         self
     }
 
@@ -176,6 +252,23 @@ impl MemoryFeature {
     /// Get the current mind identifier.
     pub fn mind(&self) -> &str {
         &self.mind
+    }
+
+    /// Replace an earlier injection when selection becomes empty. Returning None
+    /// means "keep the live TTL", not "clear memory", to the context assembler.
+    fn clear_memory_context(&self) -> Option<ContextInjection> {
+        let mut last_hash = self.last_context_hash.lock().unwrap();
+        if *last_hash == 0 {
+            return None;
+        }
+        *last_hash = 0;
+        *self.last_context_turn.lock().unwrap() = None;
+        Some(ContextInjection {
+            source: "memory".into(),
+            content: String::new(),
+            priority: 200,
+            ttl_turns: 1,
+        })
     }
 
     fn tool_operation_id(&self, call_id: &str, operation: &str) -> anyhow::Result<String> {
@@ -247,53 +340,33 @@ impl MemoryFeature {
     }
 }
 
-/// Spawn a non-blocking embedding generation task for a newly stored fact.
-fn parse_extracted_facts(text: &str) -> Vec<String> {
-    let text = text.trim();
-    if text.eq_ignore_ascii_case("NONE") || text.is_empty() {
-        return Vec::new();
-    }
-    text.lines()
-        .map(|line| {
-            let trimmed = line.trim();
-            // Strip leading bullets/numbers: "1. ", "- ", "* ", "• "
-            let stripped = trimmed
-                .strip_prefix("- ")
-                .or_else(|| trimmed.strip_prefix("* "))
-                .or_else(|| trimmed.strip_prefix("• "))
-                .or_else(|| {
-                    // "1. ", "2. ", etc.
-                    let dot = trimmed.find(". ")?;
-                    if dot <= 3 && trimmed[..dot].chars().all(|c| c.is_ascii_digit()) {
-                        Some(&trimmed[dot + 2..])
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(trimmed)
-                .trim();
-            stripped.to_string()
-        })
-        .filter(|s| s.len() >= 10)
-        .take(100)
-        .collect()
+struct EmbeddingObservation<'a> {
+    root: &'a std::path::Path,
+    settled: bool,
 }
 
-async fn extract_facts(model: &str, summary: &str) -> anyhow::Result<Vec<String>> {
-    let prompt = format!(
-        "Extract discrete, reusable facts from this session summary. \
-         Each fact should be a single sentence that would be useful context \
-         in a future conversation. Output one fact per line, no numbering, \
-         no bullets. Only include facts that are specific and actionable — \
-         skip generic observations. If there are no extractable facts, \
-         respond with exactly: NONE\n\n{summary}"
-    );
+impl EmbeddingObservation<'_> {
+    fn settle(
+        &mut self,
+        state: crate::surfaces::memory_status::CapabilityState,
+        reason: Option<crate::surfaces::memory_status::CapabilityReason>,
+    ) {
+        crate::status::update_memory_capabilities(self.root, |status| {
+            status.embeddings = crate::surfaces::memory_status::ComponentReadiness { state, reason }
+        });
+        self.settled = true;
+    }
+}
 
-    let result = crate::providers::quick_completion(model, &prompt)
-        .await
-        .map_err(|e| anyhow::anyhow!("extraction LLM call failed: {e}"))?;
-
-    Ok(parse_extracted_facts(&result.text))
+impl Drop for EmbeddingObservation<'_> {
+    fn drop(&mut self) {
+        if !self.settled {
+            self.settle(
+                crate::surfaces::memory_status::CapabilityState::Degraded,
+                Some(crate::surfaces::memory_status::CapabilityReason::Cancelled),
+            );
+        }
+    }
 }
 
 async fn persist_embedding(
@@ -303,44 +376,49 @@ async fn persist_embedding(
     content: String,
     operation_id: String,
     cancellation: tokio_util::sync::CancellationToken,
+    root: &std::path::Path,
 ) {
-    match tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        embed_svc.embed(&content),
+    use crate::embedding::IndexFactOutcome;
+    use crate::surfaces::memory_status::{CapabilityReason as Reason, CapabilityState as State};
+    use omegon_memory::EmbeddingIndexingReason as IndexReason;
+    let mut observation = EmbeddingObservation {
+        root,
+        settled: false,
+    };
+    let (state, reason) = match crate::embedding::index_fact(
+        embed_svc.as_ref(),
+        binding,
+        fact,
+        &content,
+        &operation_id,
+        &cancellation,
     )
     .await
     {
-        Ok(Ok(embedding)) => {
-            if let Err(error) = binding
-                .invoke(crate::memory_service::MemoryRequestV1::ApplyMutation {
-                    scope: crate::memory_service::MemoryScopeV1::Project,
-                    operation_id,
-                    mutation: MemoryMutation::StoreEmbedding {
-                        fact: fact.clone(),
-                        model_name: embed_svc.model_name().to_string(),
-                        embedding,
-                    },
-                    cancellation,
-                })
-                .await
-            {
-                tracing::warn!(fact_id = %fact.id, ?error, "auto-embed store failed");
-            }
+        IndexFactOutcome::Indexed => (State::Ready, None),
+        IndexFactOutcome::Incomplete(IndexReason::Timeout) => {
+            (State::Degraded, Some(Reason::DeadlineExceeded))
         }
-        Ok(Err(error)) => {
-            tracing::debug!(fact_id = %fact.id, %error, "auto-embed generation failed");
+        IndexFactOutcome::Incomplete(IndexReason::Cancelled) => {
+            (State::Degraded, Some(Reason::Cancelled))
         }
-        Err(_) => tracing::warn!(fact_id = %fact.id, "auto-embed generation timed out"),
-    }
+        IndexFactOutcome::Incomplete(IndexReason::Unavailable) => {
+            (State::Unavailable, Some(Reason::ProviderUnavailable))
+        }
+        IndexFactOutcome::Incomplete(_) => (State::Degraded, Some(Reason::IndexIncomplete)),
+        IndexFactOutcome::StorageUnavailable => {
+            (State::Unavailable, Some(Reason::StorageUnavailable))
+        }
+    };
+    observation.settle(state, reason);
 }
 
+#[derive(Clone)]
 struct SessionEndPipelineInput {
     mind: String,
     memory_binding: crate::memory_service::MemoryBinding,
-    extraction_model: Option<String>,
-    embed_service: Option<Arc<dyn EmbeddingService>>,
-    prompt_text: String,
-    outcome_text: String,
+    extractor: Option<Arc<dyn formation::Extractor>>,
+    evidence: omegon_memory::EpisodeFormation,
     session_id: String,
     status_root: std::path::PathBuf,
     turns: u32,
@@ -348,184 +426,171 @@ struct SessionEndPipelineInput {
     duration_secs: f64,
 }
 
+fn formation_episode_request(input: &SessionEndPipelineInput) -> (String, StoreEpisode) {
+    let session_key = format!("{:x}", Sha256::digest(input.session_id.as_bytes()));
+    let source_key = format!(
+        "{:x}",
+        Sha256::digest(
+            serde_json::to_vec(&(
+                &input.mind,
+                &input.evidence.source,
+                &input.evidence.evidence,
+                input.evidence.version,
+                input.evidence.truncated,
+                input.extractor.as_ref().map(|extractor| extractor.model())
+            ))
+            .expect("source serialization")
+        )
+    );
+    let mut evidence = input.evidence.clone();
+    let source_key = if let Some(coverage) = &evidence.coverage {
+        format!(
+            "{:x}",
+            Sha256::digest(
+                serde_json::to_vec(&(&source_key, coverage)).expect("coverage serialization")
+            )
+        )
+    } else {
+        source_key
+    };
+    let policy = if evidence.coverage.is_some() {
+        "formation-v3"
+    } else {
+        "formation-v2"
+    };
+    evidence.candidates.clear();
+    evidence.rejected_candidates = 0;
+    evidence.extraction = omegon_memory::ExtractionOutcome::Disabled;
+    if let Some(extractor) = &input.extractor {
+        evidence.extraction = omegon_memory::ExtractionOutcome::Pending {
+            model: extractor.model().into(),
+        };
+    }
+
+    let date = evidence
+        .evidence
+        .last()
+        .and_then(|item| chrono::DateTime::parse_from_rfc3339(&item.recorded_at).ok())
+        .map(|timestamp| timestamp.date_naive().to_string());
+    (
+        format!("session:{session_key}:{policy}:{source_key}"),
+        StoreEpisode {
+            mind: input.mind.clone(),
+            title: format!("Session memory: {}", input.session_id),
+            narrative: evidence.narrative(),
+            date,
+            affected_nodes: vec![],
+            affected_changes: vec![],
+            files_changed: vec![],
+            tags: vec!["auto".into(), policy.into()],
+            tool_calls_count: None,
+            formation: Some(Box::new(evidence)),
+        },
+    )
+}
+
 async fn run_session_end_pipeline(input: SessionEndPipelineInput) {
     const EPISODE_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-    const EXTRACTION_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-    const FACT_WRITE_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-    const EMBEDDING_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-    const VAULT_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
-
-    let now = chrono::Utc::now();
-    let session_key = format!("{:x}", Sha256::digest(input.session_id.as_bytes()));
-
+    tracing::debug!(
+        turns = input.turns,
+        tool_calls = input.tool_calls,
+        duration_secs = input.duration_secs,
+        "advisory session statistics for memory capture"
+    );
+    let (operation_id, request) = formation_episode_request(&input);
+    let evidence = request
+        .formation
+        .as_deref()
+        .expect("formation request")
+        .clone();
     let episode_cancellation = tokio_util::sync::CancellationToken::new();
+    let _cancel_episode_on_drop = episode_cancellation.clone().drop_guard();
     let episode =
         input
             .memory_binding
             .invoke(crate::memory_service::MemoryRequestV1::ApplyMutation {
                 scope: crate::memory_service::MemoryScopeV1::Project,
-                operation_id: format!("session:{session_key}:episode"),
-                mutation: MemoryMutation::StoreEpisode {
-                    request: StoreEpisode {
-                        mind: input.mind.clone(),
-                        title: format!(
-                            "Session {}: {}t {}tc",
-                            now.format("%Y-%m-%d"),
-                            input.turns,
-                            input.tool_calls
-                        ),
-                        narrative: format!(
-                            "Session on {date}: {turns} turns, {tools} tool calls, {duration:.0}s. \
-                         Auto-recorded by harness at session end.",
-                            date = now.format("%Y-%m-%d"),
-                            turns = input.turns,
-                            tools = input.tool_calls,
-                            duration = input.duration_secs,
-                        ),
-                        date: Some(now.format("%Y-%m-%d").to_string()),
-                        affected_nodes: vec![],
-                        affected_changes: vec![],
-                        files_changed: vec![],
-                        tags: vec!["auto".into()],
-                        tool_calls_count: Some(input.tool_calls),
-                    },
-                },
+                operation_id: operation_id.clone(),
+                mutation: MemoryMutation::StoreEpisode { request },
                 cancellation: episode_cancellation.clone(),
             });
-    match tokio::time::timeout(EPISODE_PHASE_TIMEOUT, episode).await {
-        Ok(Err(error)) => tracing::warn!(?error, "session episode storage failed"),
+    let stored = match tokio::time::timeout(EPISODE_PHASE_TIMEOUT, episode).await {
+        Ok(Ok(crate::memory_service::MemoryResponseV1 {
+            payload: crate::memory_service::MemoryPayloadV1::Mutation(outcome),
+            ..
+        })) => Some(outcome),
+        Ok(Err(error)) => {
+            tracing::warn!(?error, "session episode storage failed");
+            None
+        }
         Err(_) => {
             episode_cancellation.cancel();
             tracing::warn!("session episode storage timed out");
+            None
         }
-        _ => {}
-    }
-
-    let extracted_facts = if let Some(model) = input.extraction_model.as_deref()
-        && (!input.prompt_text.is_empty() || !input.outcome_text.is_empty())
-    {
-        let summary = format!(
-            "User asked: {}\n\nOutcome: {}",
-            if input.prompt_text.is_empty() {
-                "(no prompt recorded)"
-            } else {
-                &input.prompt_text
-            },
-            if input.outcome_text.is_empty() {
-                "(no outcome recorded)"
-            } else {
-                &input.outcome_text
-            },
-        );
-        match tokio::time::timeout(EXTRACTION_PHASE_TIMEOUT, extract_facts(model, &summary)).await {
-            Ok(Ok(facts)) => facts,
-            Ok(Err(error)) => {
-                tracing::debug!(%error, "session-end fact extraction failed");
-                Vec::new()
-            }
-            Err(_) => {
-                tracing::warn!("session-end fact extraction timed out");
-                Vec::new()
-            }
-        }
-    } else {
-        Vec::new()
+        _ => None,
     };
+    let Some(stored) = stored else {
+        return;
+    };
+    finish_session_episode(input, operation_id, evidence, stored).await;
+}
 
-    let fact_write_cancellation = tokio_util::sync::CancellationToken::new();
-    let fact_writes = async {
-        let mut stored = Vec::new();
-        for (index, content) in extracted_facts.into_iter().enumerate() {
-            let response = input
+async fn finish_session_episode(
+    input: SessionEndPipelineInput,
+    operation_id: String,
+    evidence: omegon_memory::EpisodeFormation,
+    stored: omegon_memory::MemoryMutationOutcome,
+) {
+    const EPISODE_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+    tracing::debug!(
+        turns = input.turns,
+        tool_calls = input.tool_calls,
+        duration_secs = input.duration_secs,
+        "advisory session statistics for memory capture"
+    );
+    if !stored.replayed
+        && input.extractor.is_some()
+        && let MemoryMutationEffect::EpisodeStored { episode_id }
+        | MemoryMutationEffect::CoverageStored { episode_id, .. } = stored.effect
+    {
+        let completed =
+            formation::extract_observed(evidence, input.extractor.as_ref(), &input.status_root)
+                .await;
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        let _cancel_completion_on_drop = cancellation.clone().drop_guard();
+        let completion =
+            input
                 .memory_binding
                 .invoke(crate::memory_service::MemoryRequestV1::ApplyMutation {
                     scope: crate::memory_service::MemoryScopeV1::Project,
-                    operation_id: format!("session:{session_key}:fact:{index}"),
-                    mutation: MemoryMutation::StoreFact {
-                        request: StoreFact {
-                            mind: input.mind.clone(),
-                            content: content.clone(),
-                            section: Section::Architecture,
-                            source: Some("session-extraction".into()),
-                            decay_profile: DecayProfileName::Standard,
-                        },
+                    operation_id: format!("{operation_id}:complete"),
+                    mutation: MemoryMutation::CompleteFormation {
+                        episode_id,
+                        formation: Box::new(completed),
                     },
-                    cancellation: fact_write_cancellation.clone(),
-                })
-                .await;
-            match response {
-                Ok(crate::memory_service::MemoryResponseV1 {
-                    payload: crate::memory_service::MemoryPayloadV1::Mutation(outcome),
-                    ..
-                }) => {
-                    if let MemoryMutationEffect::FactStored {
-                        fact_id,
-                        version,
-                        action: StoreAction::Stored,
-                    } = outcome.effect
-                    {
-                        stored.push((
-                            FactPrecondition {
-                                id: fact_id,
-                                expected_version: version,
-                            },
-                            content,
-                        ));
-                    }
-                }
-                Ok(_) => tracing::debug!("session fact store returned an unexpected response"),
-                Err(error) => tracing::debug!(?error, "failed to store extracted fact"),
+                    cancellation: cancellation.clone(),
+                });
+        match tokio::time::timeout(EPISODE_PHASE_TIMEOUT, completion).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => tracing::warn!(
+                ?error,
+                "formation completion failed; source remains durable"
+            ),
+            Err(_) => {
+                cancellation.cancel();
+                tracing::warn!("formation completion timed out; source remains durable");
             }
-        }
-        stored
-    };
-    let stored_facts = match tokio::time::timeout(FACT_WRITE_PHASE_TIMEOUT, fact_writes).await {
-        Ok(stored) => stored,
-        Err(_) => {
-            fact_write_cancellation.cancel();
-            tracing::warn!("session-end managed fact writes timed out");
-            Vec::new()
-        }
-    };
-
-    if let Some(service) = input.embed_service {
-        let embedding_cancellation = tokio_util::sync::CancellationToken::new();
-        let mut embeddings = tokio::task::JoinSet::new();
-        for (index, (fact, content)) in stored_facts.into_iter().enumerate() {
-            let service = service.clone();
-            let binding = input.memory_binding.clone();
-            let cancellation = embedding_cancellation.clone();
-            let operation_id = format!("session:{session_key}:embedding:{index}");
-            embeddings.spawn(async move {
-                persist_embedding(
-                    &service,
-                    &binding,
-                    fact,
-                    content,
-                    operation_id,
-                    cancellation,
-                )
-                .await;
-            });
-        }
-        if tokio::time::timeout(EMBEDDING_PHASE_TIMEOUT, async {
-            while let Some(result) = embeddings.join_next().await {
-                if let Err(error) = result {
-                    tracing::warn!(%error, "session-end embedding task failed");
-                }
-            }
-        })
-        .await
-        .is_err()
-        {
-            embedding_cancellation.cancel();
-            embeddings.abort_all();
-            while embeddings.join_next().await.is_some() {}
-            tracing::warn!("session-end managed embeddings timed out");
         }
     }
 
+    sync_session_end(&input).await;
+}
+
+async fn sync_session_end(input: &SessionEndPipelineInput) {
+    const VAULT_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
     let vault_cancellation = tokio_util::sync::CancellationToken::new();
+    let _cancel_vault_on_drop = vault_cancellation.clone().drop_guard();
     match tokio::time::timeout(
         VAULT_PHASE_TIMEOUT,
         input
@@ -601,6 +666,7 @@ or facts better represented as Flynt/project documents.".into(),
                     "type": "object",
                     "required": ["section", "content"],
                     "properties": {
+                        "applicability": omegon_memory::applicability::constraints_schema(),
                         "section": {
                             "type": "string",
                             "enum": ["Architecture", "Decisions", "Constraints", "Known Issues", "Patterns & Conventions", "Specs"],
@@ -624,6 +690,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     "type": "object",
                     "required": ["query"],
                     "properties": {
+                        "context": omegon_memory::applicability::context_schema(),
                         "query": {
                             "type": "string",
                             "description": "Natural language query"
@@ -765,11 +832,12 @@ Also use it when you notice a gap — if you're unsure whether something was alr
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_SEARCH_ARCHIVE.into(),
                 label: "memory_search_archive".into(),
-                description: "Search archived project memories from previous months.".into(),
+                description: "Search archived, dormant, and superseded project facts. Results are historical evidence, not current guidance.".into(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "required": ["query"],
                     "properties": {
+                        "context": omegon_memory::applicability::context_schema(),
                         "query": {
                             "type": "string",
                             "description": "Search terms"
@@ -781,7 +849,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_INGEST_LIFECYCLE.into(),
                 label: "memory_ingest_lifecycle".into(),
-                description: "Internal tool for lifecycle candidate ingestion. Used by design-tree, openspec, and cleave extensions.".into(),
+                description: "Ingest lifecycle conclusions. Inferred summaries remain pending. Explicit conclusions require a matching decided design artifact or baseline/archived spec; provide artifact_ref_type, artifact_ref_path, and artifact_ref_sub.".into(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "required": ["source_kind", "authority", "section", "content"],
@@ -791,12 +859,37 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         "section": { "type": "string" },
                         "content": { "type": "string" },
                         "supersedes": { "type": "string" },
+                        "supersedes_version": { "type": "integer", "minimum": 0, "description": "Required with supersedes; expected target fact version." },
                         "artifact_ref_type": { "type": "string" },
                         "artifact_ref_path": { "type": "string" },
-                        "artifact_ref_sub": { "type": "string" }
+                        "artifact_ref_sub": { "type": "string", "description": "Decision/requirement title, or Implementation Notes/Constraints for an exact constraint. Explicit decision/spec content uses Title: statement." }
                     }
                 }),
                 capabilities: vec![omegon_traits::ToolCapability::StateChanging],
+            },
+            ToolDefinition {
+                name:crate::tool_registry::memory::MEMORY_SELECTION.into(),label:"memory_selection".into(),
+                description:"Inspect the last ambient memory selection: selected handles, exclusion reasons, token accounting, and degradation. Explicit request_context packs return their own selection reports.".into(),
+                parameters:serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),capabilities:vec![omegon_traits::ToolCapability::Orientation],
+            },
+            ToolDefinition {
+                name:crate::tool_registry::memory::MEMORY_SET_APPLICABILITY.into(),label:"memory_set_applicability".into(),
+                description:"Record applicability constraints for one fact at its expected version. Does not reinforce, confirm, or change lifecycle status. An empty constraint object records unknown applicability.".into(),
+                parameters:serde_json::json!({"type":"object","required":["fact_id","expected_version","applicability"],"additionalProperties":false,"properties":{
+                    "fact_id":{"type":"string"},"expected_version":{"type":"integer","minimum":0},"applicability":omegon_memory::applicability::constraints_schema()}}),
+                capabilities:vec![omegon_traits::ToolCapability::StateChanging],
+            },
+            ToolDefinition {
+                name:crate::tool_registry::memory::MEMORY_INSPECT.into(),label:"memory_inspect".into(),
+                description:"Read-only inspection of one active, historical, or pending fact, its recorded provenance, and bounded artifact availability. Does not reinforce or reactivate memory.".into(),
+                parameters:serde_json::json!({"type":"object","required":["fact_id"],"additionalProperties":false,"properties":{"fact_id":{"type":"string"}}}),
+                capabilities:vec![omegon_traits::ToolCapability::Orientation],
+            },
+            ToolDefinition {
+                name: crate::tool_registry::memory::MEMORY_CONFIRM.into(),label:"memory_confirm".into(),
+                description:"Request operator review of a pending lifecycle candidate. Only an interactive operator response can confirm it; no approval flag is accepted.".into(),
+                parameters:serde_json::json!({"type":"object","required":["candidate_id"],"additionalProperties":false,"properties":{"candidate_id":{"type":"string"}}}),
+                capabilities:vec![omegon_traits::ToolCapability::StateChanging],
             },
         ]
     }
@@ -815,18 +908,24 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 let section = Self::parse_section_arg(section_str)?;
 
                 let source = args["source"].as_str().unwrap_or("manual");
+                let request = StoreFact {
+                    mind: self.mind.clone(),
+                    content: content.clone(),
+                    section,
+                    decay_profile: DecayProfileName::Standard,
+                    source: Some(source.into()),
+                };
+                let mutation = match omegon_memory::applicability::constraints_arg(&args)? {
+                    Some(constraints) => MemoryMutation::StoreApplicableFact {
+                        request,
+                        constraints: Box::new(constraints),
+                    },
+                    None => MemoryMutation::StoreFact { request },
+                };
                 let outcome = self
                     .apply_mutation(
                         self.tool_operation_id(call_id, "store")?,
-                        MemoryMutation::StoreFact {
-                            request: StoreFact {
-                                mind: self.mind.clone(),
-                                content: content.clone(),
-                                section,
-                                decay_profile: DecayProfileName::Standard,
-                                source: Some(source.into()),
-                            },
-                        },
+                        mutation,
                         cancel.clone(),
                     )
                     .await?;
@@ -854,6 +953,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         content.clone(),
                         self.tool_operation_id(call_id, &format!("embedding:{fact_id}"))?,
                         cancel.clone(),
+                        &self.status_root,
                     )
                     .await;
                 }
@@ -885,24 +985,69 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     .unwrap_or(10_000)
                     .min(10_000);
                 let fetch_k = k.saturating_mul(2).min(10_000); // over-fetch for RRF merge headroom
+                let filter = omegon_memory::SearchFilter {
+                    context: omegon_memory::applicability::context_arg(&args)?,
+                    section: args["section"]
+                        .as_str()
+                        .map(Self::parse_section_arg)
+                        .transpose()?,
+                    ..Default::default()
+                };
 
                 let query_vector = if let Some(ref embed_svc) = self.embed_service {
-                    match embed_svc.embed(&query).await {
-                        Ok(query_embedding) => Some(query_embedding),
-                        Err(e) => {
-                            tracing::debug!(error = %e, "embedding generation failed, FTS-only");
+                    use crate::embedding::BoundedEmbeddingError;
+                    use crate::surfaces::memory_status::{
+                        CapabilityReason as Reason, CapabilityState as State,
+                    };
+                    let mut observation = EmbeddingObservation {
+                        root: &self.status_root,
+                        settled: false,
+                    };
+                    match crate::embedding::generate_identified(
+                        embed_svc.as_ref(),
+                        &query,
+                        std::time::Duration::from_secs(30),
+                        &cancel,
+                    )
+                    .await
+                    {
+                        Ok(embedding) => {
+                            observation.settle(State::Ready, None);
+                            Some(embedding)
+                        }
+                        Err(BoundedEmbeddingError::Cancelled) => {
+                            observation.settle(State::Degraded, Some(Reason::Cancelled));
+                            return Err(MemoryFeatureInvokeError(
+                                ManagedServiceCallError::Cancelled,
+                            )
+                            .into());
+                        }
+                        Err(BoundedEmbeddingError::DeadlineExceeded) => {
+                            observation.settle(State::Degraded, Some(Reason::DeadlineExceeded));
+                            None
+                        }
+                        Err(BoundedEmbeddingError::Generation(_)) => {
+                            observation
+                                .settle(State::Unavailable, Some(Reason::ProviderUnavailable));
                             None
                         }
                     }
                 } else {
                     None
                 };
-                let crate::memory_service::MemoryPayloadV1::ScoredFacts(results) = self
+                let (query_space, query_vector) = match query_vector {
+                    Some(embedding) => (Some(embedding.space), Some(embedding.values)),
+                    None => (None, None),
+                };
+                let crate::memory_service::MemoryPayloadV1::RecallReport(report) = self
                     .invoke(crate::memory_service::MemoryRequestV1::HybridSearch {
                         scope: crate::memory_service::MemoryScopeV1::Project,
                         mind: self.mind.clone(),
                         query,
                         query_vector,
+                        query_space,
+                        include_diagnostics: true,
+                        filter,
                         limit: k,
                         fetch_limit: fetch_k,
                         min_similarity: 0.1,
@@ -913,16 +1058,20 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     anyhow::bail!("managed memory returned an unexpected search response");
                 };
 
+                let results = report.results;
+                let diagnostic =
+                    omegon_memory::renderer::vector_diagnostic_label(&report.diagnostics);
+
                 if results.is_empty() {
                     return Ok(ToolResult {
                         content: vec![ContentBlock::Text {
-                            text: "No matching facts found.".into(),
+                            text: format!("No matching facts found.\n{diagnostic}"),
                         }],
-                        details: Value::Null,
+                        details: serde_json::json!({"count":0,"vector":report.diagnostics}),
                     });
                 }
 
-                let mut lines = Vec::new();
+                let mut lines = vec![diagnostic];
                 for (i, sf) in results.iter().enumerate() {
                     let section = serde_json::to_string(&sf.fact.section).unwrap_or_default();
                     let section = section.trim_matches('"');
@@ -932,11 +1081,11 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         sf.fact.content.clone()
                     };
                     lines.push(format!(
-                        "{}. [{}] ({}, {:.0}%) {}",
+                        "{}. [{}] ({}, {}) {}",
                         i + 1,
                         sf.fact.id,
                         section,
-                        sf.similarity * 100.0,
+                        omegon_memory::renderer::recall_score_label(sf),
                         content,
                     ));
                 }
@@ -944,7 +1093,8 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     content: vec![ContentBlock::Text {
                         text: lines.join("\n"),
                     }],
-                    details: serde_json::json!({ "count": results.len() }),
+                    details: serde_json::json!({ "count": results.len(), "vector": report.diagnostics,
+                        "scores":results.iter().map(|result| serde_json::json!({"id":result.fact.id,"scores":result.scores,"graph_evidence":result.graph_evidence})).collect::<Vec<_>>() }),
                 })
             }
             crate::tool_registry::memory::MEMORY_QUERY => {
@@ -976,7 +1126,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         content: vec![ContentBlock::Text {
                             text: "No facts in memory.".into(),
                         }],
-                        details: serde_json::json!({ "count": 0 }),
+                        details: serde_json::json!({ "count": 0, "memory_capabilities": crate::status::memory_capabilities_snapshot_for(&self.status_root), "formation_recovery": {"enabled":self.extractor.is_some(),"mind":self.mind,"status":self.recovery_status.borrow().clone()}, "evidence_checkpoint":checkpoint::status(self) }),
                     });
                 }
 
@@ -991,6 +1141,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 }
 
                 let mut lines = Vec::new();
+                lines.push("Stored active inventory; applicability is not filtered here. Use memory_recall for current guidance.".into());
                 lines.push(format!(
                     "{} facts across {} sections:\n",
                     facts.len(),
@@ -1033,7 +1184,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     content: vec![ContentBlock::Text {
                         text: lines.join("\n"),
                     }],
-                    details: serde_json::json!({ "count": facts.len(), "sections": sections.len(), "inventory_only": facts.len() > large_store_threshold }),
+                    details: serde_json::json!({ "count": facts.len(), "sections": sections.len(), "inventory_only": facts.len() > large_store_threshold, "memory_capabilities": crate::status::memory_capabilities_snapshot_for(&self.status_root), "formation_recovery": {"enabled":self.extractor.is_some(),"mind":self.mind,"status":self.recovery_status.borrow().clone()}, "evidence_checkpoint":checkpoint::status(self) }),
                 })
             }
             crate::tool_registry::memory::MEMORY_ARCHIVE => {
@@ -1120,6 +1271,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         content,
                         self.tool_operation_id(call_id, &format!("embedding:{}", new_fact.id))?,
                         cancel.clone(),
+                        &self.status_root,
                     )
                     .await;
                 }
@@ -1259,14 +1411,17 @@ Also use it when you notice a gap — if you're unsure whether something was alr
             }
             crate::tool_registry::memory::MEMORY_SEARCH_ARCHIVE => {
                 let query = args["query"].as_str().unwrap_or("").to_string();
-                // Search archived facts using FTS - for now this searches all facts,
-                // we'd need to update the backend to filter for archived specifically
                 let crate::memory_service::MemoryPayloadV1::ScoredFacts(results) = self
                     .invoke(crate::memory_service::MemoryRequestV1::FtsSearch {
                         scope: crate::memory_service::MemoryScopeV1::Project,
                         mind: self.mind.clone(),
                         query,
                         limit: 20,
+                        filter: omegon_memory::SearchFilter {
+                            context: omegon_memory::applicability::context_arg(&args)?,
+                            intent: omegon_memory::SearchIntent::Historical,
+                            section: None,
+                        },
                         cancellation: cancel,
                     })
                     .await?
@@ -1284,13 +1439,242 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 let mut lines = Vec::new();
                 for scored in &results {
                     let f = &scored.fact;
-                    lines.push(format!("[{}] ({:?}) {}", f.id, f.section, f.content));
+                    lines.push(format!(
+                        "[{}] ({:?}, {:?}) {}\n  {}",
+                        f.id,
+                        f.section,
+                        f.status,
+                        f.content,
+                        omegon_memory::renderer::recall_score_label(scored)
+                    ));
                 }
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text {
                         text: lines.join("\n"),
                     }],
                     details: Value::Null,
+                })
+            }
+            crate::tool_registry::memory::MEMORY_SELECTION => {
+                let report = self.last_selection.lock().unwrap().clone();
+                Ok(ToolResult {
+                    content: vec![ContentBlock::Text {
+                        text: serde_json::to_string_pretty(&report)?,
+                    }],
+                    details: serde_json::to_value(report)?,
+                })
+            }
+            crate::tool_registry::memory::MEMORY_SET_APPLICABILITY => {
+                let id = args["fact_id"]
+                    .as_str()
+                    .filter(|id| !id.is_empty())
+                    .ok_or_else(|| anyhow::anyhow!("fact_id is required"))?
+                    .to_string();
+                let version = args["expected_version"]
+                    .as_u64()
+                    .ok_or_else(|| anyhow::anyhow!("expected_version is required"))?;
+                let constraints = omegon_memory::applicability::constraints_arg(&args)?
+                    .ok_or_else(|| anyhow::anyhow!("applicability is required"))?;
+                let record = self
+                    .invoke(crate::memory_service::MemoryRequestV1::GetFactRecord {
+                        scope: crate::memory_service::MemoryScopeV1::Project,
+                        mind: self.mind.clone(),
+                        id: id.clone(),
+                        cancellation: cancel.clone(),
+                    })
+                    .await?;
+                if !matches!(record,crate::memory_service::MemoryPayloadV1::Fact(record) if record.is_some())
+                {
+                    anyhow::bail!("fact not found in this mind");
+                }
+                let outcome = self
+                    .apply_mutation(
+                        self.tool_operation_id(call_id, "applicability")?,
+                        MemoryMutation::SetFactApplicability {
+                            fact: FactPrecondition {
+                                id,
+                                expected_version: version,
+                            },
+                            constraints: Box::new(constraints),
+                        },
+                        cancel,
+                    )
+                    .await?;
+                self.context_dirty.store(true, Ordering::Relaxed);
+                self.pending_status_refresh.store(true, Ordering::Relaxed);
+                self.refresh_status().await;
+                Ok(ToolResult {content:vec![ContentBlock::Text {text:"Recorded applicability constraints without reinforcement or lifecycle change.".into()}],details:serde_json::to_value(outcome)?})
+            }
+            crate::tool_registry::memory::MEMORY_INSPECT => {
+                let id = omegon_memory::inspection::fact_id(&args)?.to_string();
+                let payload = self
+                    .invoke(crate::memory_service::MemoryRequestV1::GetFactRecord {
+                        scope: crate::memory_service::MemoryScopeV1::Project,
+                        mind: self.mind.clone(),
+                        id,
+                        cancellation: cancel.clone(),
+                    })
+                    .await?;
+                let crate::memory_service::MemoryPayloadV1::Fact(fact) = payload else {
+                    anyhow::bail!("unexpected fact inspection response");
+                };
+                let fact = (*fact).ok_or_else(|| anyhow::anyhow!("fact not found in this mind"))?;
+                let inspection = omegon_memory::FactInspection::from_fact(&fact);
+                let root = self.status_root.clone();
+                let inspection = tokio::select! {
+                    _ = cancel.cancelled() => return Err(MemoryFeatureInvokeError(ManagedServiceCallError::Cancelled).into()),
+                    result=tokio::task::spawn_blocking(move || lifecycle::inspect_source(&root,inspection)) => result?,
+                };
+                Ok(ToolResult {
+                    content: vec![ContentBlock::Text {
+                        text: omegon_memory::inspection::render(&inspection)?,
+                    }],
+                    details: serde_json::to_value(inspection)?,
+                })
+            }
+            crate::tool_registry::memory::MEMORY_CONFIRM => {
+                let object = args
+                    .as_object()
+                    .ok_or_else(|| anyhow::anyhow!("invalid confirmation request"))?;
+                if object.len() != 1 {
+                    anyhow::bail!(
+                        "confirmation accepts only candidate_id; approval is supplied by the operator surface"
+                    );
+                }
+                let id = args["candidate_id"]
+                    .as_str()
+                    .filter(|id| !id.is_empty())
+                    .ok_or_else(|| anyhow::anyhow!("candidate_id is required"))?
+                    .to_string();
+                let request_id = self.tool_operation_id(call_id, "confirmation")?;
+                let session_id = self
+                    .session_id
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .ok_or_else(|| anyhow::anyhow!("memory session identity is unavailable"))?;
+                let payload = self
+                    .invoke(crate::memory_service::MemoryRequestV1::GetPendingFact {
+                        scope: crate::memory_service::MemoryScopeV1::Project,
+                        mind: self.mind.clone(),
+                        id: id.clone(),
+                        cancellation: cancel.clone(),
+                    })
+                    .await?;
+                let crate::memory_service::MemoryPayloadV1::Fact(candidate) = payload else {
+                    anyhow::bail!("unexpected candidate response");
+                };
+                let Some(candidate) = *candidate else {
+                    if let Some(fact) = self.get_fact(id.clone(), cancel).await?
+                        && fact.mind == self.mind
+                        && fact
+                            .lifecycle_inference
+                            .as_ref()
+                            .and_then(|inference| inference.confirmation.as_ref())
+                            .is_some_and(|confirmation| confirmation.request_id == request_id)
+                    {
+                        return Ok(ToolResult {
+                            content: vec![ContentBlock::Text {
+                                text: format!(
+                                    "Candidate [{id}] was already confirmed by this operator request."
+                                ),
+                            }],
+                            details: serde_json::json!({"id":id,"status":"active","replayed":true}),
+                        });
+                    }
+                    anyhow::bail!("pending candidate not found in this mind");
+                };
+                if candidate.content.len() > 65_536
+                    || candidate.id.len() > 2048
+                    || candidate.mind.len() > 2048
+                {
+                    anyhow::bail!("candidate exceeds operator review bounds");
+                }
+                let inference = candidate
+                    .lifecycle_inference
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("candidate attribution is unavailable"))?;
+                let mut correction = String::new();
+                let supersedes = if let Some(id) = &inference.proposed_supersedes {
+                    let target = self
+                        .get_fact(id.clone(), cancel.clone())
+                        .await?
+                        .filter(|fact| fact.mind == self.mind)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("correction target is not active in this mind")
+                        })?;
+                    if target.content.len() > 65_536 || target.id.len() > 2048 {
+                        anyhow::bail!("correction target exceeds operator review bounds");
+                    }
+                    correction = format!(
+                        "\nReplace [{}] version {}:\n{}\nTarget applicability: {}",
+                        confirmation::readable(&target.id),
+                        target.version,
+                        confirmation::readable(&target.content),
+                        serde_json::to_string(&target.applicability)?
+                    );
+                    Some(FactPrecondition {
+                        id: target.id,
+                        expected_version: target.version,
+                    })
+                } else {
+                    None
+                };
+                let attribution = serde_json::to_string(inference)?;
+                let prompt = format!(
+                    "Confirm this inference as project memory? This does not verify execution outcomes.\nMind: {}\nCandidate [{}] version {}:\n{}\nDeclared attribution: {}\nCandidate applicability: {}{}",
+                    confirmation::readable(&candidate.mind),
+                    confirmation::readable(&candidate.id),
+                    candidate.version,
+                    confirmation::readable(&candidate.content),
+                    attribution,
+                    serde_json::to_string(&candidate.applicability)?,
+                    correction
+                );
+                return Err(confirmation::MemoryConfirmationRequired {
+                    prompt,
+                    request: confirmation::ConfirmationRequest {
+                        snapshot_hash: omegon_memory::lifecycle::candidate_snapshot_hash(
+                            &candidate,
+                        )?,
+                        candidate: FactPrecondition {
+                            id: candidate.id,
+                            expected_version: candidate.version,
+                        },
+                        session_id,
+                        request_id,
+                        supersedes,
+                    },
+                }
+                .into());
+            }
+            crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION => {
+                let request: confirmation::ConfirmationRequest =
+                    serde_json::from_value(args["request"].clone())?;
+                let surface: omegon_memory::ConfirmationSurface =
+                    serde_json::from_value(args["surface"].clone())?;
+                let outcome = self
+                    .apply_mutation(
+                        request.request_id.clone(),
+                        MemoryMutation::ConfirmLifecycleCandidate {
+                            candidate: request.candidate,
+                            snapshot_hash: request.snapshot_hash,
+                            session_id: request.session_id,
+                            request_id: request.request_id,
+                            supersedes: request.supersedes,
+                            surface,
+                        },
+                        cancel,
+                    )
+                    .await?;
+                self.context_dirty.store(true, Ordering::Relaxed);
+                self.pending_status_refresh.store(true, Ordering::Relaxed);
+                self.refresh_status().await;
+                Ok(ToolResult {
+                    content: vec![ContentBlock::Text {
+                        text: "Operator-confirmed candidate admitted to active memory.".into(),
+                    }],
+                    details: serde_json::json!({"status":"active","outcome":outcome}),
                 })
             }
             crate::tool_registry::memory::MEMORY_INGEST_LIFECYCLE => {
@@ -1301,10 +1685,91 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 let authority = args["authority"].as_str().unwrap_or("inferred");
                 let source_kind = args["source_kind"].as_str().unwrap_or("unknown");
 
+                if !matches!(authority, "explicit" | "inferred") {
+                    anyhow::bail!("invalid lifecycle authority");
+                }
+                if authority == "inferred" {
+                    let reference = |key: &str| -> anyhow::Result<Option<String>> {
+                        match args.get(key) {
+                            None | Some(Value::Null) => Ok(None),
+                            Some(Value::String(value)) => Ok(Some(value.clone())),
+                            _ => anyhow::bail!("invalid lifecycle reference field {key}"),
+                        }
+                    };
+                    let outcome = self
+                        .apply_mutation(
+                            self.tool_operation_id(call_id, "lifecycle")?,
+                            MemoryMutation::StoreLifecycleInference {
+                                request: StoreFact {
+                                    mind: self.mind.clone(),
+                                    content,
+                                    section,
+                                    decay_profile: DecayProfileName::Standard,
+                                    source: Some(format!("lifecycle:{source_kind}")),
+                                },
+                                inference: Box::new(omegon_memory::LifecycleInference {
+                                    confirmation: None,
+                                    source_kind: source_kind.into(),
+                                    artifact_ref_type: reference("artifact_ref_type")?,
+                                    artifact_ref_path: reference("artifact_ref_path")?,
+                                    artifact_ref_sub: reference("artifact_ref_sub")?,
+                                    proposed_supersedes: reference("supersedes")?,
+                                }),
+                            },
+                            cancel,
+                        )
+                        .await?;
+                    let MemoryMutationEffect::FactStored { fact_id, .. } = outcome.effect else {
+                        anyhow::bail!(
+                            "managed memory returned an unexpected lifecycle candidate effect"
+                        );
+                    };
+                    return Ok(ToolResult {content:vec![ContentBlock::Text {
+                        text:"Retained lifecycle inference pending confirmation; excluded from established knowledge.".into(),
+                    }],details:serde_json::json!({"id":fact_id,"status":"pending","replayed":outcome.replayed})});
+                }
+
+                let path = args["artifact_ref_path"]
+                    .as_str()
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("explicit lifecycle admission requires artifact_ref_path")
+                    })?
+                    .to_string();
+                let reference_type = args["artifact_ref_type"]
+                    .as_str()
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("explicit lifecycle admission requires artifact_ref_type")
+                    })?
+                    .to_string();
+                let sub = args["artifact_ref_sub"]
+                    .as_str()
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("explicit lifecycle admission requires artifact_ref_sub")
+                    })?
+                    .to_string();
+                let supersedes = match args.get("supersedes") {
+                    None | Some(Value::Null) => None,
+                    Some(Value::String(id)) if !id.trim().is_empty() => Some(FactPrecondition {
+                        id: id.clone(),
+                        expected_version: args["supersedes_version"].as_u64().ok_or_else(|| {
+                            anyhow::anyhow!("supersedes requires supersedes_version")
+                        })?,
+                    }),
+                    _ => anyhow::bail!("invalid supersedes target"),
+                };
+                let root = self.status_root.clone();
+                let source_kind_owned = source_kind.to_string();
+                let section_for_validation = section.clone();
+                let validated = tokio::select! {
+                    _ = cancel.cancelled() => return Err(MemoryFeatureInvokeError(ManagedServiceCallError::Cancelled).into()),
+                    result = tokio::task::spawn_blocking(move || lifecycle::validate(&root,&path,&source_kind_owned,&reference_type,&sub,&section_for_validation,&content)) => result??,
+                };
+                let content = validated.content;
+                let conclusion_source = validated.source;
                 let outcome = self
                     .apply_mutation(
                         self.tool_operation_id(call_id, "lifecycle")?,
-                        MemoryMutation::StoreFact {
+                        MemoryMutation::StoreLifecycleConclusion {
                             request: StoreFact {
                                 mind: self.mind.clone(),
                                 content: content.clone(),
@@ -1312,17 +1777,26 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                                 decay_profile: DecayProfileName::Standard,
                                 source: Some(format!("lifecycle:{source_kind}")),
                             },
+                            source: Box::new(conclusion_source.clone()),
+                            supersedes,
                         },
                         cancel.clone(),
                     )
                     .await?;
-                let MemoryMutationEffect::FactStored {
-                    fact_id,
-                    version,
-                    action,
-                } = outcome.effect
-                else {
-                    anyhow::bail!("managed memory returned an unexpected lifecycle store effect");
+                let (fact_id, version, action) = match outcome.effect {
+                    MemoryMutationEffect::FactStored {
+                        fact_id,
+                        version,
+                        action,
+                    } => (fact_id, version, action),
+                    MemoryMutationEffect::FactSuperseded { replacement, .. } => (
+                        replacement.id,
+                        replacement.expected_version,
+                        StoreAction::Stored,
+                    ),
+                    _ => anyhow::bail!(
+                        "managed memory returned an unexpected lifecycle store effect"
+                    ),
                 };
 
                 // Auto-embed newly ingested lifecycle facts
@@ -1339,6 +1813,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         content.clone(),
                         self.tool_operation_id(call_id, &format!("embedding:{fact_id}"))?,
                         cancel.clone(),
+                        &self.status_root,
                     )
                     .await;
                 }
@@ -1358,7 +1833,8 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 self.refresh_status().await;
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text { text: msg }],
-                    details: serde_json::json!({ "action": format!("{:?}", action), "id": fact_id }),
+                    details: serde_json::json!({ "action": format!("{:?}", action), "id": fact_id, "version":version,
+                        "status":"active", "source":conclusion_source, "replayed":outcome.replayed }),
                 })
             }
             _ => anyhow::bail!("Unknown memory tool: {tool_name}"),
@@ -1369,6 +1845,49 @@ Also use it when you notice a gap — if you're unsure whether something was alr
         match event {
             BusEvent::SessionStart { session_id, .. } => {
                 *self.session_id.lock().unwrap() = Some(session_id.clone());
+                self.checkpoint_turns = 0;
+                checkpoint::on_start(self);
+                if !self.recovery_started
+                    && self.memory_binding.available()
+                    && let Some(extractor) = self.extractor.clone()
+                {
+                    let mut tasks = self.session_end_tasks.lock().unwrap();
+                    if tasks.accepting {
+                        let binding = self.memory_binding.clone();
+                        let mind = self.mind.clone();
+                        let cancellation = tokio_util::sync::CancellationToken::new();
+                        let worker = cancellation.clone();
+                        let status = self.recovery_status.clone();
+                        let root = self.status_root.clone();
+                        match std::thread::Builder::new()
+                            .name("memory-formation-recovery".into())
+                            .spawn(move || {
+                                let runtime = tokio::runtime::Builder::new_current_thread()
+                                    .enable_all()
+                                    .build()
+                                    .map_err(|error| error.to_string())?;
+                                runtime.block_on(recovery::run(
+                                    binding, mind, extractor, worker, status, root,
+                                ));
+                                Ok(())
+                            }) {
+                            Ok(handle) => {
+                                tasks.tasks.push(SessionEndTask {
+                                    cancellation,
+                                    handle,
+                                });
+                                self.recovery_started = true;
+                            }
+                            Err(_) => tasks
+                                .failures
+                                .push("failed to spawn formation recovery task".into()),
+                        }
+                    }
+                }
+                Vec::new()
+            }
+            BusEvent::TurnEnd(_) => {
+                checkpoint::on_turn(self);
                 Vec::new()
             }
             BusEvent::ToolEnd { name, is_error, .. }
@@ -1382,6 +1901,9 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                             | crate::tool_registry::memory::MEMORY_FOCUS
                             | crate::tool_registry::memory::MEMORY_RELEASE
                             | crate::tool_registry::memory::MEMORY_INGEST_LIFECYCLE
+                            | crate::tool_registry::memory::MEMORY_CONFIRM
+                            | crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION
+                            | crate::tool_registry::memory::MEMORY_SET_APPLICABILITY
                     )
                     && self.pending_status_refresh.swap(false, Ordering::Relaxed) =>
             {
@@ -1392,15 +1914,15 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 turns,
                 tool_calls,
                 duration_secs,
-                initial_prompt,
-                outcome_summary,
-            } if *turns > 0 => {
+                ..
+            } if *turns > 0 && self.memory_binding.available() => {
                 let mind = self.mind.clone();
                 let memory_binding = self.memory_binding.clone();
-                let extraction_model = self.extraction_model.clone();
-                let embed_svc = self.embed_service.clone();
-                let prompt_text = initial_prompt.clone().unwrap_or_default();
-                let outcome_text = outcome_summary.clone().unwrap_or_default();
+                let extractor = self.extractor.clone();
+                let session_binding = self.session_binding.clone();
+                let target = session_binding
+                    .as_ref()
+                    .and_then(|binding| binding.snapshot());
                 let Some(session_id) = self.session_id.lock().unwrap().clone() else {
                     self.session_end_tasks
                         .lock()
@@ -1409,63 +1931,25 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         .push("session-end event had no stable session identity".into());
                     return vec![];
                 };
-                let status_root = self.status_root.clone();
-                let (t, tc, dur) = (*turns, *tool_calls, *duration_secs);
-                let cancellation = tokio_util::sync::CancellationToken::new();
-                let worker_cancellation = cancellation.clone();
-                let handle = std::thread::Builder::new()
-                    .name(format!("memory-session-end-{session_id}"))
-                    .spawn(move || {
-                        let runtime = tokio::runtime::Builder::new_current_thread()
-                            .enable_all()
-                            .build()
-                            .map_err(|error| error.to_string())?;
-                        runtime.block_on(async {
-                            tokio::select! {
-                                _ = worker_cancellation.cancelled() => {}
-                                _ = async {
-                                    run_session_end_pipeline(SessionEndPipelineInput {
-                                        mind,
-                                        memory_binding,
-                                        extraction_model,
-                                        embed_service: embed_svc,
-                                        prompt_text,
-                                        outcome_text,
-                                        session_id,
-                                        status_root,
-                                        turns: t,
-                                        tool_calls: tc,
-                                        duration_secs: dur,
-                                    })
-                                    .await;
-                                } => {}
-                            }
-                        });
-                        Ok(())
-                    });
-                let mut tasks = self.session_end_tasks.lock().unwrap();
-                if !tasks.accepting {
-                    cancellation.cancel();
-                    if let Ok(handle) = handle {
-                        tasks.tasks.push(SessionEndTask {
-                            cancellation,
-                            handle,
-                        });
-                    }
-                    tasks
-                        .failures
-                        .push("session-end work arrived after shutdown admission closed".into());
-                } else {
-                    match handle {
-                        Ok(handle) => tasks.tasks.push(SessionEndTask {
-                            cancellation,
-                            handle,
-                        }),
-                        Err(error) => tasks
-                            .failures
-                            .push(format!("failed to spawn session-end task: {error}")),
-                    }
-                }
+                let input = SessionEndPipelineInput {
+                    mind,
+                    memory_binding,
+                    extractor,
+                    evidence: formation::unavailable(
+                        &session_id,
+                        if target.is_some() {
+                            "capture_pending"
+                        } else {
+                            "sessionless"
+                        },
+                    ),
+                    session_id,
+                    status_root: self.status_root.clone(),
+                    turns: *turns,
+                    tool_calls: *tool_calls,
+                    duration_secs: *duration_secs,
+                };
+                finalization::enqueue(self, input, target);
                 vec![]
             }
 
@@ -1473,14 +1957,24 @@ Also use it when you notice a gap — if you're unsure whether something was alr
         }
     }
 
+    async fn before_context_eviction(
+        &mut self,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> omegon_traits::ContextCheckpointOutcome {
+        checkpoint::before_eviction(self, cancel).await
+    }
+
     async fn prepare_managed_shutdown(&mut self) -> anyhow::Result<()> {
-        let (tasks, mut failures) = {
+        let (mut tasks, mut failures) = {
             let mut state = self.session_end_tasks.lock().unwrap();
             state.accepting = false;
             let tasks = std::mem::take(&mut state.tasks);
             let failures = std::mem::take(&mut state.failures);
             (tasks, failures)
         };
+        if let Some(task) = self.checkpoint_task.take() {
+            tasks.push(task);
+        }
         for task in &tasks {
             task.cancellation.cancel();
         }
@@ -1505,13 +1999,11 @@ Also use it when you notice a gap — if you're unsure whether something was alr
         let wm_ids = self.working_memory.lock().unwrap().clone();
 
         let binding = self.memory_binding.clone();
-        let renderer = &self.renderer;
         let turn_number = signals.turn_number;
-        // ContextSignals budgets are tokens. Four characters per token is a
-        // conservative upper bound used throughout prompt assembly.
-        let context_budget_chars = signals.context_budget_tokens.saturating_mul(4);
-        if context_budget_chars == 0 {
-            return None;
+        if signals.context_budget_tokens == 0 {
+            *self.last_selection.lock().unwrap() =
+                Some(omegon_memory::selection::empty_report(None));
+            return self.clear_memory_context();
         }
 
         std::thread::scope(|scope| {
@@ -1522,37 +2014,47 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         .build()
                         .ok()?;
                     runtime.block_on(async {
-                        let response = binding
-                            .invoke(crate::memory_service::MemoryRequestV1::ContextSnapshot {
+                        let response = match binding
+                            .invoke(crate::memory_service::MemoryRequestV1::SelectContext {
                                 scope: crate::memory_service::MemoryScopeV1::Project,
                                 mind,
-                                working_memory: wm_ids,
-                                fact_limit: 10_000,
-                                episode_limit: 1,
+                                query: signals.user_prompt.to_string(),
+                                pins: wm_ids,
+                                host_budget: signals.context_budget_tokens,
+                                intent: omegon_memory::MemorySelectionIntent::Ambient,
+                                fetch_limit: omegon_memory::selection::MAX_CANDIDATES,
                                 cancellation: tokio_util::sync::CancellationToken::new(),
                             })
                             .await
-                            .ok()?;
-                        let crate::memory_service::MemoryPayloadV1::ContextSnapshot(snapshot) =
+                        {
+                            Ok(response) => response,
+                            Err(_) => {
+                                *self.last_selection.lock().unwrap() =
+                                    Some(omegon_memory::selection::empty_report(Some(
+                                        "memory_selection_failed".into(),
+                                    )));
+                                return self.clear_memory_context();
+                            }
+                        };
+                        let crate::memory_service::MemoryPayloadV1::Selection(selected) =
                             response.payload
                         else {
-                            return None;
+                            *self.last_selection.lock().unwrap() =
+                                Some(omegon_memory::selection::empty_report(Some(
+                                    "memory_selection_invalid_response".into(),
+                                )));
+                            return self.clear_memory_context();
                         };
 
-                        let rendered = renderer.render_context(
-                            &snapshot.facts,
-                            &snapshot.episodes,
-                            &snapshot.working_memory,
-                            context_budget_chars,
-                        );
-                        if rendered.markdown.is_empty() {
-                            return None;
+                        *self.last_selection.lock().unwrap() = Some(selected.report);
+                        if selected.markdown.is_empty() {
+                            return self.clear_memory_context();
                         }
 
                         // Hash the rendered content to detect changes
                         use std::hash::{Hash, Hasher};
                         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                        rendered.markdown.hash(&mut hasher);
+                        selected.markdown.hash(&mut hasher);
                         let content_hash = hasher.finish();
 
                         // Skip re-injection if content is unchanged and no mutation occurred
@@ -1575,7 +2077,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
 
                         Some(ContextInjection {
                             source: "memory".into(),
-                            content: rendered.markdown,
+                            content: selected.markdown,
                             priority: 200, // high — memory is important context
                             ttl_turns: 3,  // persist for 3 turns, then refresh
                         })
@@ -1594,12 +2096,300 @@ mod tests {
 
     async fn managed_feature() -> (MemoryFeature, crate::bus::EventBus, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
+        let (feature, bus) = managed_feature_at(dir.path()).await;
+        (feature, bus, dir)
+    }
+
+    async fn managed_feature_at(root: &std::path::Path) -> (MemoryFeature, crate::bus::EventBus) {
         let binding = crate::memory_service::MemoryBinding::default();
         let mut bus = crate::bus::EventBus::new();
         bus.register(Box::new(crate::memory_service::MemoryDeclarationFeature));
         let candidate =
             crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
-                project_memory_root: dir.path().to_path_buf(),
+                workspace_root: Some(root.to_path_buf()),
+                memory_token_cap: None,
+                project_memory_root: root.to_path_buf(),
+                project_db_path: root.join("facts.db"),
+                project_jsonl_path: root.join("facts.jsonl"),
+                global_db_path: None,
+                vault: None,
+                startup_sync_enabled: false,
+            })
+            .await
+            .unwrap();
+        bus.stage_managed_generation("memory", candidate).unwrap();
+        bus.try_finalize_managed().await.unwrap();
+        binding.capture(&bus).unwrap();
+        let mut feature =
+            MemoryFeature::new(binding, "test".into()).with_status_root(root.to_path_buf());
+        feature.on_event(&BusEvent::SessionStart {
+            session_id: "fixture-session".into(),
+            cwd: root.to_path_buf(),
+        });
+        (feature, bus)
+    }
+
+    #[tokio::test]
+    async fn initial_wave_live_tool_contracts() {
+        let (mut feature, mut bus, _dir) = managed_feature().await;
+        feature.mind = "wave".into();
+        feature
+            .apply_mutation(
+                "wave-fixture".into(),
+                MemoryMutation::ImportJsonl {
+                    jsonl: include_str!("../../../omegon-memory/tests/fixtures/retrieval.jsonl")
+                        .into(),
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let archived = feature
+            .execute(
+                "memory_search_archive",
+                "archive-check",
+                serde_json::json!({"query":"zircon"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let recalled = feature
+            .execute(
+                "memory_recall",
+                "section-check",
+                serde_json::json!({"query":"zircon", "section":"Constraints", "k":1}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        let archive_text = archived.content[0].as_text().unwrap();
+        let recall_text = recalled.content[0].as_text().unwrap();
+        assert!(
+            archive_text.contains("[obsolete]") && !archive_text.contains("[current]"),
+            "{archive_text}"
+        );
+        assert!(recall_text.contains("[constraint]"), "{recall_text}");
+    }
+
+    #[tokio::test]
+    async fn wave4_recall_reports_incompatible_vectors_and_named_scores() {
+        struct IdentifiedService(&'static str);
+        #[async_trait]
+        impl EmbeddingService for IdentifiedService {
+            async fn embed(&self, _: &str) -> Result<Vec<f32>, omegon_memory::EmbedError> {
+                panic!("memory must use identified generation");
+            }
+            fn model_name(&self) -> &str {
+                self.0
+            }
+            async fn embed_identified(
+                &self,
+                _: &str,
+            ) -> Result<omegon_memory::IdentifiedEmbedding, omegon_memory::EmbedError> {
+                Ok(omegon_memory::IdentifiedEmbedding {
+                    space: omegon_memory::EmbeddingSpace {
+                        model: self.0.into(),
+                        revision: "fixture-v1".into(),
+                        preprocessing: "raw-v1".into(),
+                        dimensions: 2,
+                    },
+                    values: vec![1.0, 0.0],
+                })
+            }
+        }
+        let (feature, mut bus, _dir) = managed_feature().await;
+        let stored = feature
+            .apply_mutation(
+                "wave4-fact".into(),
+                MemoryMutation::StoreFact {
+                    request: StoreFact {
+                        mind: "test".into(),
+                        content: "zircon identified recall".into(),
+                        section: Section::Constraints,
+                        source: None,
+                        decay_profile: Default::default(),
+                    },
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let MemoryMutationEffect::FactStored {
+            fact_id, version, ..
+        } = stored.effect
+        else {
+            panic!("fact");
+        };
+        let embedding = IdentifiedService("model-a")
+            .embed_identified("unused")
+            .await
+            .unwrap();
+        feature
+            .apply_mutation(
+                "wave4-index".into(),
+                MemoryMutation::StoreIdentifiedEmbedding {
+                    fact: FactPrecondition {
+                        id: fact_id,
+                        expected_version: version,
+                    },
+                    embedding,
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let feature = feature.with_embed_service(Arc::new(IdentifiedService("model-b")));
+        let degraded = feature
+            .execute(
+                "memory_recall",
+                "wrong-space",
+                serde_json::json!({"query":"zircon"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let feature = feature.with_embed_service(Arc::new(IdentifiedService("model-a")));
+        let compatible = feature
+            .execute(
+                "memory_recall",
+                "same-space",
+                serde_json::json!({"query":"zircon"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        feature
+            .execute(
+                "memory_store",
+                "automatic-index",
+                serde_json::json!({"section":"Architecture","content":"newborn auto indexed fact"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let automatic = feature
+            .execute(
+                "memory_recall",
+                "automatic-recall",
+                serde_json::json!({"query":"newborn"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert_eq!(degraded.details["vector"]["incompatible"], 1);
+        assert!(degraded.content[0].as_text().unwrap().contains("lexical="));
+        assert!(degraded.details["scores"][0]["scores"]["cosine"].is_null());
+        let text = compatible.content[0].as_text().unwrap();
+        for label in ["lexical=", "cosine=", "rrf="] {
+            assert!(text.contains(label), "{text}");
+        }
+        assert!(!text.contains('%'));
+        assert_eq!(automatic.details["vector"]["compatible"], 2);
+    }
+
+    #[tokio::test]
+    async fn initial_wave_empty_task_selection_replaces_live_ttl() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        feature
+            .execute(
+                "memory_store",
+                "ttl-fact",
+                serde_json::json!({
+                    "section":"Constraints", "content":"zircon requires atomic migration"
+                }),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let signals = ContextSignals {
+            user_prompt: "atomic migration",
+            recent_tools: &[],
+            recent_files: &[],
+            lifecycle_phase: &LifecyclePhase::Idle,
+            turn_number: 1,
+            context_budget_tokens: 200,
+        };
+        let first = feature.provide_context(&signals);
+        let second = feature.provide_context(&ContextSignals {
+            user_prompt: "unrelatedquartz",
+            turn_number: 2,
+            ..signals
+        });
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert!(first.unwrap().content.contains("atomic migration"));
+        let replacement = second.expect("explicit empty replacement must retire prior live memory");
+        assert_eq!(replacement.source, "memory");
+        assert!(replacement.content.is_empty());
+    }
+
+    fn adversarial_input() -> SessionEndPipelineInput {
+        SessionEndPipelineInput {
+            mind: "test".into(),
+            memory_binding: Default::default(),
+            extractor: None,
+            evidence: formation::sample_evidence(),
+            session_id: "synthetic-session".into(),
+            status_root: Default::default(),
+            turns: 1,
+            tool_calls: 1,
+            duration_secs: 1.0,
+        }
+    }
+
+    #[tokio::test]
+    async fn startup_recovery_completes_durable_pending_evidence_once() {
+        struct Fake(std::sync::atomic::AtomicUsize);
+        #[async_trait::async_trait]
+        impl formation::Extractor for Fake {
+            fn model(&self) -> &str {
+                "fixture-model"
+            }
+            async fn extract(&self, _prompt: &str) -> anyhow::Result<String> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok("[]".into())
+            }
+        }
+        let (feature, mut bus, dir) = managed_feature().await;
+        let fake = Arc::new(Fake(std::sync::atomic::AtomicUsize::new(0)));
+        let mut input = adversarial_input();
+        input.extractor = Some(fake.clone());
+        let (id, request) = formation_episode_request(&input);
+        let original = request.formation.clone().unwrap();
+        feature
+            .apply_mutation(
+                id,
+                MemoryMutation::StoreEpisode { request },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        let binding = crate::memory_service::MemoryBinding::default();
+        let mut bus = crate::bus::EventBus::new();
+        bus.register(Box::new(crate::memory_service::MemoryDeclarationFeature));
+        let candidate =
+            crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
+                workspace_root: Some(dir.path().into()),
+                memory_token_cap: None,
+                project_memory_root: dir.path().into(),
                 project_db_path: dir.path().join("facts.db"),
                 project_jsonl_path: dir.path().join("facts.jsonl"),
                 global_db_path: None,
@@ -1611,20 +2401,1050 @@ mod tests {
         bus.stage_managed_generation("memory", candidate).unwrap();
         bus.try_finalize_managed().await.unwrap();
         binding.capture(&bus).unwrap();
-        let mut feature =
-            MemoryFeature::new(binding, "test".into()).with_status_root(dir.path().to_path_buf());
-        feature.on_event(&BusEvent::SessionStart {
-            session_id: "fixture-session".into(),
-            cwd: dir.path().to_path_buf(),
-        });
-        (feature, bus, dir)
+        // Reopened SQLite owner and fresh feature; no old session binding or task.
+        for _ in 0..2 {
+            let mut restarted = MemoryFeature::new(binding.clone(), "test".into());
+            restarted.extractor = Some(fake.clone());
+            restarted.on_event(&BusEvent::SessionStart {
+                session_id: "restarted".into(),
+                cwd: dir.path().into(),
+            });
+            let mut observed = restarted.recovery_status.subscribe();
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                observed.wait_for(|state| state.passes >= 1),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            restarted.prepare_managed_shutdown().await.unwrap();
+        }
+        let count = fake.0.load(Ordering::SeqCst);
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert_eq!(
+            count, 1,
+            "startup must recover pending evidence exactly once"
+        );
+        use omegon_memory::MemoryBackend;
+        let store = omegon_memory::SqliteBackend::open(&dir.path().join("facts.db")).unwrap();
+        let episodes = store.list_episodes("test", 8).await.unwrap();
+        assert_eq!(episodes.len(), 1);
+        let recovered = episodes[0].formation.as_ref().unwrap();
+        assert!(matches!(
+            recovered.extraction,
+            omegon_memory::ExtractionOutcome::Complete { .. }
+        ));
+        assert_eq!(recovered.source, original.source);
+        assert_eq!(recovered.evidence, original.evidence);
+    }
+
+    #[test]
+    fn adversarial_capture_replay_ignores_advisory_statistics() {
+        let mut input = adversarial_input();
+        let first = formation_episode_request(&input);
+        input.turns = 500;
+        input.tool_calls = 900;
+        input.duration_secs = 3600.0;
+        let second = formation_episode_request(&input);
+        assert_eq!(first.0, second.0);
+        assert_eq!(
+            first.1, second.1,
+            "same capture identity must bind the same payload"
+        );
     }
 
     #[tokio::test]
-    async fn feature_exposes_12_tools() {
+    async fn interval_checkpoint_persists_committed_evidence_before_session_end() {
+        struct NoInference;
+        #[async_trait::async_trait]
+        impl formation::Extractor for NoInference {
+            fn model(&self) -> &str {
+                "checkpoint-fixture"
+            }
+            async fn extract(&self, _: &str) -> anyhow::Result<String> {
+                panic!("capture must not run inference")
+            }
+        }
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        let (_authority, _, _, _) = crate::session_replay::test_open_joined_request(&dir);
+        let binding = crate::session_consumers::DeferredSessionViewBinding::default();
+        binding.bind(crate::session_consumers::SessionViewBinding::new(
+            dir.path().join("session.json"),
+            "fixture-session".into(),
+        ));
+        feature = feature.with_session_binding(binding);
+        feature.extractor = Some(Arc::new(NoInference));
+        for _ in 0..2 {
+            for turn in 0..8 {
+                feature.on_event(&BusEvent::TurnEnd(Box::new(
+                    omegon_traits::BusEventTurnEnd {
+                        turn,
+                        model: None,
+                        provider: None,
+                        estimated_tokens: 0,
+                        context_window: 0,
+                        context_composition: Default::default(),
+                        actual_input_tokens: 0,
+                        actual_output_tokens: 0,
+                        cache_read_tokens: 0,
+                        provider_telemetry: None,
+                        dominant_phase: None,
+                        drift_kind: None,
+                        progress_signal: Default::default(),
+                    },
+                )));
+                if turn < 7 {
+                    assert!(feature.checkpoint_task.is_none());
+                }
+            }
+            let task = feature
+                .checkpoint_task
+                .take()
+                .expect("interval checkpoint worker");
+            tokio::task::spawn_blocking(move || task.handle.join())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+        }
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        use omegon_memory::MemoryBackend;
+        let store = omegon_memory::SqliteBackend::open(&dir.path().join("facts.db")).unwrap();
+        let episodes = store.list_episodes("test", 8).await.unwrap();
+        assert_eq!(
+            episodes.len(),
+            1,
+            "committed evidence must persist before SessionEnd"
+        );
+        let evidence = episodes[0].formation.as_ref().unwrap();
+        assert!(!evidence.evidence.is_empty());
+        assert!(matches!(
+            evidence.source,
+            omegon_memory::FormationSource::Available { .. }
+        ));
+        assert!(
+            matches!(&evidence.extraction,omegon_memory::ExtractionOutcome::Pending {model} if model=="checkpoint-fixture")
+        );
+    }
+
+    #[tokio::test]
+    async fn pre_eviction_checkpoint_acknowledges_durable_snapshot_without_interval() {
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        let (_authority, _, _, _) = crate::session_replay::test_open_joined_request(&dir);
+        let binding = crate::session_consumers::DeferredSessionViewBinding::default();
+        binding.bind(crate::session_consumers::SessionViewBinding::new(
+            dir.path().join("session.json"),
+            "fixture-session".into(),
+        ));
+        feature = feature.with_session_binding(binding);
+        let outcome = feature
+            .before_context_eviction(CancellationToken::new())
+            .await;
+        let report = feature
+            .execute(
+                "memory_query",
+                "pre-eviction-report",
+                serde_json::json!({}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            report.details["evidence_checkpoint"]["last_pre_eviction"]["state"],
+            "persisted"
+        );
+        feature.prepare_managed_shutdown().await.unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert_eq!(outcome, omegon_traits::ContextCheckpointOutcome::Persisted);
+        use omegon_memory::MemoryBackend;
+        let store = omegon_memory::SqliteBackend::open(&dir.path().join("facts.db")).unwrap();
+        assert_eq!(store.list_episodes("test", 8).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn incremental_capture_resumes_bounded_backlog_after_reopen_without_skipping_evidence() {
+        use omegon_memory::MemoryBackend;
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        let (mut authority, _, _, _) = crate::session_replay::test_open_joined_request(&dir);
+        for index in 0..600 {
+            authority
+                .admit_prompt(
+                    uuid::Uuid::new_v4(),
+                    "2026-09-21T00:00:00Z",
+                    crate::session_authority::PromptAdmitted {
+                        submission_id: uuid::Uuid::new_v4(),
+                        prompt_id: uuid::Uuid::new_v4(),
+                        principal: "operator".into(),
+                        ingress: "fixture".into(),
+                        queue_mode: crate::session_authority::QueueMode::UntilReady,
+                        content: crate::session_authority::PromptContent {
+                            text: format!("capture-{index:04} {}", "🧠".repeat(300)),
+                            attachments: vec![],
+                        },
+                        metadata: serde_json::json!({}),
+                    },
+                )
+                .unwrap();
+        }
+        let binding = crate::session_consumers::DeferredSessionViewBinding::default();
+        binding.bind(crate::session_consumers::SessionViewBinding::new(
+            dir.path().join("session.json"),
+            "fixture-session".into(),
+        ));
+        let target = binding.snapshot().unwrap();
+        let input = SessionEndPipelineInput {
+            mind: "test".into(),
+            memory_binding: feature.memory_binding.clone(),
+            extractor: None,
+            evidence: formation::capture(Some(&binding), Some(&target), "fixture-session"),
+            session_id: "fixture-session".into(),
+            status_root: dir.path().into(),
+            turns: 0,
+            tool_calls: 0,
+            duration_secs: 0.0,
+        };
+        assert_eq!(
+            checkpoint::capture_pass(&binding, &target, input, &CancellationToken::new())
+                .await
+                .err()
+                .as_deref(),
+            Some("capture_backlog")
+        );
+        feature.prepare_managed_shutdown().await.unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        {
+            let store = omegon_memory::SqliteBackend::open(&dir.path().join("facts.db")).unwrap();
+            assert_eq!(store.list_episodes("test", 100).await.unwrap().len(), 8);
+        }
+        let (mut restarted, mut bus) = managed_feature_at(dir.path()).await;
+        restarted = restarted.with_session_binding(binding);
+        restarted.on_event(&BusEvent::SessionStart {
+            session_id: "fixture-session".into(),
+            cwd: dir.path().into(),
+        });
+        let task = restarted
+            .checkpoint_task
+            .take()
+            .expect("startup capture recovery");
+        tokio::task::spawn_blocking(move || task.handle.join())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        // Finalization of an already-covered source must not duplicate its pages.
+        restarted.on_event(&BusEvent::SessionEnd {
+            turns: 1,
+            tool_calls: 0,
+            duration_secs: 0.0,
+            initial_prompt: None,
+            outcome_summary: None,
+        });
+        finalization::flush(&restarted).await;
+        restarted.prepare_managed_shutdown().await.unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        let store = omegon_memory::SqliteBackend::open(&dir.path().join("facts.db")).unwrap();
+        let episodes = store.list_episodes("test", 100).await.unwrap();
+        let mut evidence = episodes
+            .iter()
+            .flat_map(|episode| &episode.formation.as_ref().unwrap().evidence)
+            .filter(|item| item.excerpt.starts_with("capture-"))
+            .collect::<Vec<_>>();
+        evidence.sort_by_key(|item| item.sequence);
+        assert_eq!(evidence.len(), 600);
+        for (index, item) in evidence.iter().enumerate() {
+            assert!(item.excerpt.starts_with(&format!("capture-{index:04} ")));
+        }
+        assert!(
+            episodes
+                .iter()
+                .all(|episode| episode.formation.as_ref().unwrap().coverage.is_some())
+        );
+    }
+
+    #[tokio::test]
+    async fn finalization_queue_preserves_rebound_source_and_bounds_workers() {
+        struct WaitingFirst {
+            entered: tokio::sync::Notify,
+            release: tokio::sync::Notify,
+            calls: std::sync::atomic::AtomicUsize,
+        }
+        #[async_trait::async_trait]
+        impl formation::Extractor for WaitingFirst {
+            fn model(&self) -> &str {
+                "queued-extractor"
+            }
+            async fn extract(&self, _: &str) -> anyhow::Result<String> {
+                if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    self.entered.notify_one();
+                    self.release.notified().await;
+                }
+                Ok("[]".into())
+            }
+        }
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        let (_a, _, _, _) = crate::session_replay::test_open_joined_request(&dir);
+        let second = tempfile::tempdir().unwrap();
+        let (_b, _, _, _) = crate::session_replay::test_open_joined_request(&second);
+        let binding = crate::session_consumers::DeferredSessionViewBinding::default();
+        binding.bind(crate::session_consumers::SessionViewBinding::new(
+            dir.path().join("session.json"),
+            "fixture-session".into(),
+        ));
+        feature = feature.with_session_binding(binding.clone());
+        let extractor = Arc::new(WaitingFirst {
+            entered: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+            calls: Default::default(),
+        });
+        feature.extractor = Some(extractor.clone());
+        let event = BusEvent::SessionEnd {
+            turns: 1,
+            tool_calls: 0,
+            duration_secs: 0.0,
+            initial_prompt: None,
+            outcome_summary: None,
+        };
+        feature.on_event(&event);
+        extractor.entered.notified().await;
+        binding.bind(crate::session_consumers::SessionViewBinding::new(
+            second.path().join("session.json"),
+            "fixture-session".into(),
+        ));
+        for _ in 0..100 {
+            feature.on_event(&event);
+        }
+        assert_eq!(feature.session_end_tasks.lock().unwrap().tasks.len(), 1);
+        assert_eq!(finalization::queued(&feature), 8);
+        assert_eq!(checkpoint::status(&feature)["finalization_running"], true);
+        assert_eq!(
+            checkpoint::status(&feature)["backpressure"],
+            "finalization_queue_full"
+        );
+        extractor.release.notify_one();
+        finalization::flush(&feature).await;
+        assert_eq!(extractor.calls.load(Ordering::SeqCst), 2);
+        feature.prepare_managed_shutdown().await.unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        use omegon_memory::MemoryBackend;
+        let store = omegon_memory::SqliteBackend::open(&dir.path().join("facts.db")).unwrap();
+        let episodes = store.list_episodes("test", 100).await.unwrap();
+        assert_eq!(
+            episodes.len(),
+            2,
+            "both ended sources must complete exactly once"
+        );
+        assert!(episodes.iter().all(|episode| matches!(
+            episode.formation.as_ref().unwrap().extraction,
+            omegon_memory::ExtractionOutcome::Complete { .. }
+        )));
+    }
+
+    #[tokio::test]
+    async fn cancelled_finalization_does_not_complete_a_queued_batch() {
+        use std::future::Future;
+        struct Ready;
+        #[async_trait::async_trait]
+        impl formation::Extractor for Ready {
+            fn model(&self) -> &str {
+                "ready-fixture"
+            }
+            async fn extract(&self, _: &str) -> anyhow::Result<String> {
+                Ok("[]".into())
+            }
+        }
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        let mut input = adversarial_input();
+        input.mind = "test".into();
+        input.memory_binding = feature.memory_binding.clone();
+        input.status_root = dir.path().into();
+        input.extractor = Some(Arc::new(Ready));
+        let (id, request) = formation_episode_request(&input);
+        let evidence = request.formation.as_deref().unwrap().clone();
+        let stored = feature
+            .apply_mutation(
+                id.clone(),
+                MemoryMutation::StoreEpisode { request },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let release = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        let (started, started_rx) = std::sync::mpsc::sync_channel(1);
+        let blocking = tokio::spawn({
+            let binding = feature.memory_binding.clone();
+            let release = release.clone();
+            async move {
+                binding
+                    .invoke(crate::memory_service::MemoryRequestV1::TestBlock {
+                        started,
+                        release,
+                        cancellation: CancellationToken::new(),
+                    })
+                    .await
+            }
+        });
+        tokio::task::spawn_blocking(move || started_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let mut completing = Box::pin(finish_session_episode(input, id, evidence, stored));
+        let was_pending = std::future::poll_fn(|cx| {
+            std::task::Poll::Ready(completing.as_mut().poll(cx).is_pending())
+        })
+        .await;
+        drop(completing);
+        *release.0.lock().unwrap() = true;
+        release.1.notify_all();
+        blocking.await.unwrap().unwrap();
+        assert!(
+            was_pending,
+            "completion must wait behind the blocked service request"
+        );
+        let payload = feature
+            .invoke(crate::memory_service::MemoryRequestV1::ListEpisodes {
+                scope: crate::memory_service::MemoryScopeV1::Project,
+                mind: "test".into(),
+                limit: 1,
+                cancellation: CancellationToken::new(),
+            })
+            .await
+            .unwrap();
+        let crate::memory_service::MemoryPayloadV1::Episodes(episodes) = payload else {
+            panic!("episodes");
+        };
+        assert!(matches!(
+            episodes[0].formation.as_ref().unwrap().extraction,
+            omegon_memory::ExtractionOutcome::Pending { .. }
+        ));
+        feature.prepare_managed_shutdown().await.unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
+    async fn readiness_query_reports_extraction_outage_without_running_inference() {
+        struct Failing(std::sync::atomic::AtomicUsize);
+        #[async_trait::async_trait]
+        impl formation::Extractor for Failing {
+            fn model(&self) -> &str {
+                "readiness-fixture"
+            }
+            async fn extract(&self, _: &str) -> anyhow::Result<String> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                anyhow::bail!("private diagnostic must not escape")
+            }
+        }
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        let failing = Arc::new(Failing(Default::default()));
+        let extractor: Arc<dyn formation::Extractor> = failing.clone();
+        formation::extract_observed(formation::sample_evidence(), Some(&extractor), dir.path())
+            .await;
+        feature.extractor = Some(extractor);
+        feature
+            .execute(
+                "memory_store",
+                "readiness-store",
+                serde_json::json!({"content":"keyword evidence remains available"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        for _ in 0..2 {
+            let report = feature
+                .execute(
+                    "memory_query",
+                    "readiness-query",
+                    serde_json::json!({}),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                report.details["memory_capabilities"]["extraction"]["state"],
+                "unavailable"
+            );
+            assert_eq!(
+                report.details["memory_capabilities"]["extraction"]["reason"],
+                "provider_unavailable"
+            );
+            assert_eq!(report.details["count"], 1);
+            assert!(!report.details.to_string().contains("private diagnostic"));
+        }
+        assert_eq!(failing.0.load(Ordering::SeqCst), 1);
+        feature.prepare_managed_shutdown().await.unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
+    async fn startup_recovery_shutdown_cancels_extraction_and_retains_pending() {
+        struct Waiting {
+            entered: tokio::sync::Notify,
+            dropped: Arc<AtomicBool>,
+        }
+        #[async_trait::async_trait]
+        impl formation::Extractor for Waiting {
+            fn model(&self) -> &str {
+                "fixture-waiting"
+            }
+            async fn extract(&self, _: &str) -> anyhow::Result<String> {
+                struct Guard(Arc<AtomicBool>);
+                impl Drop for Guard {
+                    fn drop(&mut self) {
+                        self.0.store(true, Ordering::SeqCst);
+                    }
+                }
+                let _guard = Guard(self.dropped.clone());
+                self.entered.notify_one();
+                std::future::pending().await
+            }
+        }
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        let dropped = Arc::new(AtomicBool::new(false));
+        let waiting = Arc::new(Waiting {
+            entered: tokio::sync::Notify::new(),
+            dropped: dropped.clone(),
+        });
+        let mut input = adversarial_input();
+        input.extractor = Some(waiting.clone());
+        let (id, request) = formation_episode_request(&input);
+        feature
+            .apply_mutation(
+                id,
+                MemoryMutation::StoreEpisode { request },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        feature.extractor = Some(waiting.clone());
+        feature.on_event(&BusEvent::SessionStart {
+            session_id: "recover".into(),
+            cwd: dir.path().into(),
+        });
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            waiting.entered.notified(),
+        )
+        .await
+        .unwrap();
+        feature.prepare_managed_shutdown().await.unwrap();
+        assert!(dropped.load(Ordering::SeqCst));
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        use omegon_memory::MemoryBackend;
+        let store = omegon_memory::SqliteBackend::open(&dir.path().join("facts.db")).unwrap();
+        assert_eq!(
+            store
+                .pending_formations("test", "fixture-waiting", 8)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn interval_checkpoint_coalesces_pressure_and_shutdown_joins_single_slot() {
+        let (mut feature, mut bus, _dir) = managed_feature().await;
+        let cancellation = CancellationToken::new();
+        let worker = cancellation.clone();
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let handle = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async {
+                let _ = entered.send(());
+                worker.cancelled().await;
+            });
+            Ok(())
+        });
+        let id = handle.thread().id();
+        feature.checkpoint_task = Some(SessionEndTask {
+            cancellation,
+            handle,
+        });
+        started.await.unwrap();
+        for _ in 0..100 {
+            checkpoint::on_turn(&mut feature);
+        }
+        assert_eq!(feature.checkpoint_turns, 8);
+        let outcome = feature
+            .before_context_eviction(CancellationToken::new())
+            .await;
+        assert_eq!(
+            outcome,
+            omegon_traits::ContextCheckpointOutcome::Unavailable {
+                reason: "capture_busy".into()
+            }
+        );
+        let report = feature
+            .execute(
+                "memory_query",
+                "checkpoint-pressure",
+                serde_json::json!({}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(report.details["evidence_checkpoint"]["capture_due"], true);
+        assert_eq!(
+            report.details["evidence_checkpoint"]["worker_running"],
+            true
+        );
+        assert_eq!(
+            feature
+                .checkpoint_task
+                .as_ref()
+                .unwrap()
+                .handle
+                .thread()
+                .id(),
+            id
+        );
+        feature.prepare_managed_shutdown().await.unwrap();
+        checkpoint::on_turn(&mut feature);
+        assert!(feature.checkpoint_task.is_none());
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
+    async fn interval_checkpoint_unavailable_source_does_not_fabricate_episode() {
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        let binding = crate::session_consumers::DeferredSessionViewBinding::default();
+        binding.bind(crate::session_consumers::SessionViewBinding::new(
+            dir.path().join("missing-session.json"),
+            "fixture-session".into(),
+        ));
+        feature = feature.with_session_binding(binding);
+        for _ in 0..8 {
+            checkpoint::on_turn(&mut feature);
+        }
+        let task = feature.checkpoint_task.take().unwrap();
+        let result = tokio::task::spawn_blocking(move || task.handle.join())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(result.is_err());
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        use omegon_memory::MemoryBackend;
+        let store = omegon_memory::SqliteBackend::open(&dir.path().join("facts.db")).unwrap();
+        assert!(store.list_episodes("test", 8).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn recovery_scheduler_drains_overflow_without_another_startup() {
+        struct Fake(std::sync::atomic::AtomicUsize);
+        #[async_trait::async_trait]
+        impl formation::Extractor for Fake {
+            fn model(&self) -> &str {
+                "scheduler-model"
+            }
+            async fn extract(&self, _: &str) -> anyhow::Result<String> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok("[]".into())
+            }
+        }
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        let fake = Arc::new(Fake(std::sync::atomic::AtomicUsize::new(0)));
+        let mut input = adversarial_input();
+        input.extractor = Some(fake.clone());
+        for index in 0..9 {
+            input.session_id = format!("scheduler-{index}");
+            let (id, request) = formation_episode_request(&input);
+            feature
+                .apply_mutation(
+                    id,
+                    MemoryMutation::StoreEpisode { request },
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+        }
+        feature.extractor = Some(fake.clone());
+        feature.on_event(&BusEvent::SessionStart {
+            session_id: "scheduler".into(),
+            cwd: dir.path().into(),
+        });
+        let mut observed = feature.recovery_status.subscribe();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            observed.wait_for(|state| state.passes >= 2),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let report = feature
+            .execute(
+                "memory_query",
+                "scheduler-report",
+                serde_json::json!({}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            report.details["formation_recovery"]["status"]["phase"],
+            "idle"
+        );
+        assert_eq!(
+            report.details["formation_recovery"]["status"]["pending_sample"],
+            0
+        );
+        feature.prepare_managed_shutdown().await.unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert_eq!(
+            fake.0.load(Ordering::SeqCst),
+            9,
+            "overflow must progress without another startup"
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_scheduler_feature_drop_cancels_idle_worker() {
+        struct Empty;
+        #[async_trait::async_trait]
+        impl formation::Extractor for Empty {
+            fn model(&self) -> &str {
+                "empty-fixture"
+            }
+            async fn extract(&self, _: &str) -> anyhow::Result<String> {
+                panic!("empty inventory must not call extractor")
+            }
+        }
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        feature.extractor = Some(Arc::new(Empty));
+        let mut observed = feature.recovery_status.subscribe();
+        feature.on_event(&BusEvent::SessionStart {
+            session_id: "idle".into(),
+            cwd: dir.path().into(),
+        });
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            observed.wait_for(|state| state.passes >= 1),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        drop(feature);
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            observed.wait_for(|state| state.stopped()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[test]
+    fn adversarial_capture_date_comes_from_evidence_and_minds_are_isolated() {
+        let mut input = adversarial_input();
+        input.evidence.evidence[0].recorded_at = "2001-01-01T00:00:00Z".into();
+        let first = formation_episode_request(&input);
+        assert_eq!(first.1.date.as_deref(), Some("2001-01-01"));
+        input.mind = "other".into();
+        assert_ne!(
+            first.0,
+            formation_episode_request(&input).0,
+            "mind scopes cannot share a capture receipt"
+        );
+    }
+
+    #[tokio::test]
+    async fn adversarial_stable_capture_payload_replays_through_managed_storage() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        let mut input = adversarial_input();
+        let (id, request) = formation_episode_request(&input);
+        assert!(id.contains(":formation-v2:"));
+        let first = feature
+            .apply_mutation(
+                id.clone(),
+                MemoryMutation::StoreEpisode { request },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(!first.replayed);
+        input.turns = 100;
+        input.tool_calls = 200;
+        input.duration_secs = 86400.0;
+        let (_, request) = formation_episode_request(&input);
+        let replay = feature
+            .apply_mutation(
+                id,
+                MemoryMutation::StoreEpisode { request },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(first.effect, replay.effect);
+        input.mind = "other".into();
+        let (id, request) = formation_episode_request(&input);
+        assert!(
+            !feature
+                .apply_mutation(
+                    id,
+                    MemoryMutation::StoreEpisode { request },
+                    CancellationToken::new()
+                )
+                .await
+                .unwrap()
+                .replayed
+        );
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
+    async fn adversarial_invalid_model_does_not_discard_source_evidence() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        let profile = crate::settings::Profile {
+            memory_extraction_model: Some("m".repeat(513)),
+            ..Default::default()
+        };
+        let feature = feature.with_capabilities(&profile, false, None);
+        let mut input = adversarial_input();
+        input.memory_binding = feature.memory_binding.clone();
+        input.extractor = feature.extractor.clone();
+        run_session_end_pipeline(input).await;
+        let payload = feature
+            .invoke(crate::memory_service::MemoryRequestV1::ListEpisodes {
+                scope: crate::memory_service::MemoryScopeV1::Project,
+                mind: "test".into(),
+                limit: 1,
+                cancellation: CancellationToken::new(),
+            })
+            .await
+            .unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        let crate::memory_service::MemoryPayloadV1::Episodes(episodes) = payload else {
+            panic!("episodes");
+        };
+        assert_eq!(
+            episodes.len(),
+            1,
+            "invalid optional model must not prevent durable capture"
+        );
+        assert!(feature.extractor.is_none());
+    }
+
+    #[test]
+    fn wave3_extraction_is_configured_without_embeddings() {
+        let feature = MemoryFeature::new(Default::default(), "wave3".into()).with_capabilities(
+            &Default::default(),
+            false,
+            None,
+        );
+        assert!(
+            feature.extractor.is_some(),
+            "embedding discovery must not disable extraction"
+        );
+        assert!(feature.embed_service.is_none());
+    }
+
+    #[test]
+    fn wave3_profile_override_disable_and_child_policy_are_independent() {
+        let mut profile: crate::settings::Profile = serde_json::from_value(serde_json::json!({
+            "memoryExtractionModel":"fixture:cheap", "memoryExtractionEnabled":true
+        }))
+        .unwrap();
+        let feature = MemoryFeature::new(Default::default(), "wave3".into())
+            .with_capabilities(&profile, false, None);
+        assert_eq!(feature.extractor.as_ref().unwrap().model(), "fixture:cheap");
+        profile.memory_extraction_enabled = Some(false);
+        let disabled = MemoryFeature::new(Default::default(), "wave3".into())
+            .with_extraction_model("previous".into())
+            .with_capabilities(&profile, false, None);
+        assert!(disabled.extractor.is_none());
+        profile.memory_extraction_enabled = Some(true);
+        let child = MemoryFeature::new(Default::default(), "wave3".into())
+            .with_capabilities(&profile, true, None);
+        assert!(child.extractor.is_none());
+    }
+
+    #[tokio::test]
+    async fn wave3_pipeline_persists_pending_candidates_without_creating_facts() {
+        struct Fake;
+        #[async_trait]
+        impl formation::Extractor for Fake {
+            fn model(&self) -> &str {
+                "fixture-model"
+            }
+            async fn extract(&self, _: &str) -> anyhow::Result<String> {
+                Ok(r#"[{"content":"Migration must be atomic.","section":"Constraints","evidence_ids":["event-4"]}]"#.into())
+            }
+        }
+        let (feature, mut bus, dir) = managed_feature().await;
+        for _ in 0..2 {
+            run_session_end_pipeline(SessionEndPipelineInput {
+                mind: "test".into(),
+                memory_binding: feature.memory_binding.clone(),
+                extractor: Some(Arc::new(Fake)),
+                evidence: formation::sample_evidence(),
+                session_id: "synthetic-session".into(),
+                status_root: dir.path().into(),
+                turns: 2,
+                tool_calls: 1,
+                duration_secs: 1.0,
+            })
+            .await;
+        }
+        let payload = feature
+            .invoke(crate::memory_service::MemoryRequestV1::ListEpisodes {
+                scope: crate::memory_service::MemoryScopeV1::Project,
+                mind: "test".into(),
+                limit: 10,
+                cancellation: CancellationToken::new(),
+            })
+            .await
+            .unwrap();
+        let crate::memory_service::MemoryPayloadV1::Episodes(episodes) = payload else {
+            panic!("episodes");
+        };
+        assert_eq!(episodes.len(), 1);
+        assert_eq!(
+            episodes[0].formation.as_ref().unwrap().candidates[0].section,
+            Section::Constraints
+        );
+        let payload = feature
+            .invoke(crate::memory_service::MemoryRequestV1::Stats {
+                scope: crate::memory_service::MemoryScopeV1::Project,
+                mind: "test".into(),
+                cancellation: CancellationToken::new(),
+            })
+            .await
+            .unwrap();
+        let crate::memory_service::MemoryPayloadV1::Stats(stats) = payload else {
+            panic!("stats");
+        };
+        assert_eq!(stats.total_facts, 0);
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
+    async fn wave3_cancellation_keeps_source_and_pending_extraction_durable() {
+        struct Waiting(Arc<tokio::sync::Notify>);
+        #[async_trait]
+        impl formation::Extractor for Waiting {
+            fn model(&self) -> &str {
+                "fixture-waiting"
+            }
+            async fn extract(&self, _: &str) -> anyhow::Result<String> {
+                self.0.notify_one();
+                std::future::pending().await
+            }
+        }
+        let (feature, mut bus, dir) = managed_feature().await;
+        let started = Arc::new(tokio::sync::Notify::new());
+        let task = tokio::spawn(run_session_end_pipeline(SessionEndPipelineInput {
+            mind: "test".into(),
+            memory_binding: feature.memory_binding.clone(),
+            extractor: Some(Arc::new(Waiting(started.clone()))),
+            evidence: formation::sample_evidence(),
+            session_id: "synthetic-session".into(),
+            status_root: dir.path().into(),
+            turns: 1,
+            tool_calls: 0,
+            duration_secs: 1.0,
+        }));
+        tokio::time::timeout(std::time::Duration::from_secs(5), started.notified())
+            .await
+            .unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        let payload = feature
+            .invoke(crate::memory_service::MemoryRequestV1::ListEpisodes {
+                scope: crate::memory_service::MemoryScopeV1::Project,
+                mind: "test".into(),
+                limit: 1,
+                cancellation: CancellationToken::new(),
+            })
+            .await
+            .unwrap();
+        let crate::memory_service::MemoryPayloadV1::Episodes(episodes) = payload else {
+            panic!("episodes");
+        };
+        let evidence = episodes[0].formation.as_ref().unwrap();
+        assert_eq!(evidence.evidence.len(), 1);
+        assert!(matches!(
+            evidence.extraction,
+            omegon_memory::ExtractionOutcome::Pending { .. }
+        ));
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
+    async fn feature_exposes_public_memory_tools_without_internal_confirmation() {
         let feature = MemoryFeature::new(Default::default(), "test".into());
         let tools = feature.tools();
-        assert_eq!(tools.len(), 12, "Should have exactly 12 memory tools");
+        assert_eq!(tools.len(), 16, "public memory tool inventory");
 
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"memory_store"));
@@ -1639,6 +3459,11 @@ mod tests {
         assert!(names.contains(&"memory_compact"));
         assert!(names.contains(&"memory_search_archive"));
         assert!(names.contains(&"memory_ingest_lifecycle"));
+        assert!(names.contains(&"memory_confirm"));
+        assert!(names.contains(&"memory_inspect"));
+        assert!(names.contains(&"memory_set_applicability"));
+        assert!(names.contains(&"memory_selection"));
+        assert!(!names.contains(&"memory_apply_confirmation"));
     }
 
     #[test]
@@ -1655,6 +3480,8 @@ mod tests {
             "memory_release",
             "memory_compact",
             "memory_ingest_lifecycle",
+            "memory_confirm",
+            "memory_set_applicability",
         ] {
             let tool = tools.iter().find(|tool| tool.name == name).unwrap();
             assert!(
@@ -1836,6 +3663,785 @@ mod tests {
             .unwrap_err();
 
         assert!(err.to_string().contains("invalid memory section 'Notes'"));
+    }
+
+    #[tokio::test]
+    async fn inspection_reports_unavailable_declared_source_without_mutation() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        let stored=feature.execute("memory_ingest_lifecycle","candidate",serde_json::json!({"source_kind":"design-tree","authority":"inferred","section":"Decisions","content":"zircon unverified conclusion",
+            "artifact_ref_type":"design","artifact_ref_path":"docs/design/missing.md"}),CancellationToken::new()).await.unwrap();
+        let id = stored.details["id"].as_str().unwrap().to_string();
+        let pending = || crate::memory_service::MemoryRequestV1::GetPendingFact {
+            scope: crate::memory_service::MemoryScopeV1::Project,
+            mind: "test".into(),
+            id: id.clone(),
+            cancellation: CancellationToken::new(),
+        };
+        let before = serde_json::to_value(feature.invoke(pending()).await.unwrap()).unwrap();
+        let inspected = feature
+            .execute(
+                "memory_inspect",
+                "inspect",
+                serde_json::json!({"fact_id":id}),
+                CancellationToken::new(),
+            )
+            .await;
+        let after = serde_json::to_value(feature.invoke(pending()).await.unwrap()).unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        let inspected = inspected.unwrap();
+        assert_eq!(inspected.details["status"], "pending");
+        assert_eq!(inspected.details["basis"], "unconfirmed_inference");
+        assert_eq!(inspected.details["evidence_availability"], "unavailable");
+        assert_eq!(before, after);
+    }
+
+    #[tokio::test]
+    async fn applicability_tracks_head_changes_and_retires_same_turn_context() {
+        let (feature, mut bus, dir) = managed_feature().await;
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let signature = git2::Signature::now("test", "test@example.invalid").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let first = repo
+            .commit(Some("HEAD"), &signature, &signature, "first", &tree, &[])
+            .unwrap();
+        let revision = format!("git:{first}");
+        feature.execute("memory_store","scoped",serde_json::json!({"section":"Constraints","content":"zircon revision rule","applicability":{"revisions":[revision]}}),CancellationToken::new()).await.unwrap();
+        let signals = ContextSignals {
+            user_prompt: "zircon",
+            recent_tools: &[],
+            recent_files: &[],
+            lifecycle_phase: &LifecyclePhase::Idle,
+            turn_number: 1,
+            context_budget_tokens: 500,
+        };
+        let initial = feature.provide_context(&signals).unwrap();
+        assert!(initial.content.contains("zircon revision rule"));
+        std::fs::write(dir.path().join("untracked.txt"), "dirty workspace").unwrap();
+        let context = crate::memory_service::applicability_context(Some(dir.path()));
+        assert_eq!(context.revision.as_deref(), Some(revision.as_str()));
+        assert_eq!(
+            context.workspace,
+            Some(crate::workspace::runtime::workspace_id_from_path(
+                &dir.path().canonicalize().unwrap()
+            ))
+        );
+        let parent = repo.find_commit(first).unwrap();
+        repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            "second",
+            &tree,
+            &[&parent],
+        )
+        .unwrap();
+        let cleared = feature
+            .provide_context(&signals)
+            .expect("known mismatch must replace a live injection even within the same turn");
+        assert!(cleared.content.is_empty());
+        let recall = feature
+            .execute(
+                "memory_recall",
+                "recall",
+                serde_json::json!({"query":"zircon"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(recall.details["count"], 0);
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
+    async fn applicability_update_expires_context_without_reinforcement() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        let stored = feature
+            .execute(
+                "memory_store",
+                "store",
+                serde_json::json!({"section":"Constraints","content":"zircon expires"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let id = stored.details["id"].as_str().unwrap().to_string();
+        let before = feature
+            .get_fact(id.clone(), CancellationToken::new())
+            .await
+            .unwrap()
+            .unwrap();
+        let signals = ContextSignals {
+            user_prompt: "zircon",
+            recent_tools: &[],
+            recent_files: &[],
+            lifecycle_phase: &LifecyclePhase::Idle,
+            turn_number: 1,
+            context_budget_tokens: 500,
+        };
+        assert!(
+            feature
+                .provide_context(&signals)
+                .unwrap()
+                .content
+                .contains("applicability unknown")
+        );
+        let args = serde_json::json!({"fact_id":id,"expected_version":before.version,"applicability":{"valid_until":"2000-01-01T00:00:00Z"}});
+        feature
+            .execute(
+                "memory_set_applicability",
+                "expire",
+                args.clone(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let replay = feature
+            .execute(
+                "memory_set_applicability",
+                "expire",
+                args,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(replay.details["replayed"], true);
+        assert!(
+            feature
+                .provide_context(&signals)
+                .unwrap()
+                .content
+                .is_empty()
+        );
+        let after = feature
+            .get_fact(id, CancellationToken::new())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.status, omegon_memory::FactStatus::Active);
+        assert_eq!(after.reinforcement_count, before.reinforcement_count);
+        assert_eq!(after.last_reinforced, before.last_reinforced);
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
+    async fn applicability_revalidation_failure_retires_injection_but_preserves_facts() {
+        let (feature, mut bus, dir) = managed_feature().await;
+        feature
+            .execute(
+                "memory_store",
+                "store",
+                serde_json::json!({"section":"Constraints","content":"zircon remains stored"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let signals = ContextSignals {
+            user_prompt: "zircon",
+            recent_tools: &[],
+            recent_files: &[],
+            lifecycle_phase: &LifecyclePhase::Idle,
+            turn_number: 1,
+            context_budget_tokens: 500,
+        };
+        assert!(
+            feature
+                .provide_context(&signals)
+                .unwrap()
+                .content
+                .contains("zircon remains stored")
+        );
+        let connection = rusqlite::Connection::open(dir.path().join("facts.db")).unwrap();
+        connection.execute_batch("DROP TABLE facts_fts;").unwrap();
+        assert!(
+            feature
+                .provide_context(&signals)
+                .unwrap()
+                .content
+                .is_empty()
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM facts", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
+    async fn token_selection_never_exceeds_conservative_host_budget() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        feature.execute("memory_store","large",serde_json::json!({"section":"Constraints","content":format!("zircon {}","漢".repeat(100))}),CancellationToken::new()).await.unwrap();
+        feature
+            .execute(
+                "memory_store",
+                "small",
+                serde_json::json!({"section":"Constraints","content":"zircon small fact"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let signals = ContextSignals {
+            user_prompt: "zircon",
+            recent_tools: &[],
+            recent_files: &[],
+            lifecycle_phase: &LifecyclePhase::Idle,
+            turn_number: 1,
+            context_budget_tokens: 200,
+        };
+        let injected = feature.provide_context(&signals).unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert!(
+            injected.content.len() <= 200,
+            "conservative accounting includes UTF-8 bytes and formatting"
+        );
+        assert!(injected.content.contains("zircon small fact"));
+    }
+
+    #[tokio::test]
+    async fn selection_cache_reuses_an_unchanged_hosted_turn() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        feature
+            .execute(
+                "memory_store",
+                "cache-fact",
+                serde_json::json!({"section":"Constraints","content":"zircon cache evidence"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let signals = ContextSignals {
+            user_prompt: "zircon",
+            recent_tools: &[],
+            recent_files: &[],
+            lifecycle_phase: &LifecyclePhase::Idle,
+            turn_number: 1,
+            context_budget_tokens: 900,
+        };
+        feature.provide_context(&signals).unwrap();
+        let first = feature
+            .execute(
+                "memory_selection",
+                "report",
+                serde_json::json!({}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        feature.provide_context(&signals);
+        let second = feature
+            .execute(
+                "memory_selection",
+                "report",
+                serde_json::json!({}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert_eq!(first.details["cache_hit"], false);
+        assert_eq!(second.details["cache_hit"], true);
+    }
+
+    #[tokio::test]
+    async fn token_selection_standalone_and_hosted_ambient_agree() {
+        let (feature, mut bus, dir) = managed_feature().await;
+        feature
+            .execute(
+                "memory_store",
+                "fact",
+                serde_json::json!({"section":"Constraints","content":"zircon shared evidence"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let standalone = omegon_memory::MemoryProvider::new(
+            omegon_memory::SqliteBackend::open(&dir.path().join("facts.db")).unwrap(),
+            omegon_memory::MarkdownRenderer,
+            "test".into(),
+        );
+        let signals = ContextSignals {
+            user_prompt: "zircon",
+            recent_tools: &[],
+            recent_files: &[],
+            lifecycle_phase: &LifecyclePhase::Idle,
+            turn_number: 1,
+            context_budget_tokens: 900,
+        };
+        let hosted = feature.provide_context(&signals).unwrap();
+        let direct =
+            omegon_traits::ContextProvider::provide_context(&standalone, &signals).unwrap();
+        assert_eq!(hosted.content, direct.content);
+        let host_report = feature
+            .execute(
+                "memory_selection",
+                "report",
+                serde_json::json!({}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let direct_report = omegon_traits::ToolProvider::execute(
+            &standalone,
+            "memory_selection",
+            "report",
+            serde_json::json!({}),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        for key in [
+            "intent",
+            "low_signal",
+            "accounting",
+            "budget",
+            "accounted_tokens",
+            "selected",
+            "exclusions",
+            "exclusion_counts",
+            "exclusions_truncated",
+            "budget_exhausted",
+            "pin_resolutions",
+            "retrieval_degradation",
+        ] {
+            assert_eq!(
+                host_report.details[key], direct_report.details[key],
+                "{key}"
+            );
+        }
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
+    async fn inspection_tracks_artifact_availability_without_reactivating_history() {
+        let (feature, mut bus, dir) = managed_feature().await;
+        std::fs::create_dir_all(dir.path().join("docs/design")).unwrap();
+        let path = dir.path().join("docs/design/zircon.md");
+        std::fs::write(&path, lifecycle::TEST_DESIGN).unwrap();
+        let stored=feature.execute("memory_ingest_lifecycle","explicit",serde_json::json!({"source_kind":"design-tree","authority":"explicit","section":"Decisions",
+            "content":"Use transactions: Keep corrections atomic.","artifact_ref_type":"design","artifact_ref_path":"docs/design/zircon.md","artifact_ref_sub":"Use transactions"}),CancellationToken::new()).await.unwrap();
+        let id = stored.details["id"].as_str().unwrap().to_string();
+        feature
+            .execute(
+                "memory_archive",
+                "archive",
+                serde_json::json!({"fact_ids":[id]}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let record = || crate::memory_service::MemoryRequestV1::GetFactRecord {
+            scope: crate::memory_service::MemoryScopeV1::Project,
+            mind: "test".into(),
+            id: id.clone(),
+            cancellation: CancellationToken::new(),
+        };
+        let before = serde_json::to_value(feature.invoke(record()).await.unwrap()).unwrap();
+        for (step, expected) in [
+            (0, "snapshot_matches"),
+            (1, "snapshot_changed"),
+            (2, "unavailable"),
+        ] {
+            if step == 1 {
+                std::fs::write(&path, lifecycle::TEST_DESIGN.replace("atomic", "guarded")).unwrap();
+            }
+            if step == 2 {
+                std::fs::remove_file(&path).unwrap();
+            }
+            let inspected = feature
+                .execute(
+                    "memory_inspect",
+                    "inspect",
+                    serde_json::json!({"fact_id":id}),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(inspected.details["evidence_availability"], expected);
+            if step == 0 {
+                let mut projection: omegon_memory::FactInspection =
+                    serde_json::from_value(inspected.details.clone()).unwrap();
+                let artifact = projection.artifact.as_mut().unwrap();
+                artifact.artifact_sha256 = artifact.artifact_sha256.to_uppercase();
+                assert_eq!(
+                    lifecycle::inspect_source(dir.path(), projection).evidence_availability,
+                    omegon_memory::EvidenceAvailability::SnapshotMatches
+                );
+            }
+            assert_eq!(inspected.details["status"], "archived");
+            assert_eq!(inspected.details["basis"], "explicit_artifact");
+        }
+        #[cfg(unix)]
+        {
+            let outside = tempfile::tempdir().unwrap();
+            let target = outside.path().join("secret.md");
+            std::fs::write(&target, lifecycle::TEST_DESIGN).unwrap();
+            std::os::unix::fs::symlink(target, &path).unwrap();
+            let inspected = feature
+                .execute(
+                    "memory_inspect",
+                    "symlink",
+                    serde_json::json!({"fact_id":id}),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(inspected.details["evidence_availability"], "unavailable");
+        }
+        let after = serde_json::to_value(feature.invoke(record()).await.unwrap()).unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert_eq!(before, after);
+    }
+
+    #[tokio::test]
+    async fn inspection_does_not_validate_declared_references_or_follow_unsupported_paths() {
+        let (feature, mut bus, dir) = managed_feature().await;
+        std::fs::create_dir_all(dir.path().join("docs/design")).unwrap();
+        std::fs::write(
+            dir.path().join("docs/design/plain.md"),
+            "plain text, not an explicit decision",
+        )
+        .unwrap();
+        for (path, expected) in [
+            ("docs/design/plain.md", "readable_unverified"),
+            ("../outside.md", "unsupported_reference"),
+        ] {
+            let stored=feature.execute("memory_ingest_lifecycle",path,serde_json::json!({"source_kind":"design-tree","authority":"inferred","section":"Decisions","content":"unverified","artifact_ref_type":"design","artifact_ref_path":path}),CancellationToken::new()).await.unwrap();
+            let inspected = feature
+                .execute(
+                    "memory_inspect",
+                    "inspect",
+                    serde_json::json!({"fact_id":stored.details["id"]}),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(inspected.details["evidence_availability"], expected);
+            assert_eq!(inspected.details["basis"], "unconfirmed_inference");
+        }
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
+    async fn lifecycle_explicit_claim_requires_artifact_evidence() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        let result = feature
+            .execute(
+                "memory_ingest_lifecycle",
+                "unsupported",
+                serde_json::json!({
+                    "source_kind":"design-tree", "authority":"explicit", "section":"Decisions",
+                    "content":"zircon tests passed"
+                }),
+                CancellationToken::new(),
+            )
+            .await;
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert!(
+            result.is_err(),
+            "the authority string alone cannot establish explicit evidence"
+        );
+    }
+
+    #[tokio::test]
+    async fn lifecycle_explicit_tool_corrects_with_artifact_attribution_and_replay() {
+        let (feature, mut bus, dir) = managed_feature().await;
+        std::fs::create_dir_all(dir.path().join("docs/design")).unwrap();
+        std::fs::write(
+            dir.path().join("docs/design/zircon.md"),
+            lifecycle::TEST_DESIGN,
+        )
+        .unwrap();
+        let stored = feature
+            .execute(
+                "memory_store",
+                "old",
+                serde_json::json!({"section":"Decisions","content":"old zircon decision"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let old_id = stored.details["id"].as_str().unwrap().to_string();
+        let old = feature
+            .get_fact(old_id.clone(), CancellationToken::new())
+            .await
+            .unwrap()
+            .unwrap();
+        let args = serde_json::json!({"source_kind":"design-tree","authority":"explicit","section":"Decisions",
+            "content":"Use transactions: Keep corrections atomic.","artifact_ref_type":"design",
+            "artifact_ref_path":"docs/design/zircon.md","artifact_ref_sub":"Use transactions",
+            "supersedes":old_id,"supersedes_version":old.version});
+        let result = feature
+            .execute(
+                "memory_ingest_lifecycle",
+                "correct",
+                args.clone(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let replay = feature
+            .execute(
+                "memory_ingest_lifecycle",
+                "correct",
+                args,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let original = feature
+            .get_fact(old.id, CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert!(original.is_none());
+        assert_eq!(result.details["id"], replay.details["id"]);
+        assert_eq!(replay.details["replayed"], true);
+        assert_eq!(result.details["source"]["artifact_id"], "zircon");
+        assert!(result.details["version"].is_u64());
+    }
+
+    #[tokio::test]
+    async fn lifecycle_inference_is_pending_and_not_recalled_as_knowledge() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        let result = feature.execute("memory_ingest_lifecycle", "inferred", serde_json::json!({
+            "source_kind":"design-tree", "authority":"inferred", "section":"Decisions",
+            "content":"zircon inferred success", "artifact_ref_type":"design",
+            "artifact_ref_path":"docs/design/zircon.md", "artifact_ref_sub":"unverified-summary"
+        }), CancellationToken::new()).await.unwrap();
+        let recall = feature
+            .execute(
+                "memory_recall",
+                "recall",
+                serde_json::json!({"query":"zircon"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert_eq!(result.details["status"], "pending");
+        assert_eq!(recall.details["count"], 0);
+    }
+
+    #[tokio::test]
+    async fn confirmation_tool_cannot_accept_agent_approval_flags_or_expose_internal_commit() {
+        let (feature, mut bus, _dir) = managed_feature().await;
+        let candidate=feature.execute("memory_ingest_lifecycle","candidate",serde_json::json!({"source_kind":"design-tree","authority":"inferred","section":"Decisions","content":"zircon inference"}),CancellationToken::new()).await.unwrap();
+        let id = candidate.details["id"].as_str().unwrap();
+        assert!(
+            feature
+                .execute(
+                    "memory_confirm",
+                    "review",
+                    serde_json::json!({"candidate_id":id,"approved":true}),
+                    CancellationToken::new()
+                )
+                .await
+                .is_err()
+        );
+        let error = feature
+            .execute(
+                "memory_confirm",
+                "review",
+                serde_json::json!({"candidate_id":id}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        let review = error
+            .downcast::<confirmation::MemoryConfirmationRequired>()
+            .unwrap();
+        assert!(
+            feature
+                .get_fact(id.into(), CancellationToken::new())
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            !feature
+                .tools()
+                .iter()
+                .any(|tool| tool.name == crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION)
+        );
+        let mut public_bus = crate::bus::EventBus::new();
+        public_bus.register(Box::new(MemoryFeature::new(
+            Default::default(),
+            "test".into(),
+        )));
+        public_bus.register_internal_tool(
+            crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION,
+            "memory",
+        );
+        assert!(
+            public_bus
+                .execute_tool(
+                    crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION,
+                    "forged",
+                    serde_json::json!({}),
+                    CancellationToken::new()
+                )
+                .await
+                .is_err()
+        );
+        feature
+            .execute(
+                crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION,
+                "kernel",
+                serde_json::json!({"request":review.request,"surface":"native_event"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            feature
+                .get_fact(id.into(), CancellationToken::new())
+                .await
+                .unwrap()
+                .is_some()
+        );
+        let replay = feature
+            .execute(
+                "memory_confirm",
+                "review",
+                serde_json::json!({"candidate_id":id}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(replay.details["replayed"], true);
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
+    async fn confirmation_internal_dispatch_requires_runtime_principal() {
+        let dir = tempfile::tempdir().unwrap();
+        let binding = crate::memory_service::MemoryBinding::default();
+        let mut feature = MemoryFeature::new(binding.clone(), "test".into());
+        feature.on_event(&BusEvent::SessionStart {
+            session_id: "fixture-session".into(),
+            cwd: dir.path().into(),
+        });
+        let mut bus = crate::bus::EventBus::new();
+        bus.register(Box::new(feature));
+        bus.register_internal_tool(
+            crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION,
+            "memory",
+        );
+        let candidate =
+            crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
+                workspace_root: Some(dir.path().to_path_buf()),
+                memory_token_cap: None,
+                project_memory_root: dir.path().into(),
+                project_db_path: dir.path().join("facts.db"),
+                project_jsonl_path: dir.path().join("facts.jsonl"),
+                global_db_path: None,
+                vault: None,
+                startup_sync_enabled: false,
+            })
+            .await
+            .unwrap();
+        bus.stage_managed_generation("memory", candidate).unwrap();
+        bus.try_finalize_managed().await.unwrap();
+        binding.capture(&bus).unwrap();
+        let stored=bus.execute_tool("memory_ingest_lifecycle","candidate",serde_json::json!({"source_kind":"design-tree","authority":"inferred","section":"Decisions","content":"zircon inference"}),CancellationToken::new()).await.unwrap();
+        let error = bus
+            .execute_tool(
+                "memory_confirm",
+                "review",
+                serde_json::json!({"candidate_id":stored.details["id"]}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        let review = error
+            .downcast::<confirmation::MemoryConfirmationRequired>()
+            .unwrap();
+        let args = serde_json::json!({"request":review.request,"surface":"native_event"});
+        assert!(
+            bus.invoke_internal(
+                crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION,
+                "forged",
+                args.clone(),
+                CancellationToken::new(),
+                Default::default()
+            )
+            .await
+            .is_err()
+        );
+        let result = bus
+            .invoke_internal(
+                crate::tool_registry::memory::MEMORY_APPLY_CONFIRMATION,
+                "kernel",
+                args,
+                CancellationToken::new(),
+                crate::invocation_service::InvocationScope {
+                    principal: "kernel:memory-confirmation".into(),
+                    principal_class: omegon_traits::RuntimePrincipalClass::Internal,
+                    surface: omegon_traits::RuntimeSurface::Internal,
+                    ..Default::default()
+                },
+            )
+            .await;
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        assert_eq!(result.unwrap().details["status"], "active");
     }
 
     #[tokio::test]
@@ -2386,21 +4992,25 @@ mod tests {
             .await
             .unwrap();
         let signals = ContextSignals {
-            user_prompt: "",
+            user_prompt: "ambient fact",
             recent_tools: &[],
             recent_files: &[],
             lifecycle_phase: &LifecyclePhase::Idle,
             turn_number: 1,
-            context_budget_tokens: 100,
+            context_budget_tokens: 200,
         };
         let injection = feature.provide_context(&signals).expect("bounded context");
-        assert!(injection.content.chars().count() <= 400);
+        assert!(injection.content.len() <= 200);
 
         let tiny_signals = ContextSignals {
             turn_number: 2,
             context_budget_tokens: 1,
             ..signals
         };
+        let cleared = feature
+            .provide_context(&tiny_signals)
+            .expect("smaller budget must retire the previous live injection");
+        assert!(cleared.content.is_empty());
         assert!(feature.provide_context(&tiny_signals).is_none());
 
         feature
@@ -2500,8 +5110,8 @@ mod tests {
             turns: 1,
             tool_calls: 2,
             duration_secs: 3.0,
-            initial_prompt: Some("test".into()),
-            outcome_summary: Some("done".into()),
+            initial_prompt: Some("uncommitted-advisory-prompt".into()),
+            outcome_summary: Some("uncommitted-advisory-outcome".into()),
         });
         assert!(start.elapsed() < std::time::Duration::from_millis(100));
         let mut episode_count = 0;
@@ -2520,6 +5130,11 @@ mod tests {
             };
             episode_count = episodes.len();
             if episode_count == 1 {
+                assert!(!episodes[0].narrative.contains("uncommitted-advisory"));
+                assert!(matches!(
+                    episodes[0].formation.as_ref().unwrap().source,
+                    omegon_memory::FormationSource::Unavailable { .. }
+                ));
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -2534,71 +5149,9 @@ mod tests {
     }
 
     #[test]
-    fn session_end_pipeline_has_ordered_independent_phase_budgets() {
-        let source = include_str!("memory.rs");
-        let pipeline = source
-            .split("async fn run_session_end_pipeline")
-            .nth(1)
-            .and_then(|tail| tail.split("impl Feature for MemoryFeature").next())
-            .expect("session-end pipeline source");
-        let episode = pipeline.find("EPISODE_PHASE_TIMEOUT").unwrap();
-        let extraction = pipeline.find("EXTRACTION_PHASE_TIMEOUT").unwrap();
-        let fact_write = pipeline.find("FACT_WRITE_PHASE_TIMEOUT").unwrap();
-        let embedding = pipeline.find("EMBEDDING_PHASE_TIMEOUT").unwrap();
-        let vault = pipeline.find("VAULT_PHASE_TIMEOUT").unwrap();
-        let vault_request = pipeline
-            .find("MemoryRequestV1::VaultSessionEnd")
-            .expect("vault session-end request");
-
-        assert!(episode < extraction);
-        assert!(extraction < fact_write);
-        assert!(fact_write < embedding);
-        assert!(embedding < vault);
-        assert!(vault < vault_request);
-        assert!(pipeline.contains("embeddings.abort_all()"));
-        assert!(pipeline.contains("vault_cancellation.cancel()"));
-        assert!(!pipeline.contains("Duration::from_secs(75)"));
-    }
-
-    #[test]
     fn feature_retains_only_managed_binding_and_mind() {
         let feature = MemoryFeature::new(Default::default(), "test".into());
         assert_eq!(feature.mind(), "test");
         assert!(!feature.memory_binding.available());
-    }
-
-    #[test]
-    fn parse_extracted_facts_plain_lines() {
-        let text = "Wilson prefers terse responses.\nThe project uses Rust with tokio async runtime.\nShort.";
-        let facts = parse_extracted_facts(text);
-        assert_eq!(facts.len(), 2);
-        assert_eq!(facts[0], "Wilson prefers terse responses.");
-        assert_eq!(facts[1], "The project uses Rust with tokio async runtime.");
-    }
-
-    #[test]
-    fn parse_extracted_facts_strips_bullets_and_numbers() {
-        let text = "1. The API key is stored in the vault.\n2. Deployments happen on Fridays.\n- CI runs on every push.\n* The database is PostgreSQL.";
-        let facts = parse_extracted_facts(text);
-        assert_eq!(facts.len(), 4);
-        assert_eq!(facts[0], "The API key is stored in the vault.");
-        assert_eq!(facts[1], "Deployments happen on Fridays.");
-        assert_eq!(facts[2], "CI runs on every push.");
-        assert_eq!(facts[3], "The database is PostgreSQL.");
-    }
-
-    #[test]
-    fn parse_extracted_facts_none_response() {
-        assert!(parse_extracted_facts("NONE").is_empty());
-        assert!(parse_extracted_facts("none").is_empty());
-        assert!(parse_extracted_facts("  NONE  ").is_empty());
-        assert!(parse_extracted_facts("").is_empty());
-    }
-
-    #[test]
-    fn parse_extracted_facts_filters_short_lines() {
-        let text = "Good fact that meets the minimum length.\nToo short\n\nAnother valid fact for the memory system.";
-        let facts = parse_extracted_facts(text);
-        assert_eq!(facts.len(), 2);
     }
 }

@@ -16,6 +16,23 @@ pub struct LocalEmbeddingService {
     session: Arc<Mutex<ort::session::Session>>,
     tokenizer: Arc<tokenizers::Tokenizer>,
     model_name: String,
+    revision: String,
+}
+
+/// The async caller owns this guard; the blocking worker owns cloned handles.
+/// Dropping a timed-out request signals both queued and in-flight native work.
+struct InferenceCancellation {
+    options: Arc<ort::session::RunOptions>,
+    cancelled: tokio_util::sync::CancellationToken,
+}
+
+impl Drop for InferenceCancellation {
+    fn drop(&mut self) {
+        self.cancelled.cancel();
+        if self.options.terminate().is_err() {
+            tracing::warn!("local embedding termination request failed");
+        }
+    }
 }
 
 impl LocalEmbeddingService {
@@ -30,20 +47,27 @@ impl LocalEmbeddingService {
             )));
         }
 
+        // Load exactly the bytes we identify. In-memory ONNX loading does not
+        // implicitly resolve untracked external-weight files beside the model.
+        let model_bytes = read_artifact(&model_path, 512 * 1024 * 1024)?;
+        let tokenizer_bytes = read_artifact(&tokenizer_path, 16 * 1024 * 1024)?;
+        let revision = artifact_revision(&model_bytes, &tokenizer_bytes);
+
         let session = ort::session::Session::builder()
             .map_err(|e| EmbedError::Unavailable(format!("session builder: {e}")))?
             .with_intra_threads(1)
             .map_err(|e| EmbedError::Unavailable(format!("set threads: {e}")))?
-            .commit_from_file(&model_path)
+            .commit_from_memory(&model_bytes)
             .map_err(|e| EmbedError::Unavailable(format!("failed to load ONNX model: {e}")))?;
 
-        let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path)
+        let tokenizer = tokenizers::Tokenizer::from_bytes(&tokenizer_bytes)
             .map_err(|e| EmbedError::Unavailable(format!("failed to load tokenizer: {e}")))?;
 
         Ok(Self {
             session: Arc::new(Mutex::new(session)),
             tokenizer: Arc::new(tokenizer),
             model_name: model_name.to_string(),
+            revision,
         })
     }
 
@@ -54,11 +78,25 @@ impl LocalEmbeddingService {
         Self::load(&model_dir, &model_name)
     }
 
-    fn embed_sync(&self, text: &str) -> Result<Vec<f32>, EmbedError> {
+    fn embed_sync(
+        &self,
+        text: &str,
+        options: &ort::session::RunOptions,
+        cancelled: &tokio_util::sync::CancellationToken,
+    ) -> Result<Vec<f32>, EmbedError> {
+        let check_cancelled = || {
+            if cancelled.is_cancelled() {
+                Err(EmbedError::Unavailable("local embedding cancelled".into()))
+            } else {
+                Ok(())
+            }
+        };
+        check_cancelled()?;
         let encoding = self
             .tokenizer
             .encode(text, true)
             .map_err(|e| EmbedError::RequestFailed(format!("tokenization failed: {e}")))?;
+        check_cancelled()?;
 
         let input_ids: Vec<i64> = encoding.get_ids().iter().map(|&id| id as i64).collect();
         let attention_mask: Vec<i64> = encoding
@@ -87,20 +125,29 @@ impl LocalEmbeddingService {
             .session
             .lock()
             .map_err(|e| EmbedError::RequestFailed(format!("session lock: {e}")))?;
+        check_cancelled()?;
         let outputs = session
-            .run(ort::inputs![ids_tensor, mask_tensor, type_tensor])
+            .run_with_options(ort::inputs![ids_tensor, mask_tensor, type_tensor], options)
             .map_err(|e| EmbedError::RequestFailed(format!("inference failed: {e}")))?;
+
+        if outputs.len() == 0 {
+            return Err(EmbedError::RequestFailed(
+                "embedding model returned no output".into(),
+            ));
+        }
 
         let output_view = outputs[0]
             .try_extract_array::<f32>()
             .map_err(|e| EmbedError::RequestFailed(format!("output extraction: {e}")))?;
 
         let shape = output_view.shape();
+        validate_output_shape(shape, seq_len)?;
         let hidden_size = shape.last().copied().unwrap_or(DEFAULT_DIMS);
         let mut pooled = vec![0.0f32; hidden_size];
         let mut mask_sum = 0.0f32;
 
         for (tok_idx, &mask_val) in attention_mask.iter().enumerate() {
+            check_cancelled()?;
             let mask_f = mask_val as f32;
             mask_sum += mask_f;
             for dim in 0..hidden_size {
@@ -128,14 +175,23 @@ impl LocalEmbeddingService {
 #[async_trait]
 impl EmbeddingService for LocalEmbeddingService {
     async fn embed(&self, text: &str) -> Result<Vec<f32>, EmbedError> {
+        let options = Arc::new(ort::session::RunOptions::new().map_err(|_| {
+            EmbedError::Unavailable("local embedding run options unavailable".into())
+        })?);
+        let cancelled = tokio_util::sync::CancellationToken::new();
+        let _cancel_on_drop = InferenceCancellation {
+            options: options.clone(),
+            cancelled: cancelled.clone(),
+        };
         let svc = LocalEmbeddingService {
             session: self.session.clone(),
             tokenizer: self.tokenizer.clone(),
             model_name: self.model_name.clone(),
+            revision: self.revision.clone(),
         };
         let text = text.to_string();
 
-        tokio::task::spawn_blocking(move || svc.embed_sync(&text))
+        tokio::task::spawn_blocking(move || svc.embed_sync(&text, &options, &cancelled))
             .await
             .map_err(|e| EmbedError::RequestFailed(format!("spawn_blocking failed: {e}")))?
     }
@@ -143,18 +199,90 @@ impl EmbeddingService for LocalEmbeddingService {
     fn model_name(&self) -> &str {
         &self.model_name
     }
+
+    async fn embed_identified(
+        &self,
+        text: &str,
+    ) -> Result<omegon_memory::IdentifiedEmbedding, EmbedError> {
+        if text.len() > 65_536 {
+            return Err(EmbedError::RequestFailed(
+                "embedding input exceeds byte budget".into(),
+            ));
+        }
+        let values = self.embed(text).await?;
+        let result = omegon_memory::IdentifiedEmbedding {
+            space: omegon_memory::EmbeddingSpace {
+                model: format!("onnx:{}", self.model_name),
+                revision: self.revision.clone(),
+                preprocessing: "onnx/raw-tokenizer-mean-mask-l2-v1".into(),
+                dimensions: values.len() as u32,
+            },
+            values,
+        };
+        result
+            .validate()
+            .map_err(|_| EmbedError::RequestFailed("invalid identified embedding".into()))?;
+        Ok(result)
+    }
+}
+
+fn read_artifact(path: &Path, limit: u64) -> Result<Vec<u8>, EmbedError> {
+    use std::io::Read;
+    let file =
+        std::fs::File::open(path).map_err(|error| EmbedError::Unavailable(error.to_string()))?;
+    if file
+        .metadata()
+        .map_err(|error| EmbedError::Unavailable(error.to_string()))?
+        .len()
+        > limit
+    {
+        return Err(EmbedError::Unavailable(
+            "embedding artifact exceeds byte budget".into(),
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.take(limit + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| EmbedError::Unavailable(error.to_string()))?;
+    if bytes.len() as u64 > limit {
+        return Err(EmbedError::Unavailable(
+            "embedding artifact exceeds byte budget".into(),
+        ));
+    }
+    Ok(bytes)
+}
+
+fn artifact_revision(model: &[u8], tokenizer: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut combined = Sha256::new();
+    combined.update(Sha256::digest(model));
+    combined.update(Sha256::digest(tokenizer));
+    format!("sha256:{:x}", combined.finalize())
+}
+
+fn validate_output_shape(shape: &[usize], sequence_length: usize) -> Result<(), EmbedError> {
+    if shape.len() != 3
+        || shape[0] != 1
+        || shape[1] != sequence_length
+        || shape[2] == 0
+        || shape[2] > 16_384
+    {
+        return Err(EmbedError::RequestFailed(
+            "embedding model requires a bounded [1, sequence, hidden] output".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn resolve_model_dir(model_name: &str) -> PathBuf {
     if let Ok(dir) = std::env::var("OMEGON_EMBED_MODEL_DIR") {
         return PathBuf::from(dir);
     }
-    let config_dir = dirs::config_dir()
+    dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("omegon")
         .join("models")
-        .join(model_name);
-    config_dir
+        .join(model_name)
 }
 
 /// Check if local embedding models are available without loading them.
@@ -175,6 +303,35 @@ pub fn model_dir_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wave5_local_request_drop_signals_the_blocking_worker() {
+        let options = Arc::new(ort::session::RunOptions::new().unwrap());
+        let worker_cancelled = tokio_util::sync::CancellationToken::new();
+        let guard = InferenceCancellation {
+            options: options.clone(),
+            cancelled: worker_cancelled.clone(),
+        };
+        assert!(!worker_cancelled.is_cancelled());
+        drop(guard);
+        assert!(worker_cancelled.is_cancelled());
+        // The worker's shared native options remain valid after async-owner drop.
+        options.terminate().unwrap();
+    }
+
+    #[test]
+    fn wave4_artifact_identity_covers_model_and_tokenizer_bytes() {
+        let original = artifact_revision(b"model-a", b"tokenizer-a");
+        assert_ne!(original, artifact_revision(b"model-b", b"tokenizer-a"));
+        assert_ne!(original, artifact_revision(b"model-a", b"tokenizer-b"));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("artifact");
+        std::fs::write(&path, b"oversized").unwrap();
+        assert!(read_artifact(&path, 4).is_err());
+        assert!(validate_output_shape(&[1, 3, 384], 3).is_ok());
+        assert!(validate_output_shape(&[1, 384], 3).is_err());
+        assert!(validate_output_shape(&[1, 2, 384], 3).is_err());
+    }
 
     #[test]
     fn resolve_model_dir_uses_config() {

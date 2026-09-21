@@ -6482,15 +6482,30 @@ impl SessionAuthorityStore {
     }
 
     pub(crate) fn validate_state_content(&self, state: &SessionAuthorityState) -> Result<()> {
+        self.validate_state_content_with(state, &mut |reference, projection| {
+            self.read_content(reference, projection)
+        })
+    }
+
+    pub(crate) fn validate_state_content_with(
+        &self,
+        state: &SessionAuthorityState,
+        read: &mut dyn FnMut(&ContentRef, ProjectionClass) -> Result<Vec<u8>>,
+    ) -> Result<()> {
         for source in state.materialized_context_sources.values() {
-            self.validate_content_ref(&source.content_ref, ProjectionClass::Default)?;
+            read(&source.content_ref, ProjectionClass::Default)?;
         }
         for request in state.model_requests.values() {
-            self.validate_request_content(request.preparation())?;
+            for item in &request.preparation().context_items {
+                read(&item.content_ref, ProjectionClass::Default)?;
+            }
+            for schema in &request.preparation().schema_set.schemas {
+                read(&schema.schema_content_ref, ProjectionClass::Default)?;
+            }
         }
         for chunks in state.assistant_chunks.values() {
             for chunk in chunks {
-                let bytes = self.read_content(&chunk.content_ref, ProjectionClass::Default)?;
+                let bytes = read(&chunk.content_ref, ProjectionClass::Default)?;
                 if std::str::from_utf8(&bytes).is_err() {
                     return Err(AuthorityError::Invalid(
                         "assistant content must be valid UTF-8".into(),
@@ -6499,33 +6514,49 @@ impl SessionAuthorityStore {
             }
         }
         for commit in state.assistant_messages.values() {
-            self.validate_message_content(commit)?;
+            for manifest in &commit.content {
+                let mut hasher = Sha256::new();
+                for reference in &manifest.chunk_refs {
+                    let bytes = read(reference, ProjectionClass::Default)?;
+                    if std::str::from_utf8(&bytes).is_err() {
+                        return Err(AuthorityError::Invalid(
+                            "assistant content must be valid UTF-8".into(),
+                        ));
+                    }
+                    hasher.update(bytes);
+                }
+                if manifest.content_digest != format!("{:x}", hasher.finalize()) {
+                    return Err(AuthorityError::Invalid(
+                        "assistant content digest does not match stored chunk bytes".into(),
+                    ));
+                }
+            }
         }
         for continuity in state.provider_continuity.values() {
-            self.validate_content_ref(
+            read(
                 &continuity.content_ref,
                 ProjectionClass::RestrictedContinuity,
             )?;
         }
         for call in state.tool_calls.values() {
-            self.validate_content_ref(&call.arguments_ref, ProjectionClass::Default)?;
+            read(&call.arguments_ref, ProjectionClass::Default)?;
         }
         for result in state.tool_results.values() {
-            self.validate_content_ref(&result.content_ref, ProjectionClass::Default)?;
+            read(&result.content_ref, ProjectionClass::Default)?;
         }
         for start in state.compaction_starts.values() {
             for item in start.input_items.iter().chain(&start.retained_items) {
-                self.validate_content_ref(&item.content_ref, ProjectionClass::Default)?;
+                read(&item.content_ref, ProjectionClass::Default)?;
             }
         }
         for request in state.compaction_requests.values() {
-            self.validate_content_ref(
+            read(
                 &request.preparation().prompt_template.content_ref,
                 ProjectionClass::Default,
             )?;
         }
         for summary in state.compaction_summaries.values() {
-            let bytes = self.read_content(&summary.summary_ref, ProjectionClass::Default)?;
+            let bytes = read(&summary.summary_ref, ProjectionClass::Default)?;
             if bytes.is_empty()
                 || std::str::from_utf8(&bytes).is_err()
                 || format!("{:x}", Sha256::digest(&bytes)) != summary.summary_digest
@@ -6535,7 +6566,7 @@ impl SessionAuthorityStore {
                 ));
             }
             for item in &summary.replacement_items {
-                self.validate_content_ref(&item.content_ref, ProjectionClass::Default)?;
+                read(&item.content_ref, ProjectionClass::Default)?;
             }
         }
         Ok(())
@@ -6652,6 +6683,79 @@ impl SessionAuthorityStore {
 
     pub(crate) fn read_stable_facts(&self) -> Result<Vec<SessionFact>> {
         read_facts_stable(&self.log_path)
+    }
+
+    pub(crate) fn read_bounded_facts(
+        &self,
+        max_bytes: usize,
+        max_records: usize,
+        max_record_bytes: usize,
+        check: &mut dyn FnMut(usize) -> crate::session_blob_store::Result<()>,
+    ) -> Result<Vec<SessionFact>> {
+        let bytes = crate::session_blob_store::read_bounded_file(&self.log_path, max_bytes, check)?;
+        if bytes.is_empty() || !bytes.ends_with(b"\n") {
+            return Err(AuthorityError::Invalid(
+                "empty or truncated authority stream".into(),
+            ));
+        }
+        let mut facts = Vec::new();
+        for line in bytes[..bytes.len() - 1].split(|byte| *byte == b'\n') {
+            check(0)?;
+            if facts.len() >= max_records
+                || line.is_empty()
+                || line.len() > max_record_bytes.min(MAX_RECORD_BYTES)
+            {
+                return Err(AuthorityError::Invalid(
+                    "authority replay record limit exceeded".into(),
+                ));
+            }
+            facts.push(SessionFact::decode(line)?);
+        }
+        check(0)?;
+        Ok(facts)
+    }
+
+    pub(crate) fn read_bounded_content(
+        &self,
+        reference: &ContentRef,
+        projection: ProjectionClass,
+        max_file_bytes: usize,
+        check: &mut dyn FnMut(usize) -> crate::session_blob_store::Result<()>,
+    ) -> Result<Vec<u8>> {
+        Ok(self
+            .blob_store
+            .read_bounded(reference, projection, max_file_bytes, check)?)
+    }
+
+    pub(crate) fn validate_bounded_attachment(
+        &self,
+        attachment: &AttachmentRef,
+        max_file_bytes: usize,
+        check: &mut dyn FnMut(usize) -> crate::session_blob_store::Result<()>,
+    ) -> Result<()> {
+        let path = PathBuf::from(&attachment.storage_ref);
+        if path.parent() != Some(self.attachment_dir.as_path())
+            || path.file_name().and_then(|name| name.to_str()) != Some(attachment.digest.as_str())
+        {
+            return Err(AuthorityError::Invalid(
+                "authority attachment is outside content-addressed storage".into(),
+            ));
+        }
+        let bytes = crate::session_blob_store::read_bounded_file(&path, max_file_bytes, check)?;
+        let mut digest = Sha256::new();
+        for chunk in bytes.chunks(64 * 1024) {
+            check(0)?;
+            digest.update(chunk);
+        }
+        if bytes.len() as u64 != attachment.byte_length
+            || format!("{:x}", digest.finalize()) != attachment.digest
+        {
+            return Err(AuthorityError::Invalid(
+                "authority attachment content changed".into(),
+            ));
+        }
+        check(0)?;
+        Ok(())
     }
 
     pub(crate) fn append(

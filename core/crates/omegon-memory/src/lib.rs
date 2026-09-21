@@ -18,15 +18,23 @@
 //!         └── MemoryProvider → MemoryBackend::import_jsonl() + render_context()
 //! ```
 
+pub mod applicability;
 pub mod backend;
 pub mod decay;
 pub mod embedding;
+pub mod formation;
 pub mod hash;
+mod indexing;
 pub mod inmemory;
+pub mod inspection;
+pub mod lifecycle;
 pub mod maintenance;
 #[cfg(feature = "agent")]
 pub mod provider;
 pub mod renderer;
+pub mod retrieval;
+pub mod selection;
+pub mod selection_cache;
 pub mod service;
 pub mod sqlite;
 pub mod types;

@@ -3860,34 +3860,20 @@ This agent runs in write mode and can modify files.
         assert_eq!(failed.status, "failed");
     }
 
-    fn write_fake_child(dir: &Path, name: &str, body: &str) -> PathBuf {
-        let path = dir.join(name);
-        let staged = dir.join(format!(".{name}.tmp"));
-        {
-            use std::io::Write;
-            let mut file = std::fs::File::create(&staged).unwrap();
-            file.write_all(body.as_bytes()).unwrap();
-            file.sync_all().unwrap();
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&staged).unwrap().permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&staged, perms).unwrap();
-        }
-        std::fs::rename(staged, &path).unwrap();
-        path
+    fn fake_child(name: &str) -> PathBuf {
+        // Do not write executable fixtures at runtime: a concurrent fork can
+        // retain the writable descriptor until exec, even after we close it.
+        // Linux then rejects executing that inode with ETXTBSY; sync/rename
+        // cannot prevent this. Checked-in scripts have no runtime writers.
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/delegate")
+            .join(name)
     }
 
     #[tokio::test]
     async fn delegate_runner_executes_injected_child_successfully() {
         let temp_dir = TempDir::new().unwrap();
-        let child = write_fake_child(
-            temp_dir.path(),
-            "fake-child-success.sh",
-            "#!/bin/sh\necho delegate-child-ok\n",
-        );
+        let child = fake_child("success.sh");
         let store = Arc::new(DelegateResultStore::new());
         let runner = DelegateRunner::new(temp_dir.path().to_path_buf(), store.clone(), false)
             .with_child_agent_binary(child);
@@ -3914,11 +3900,7 @@ This agent runs in write mode and can modify files.
     #[tokio::test]
     async fn delegate_runner_surfaces_injected_child_failure_context() {
         let temp_dir = TempDir::new().unwrap();
-        let child = write_fake_child(
-            temp_dir.path(),
-            "fake-child-fail.sh",
-            "#!/bin/sh\necho child stderr line >&2\nexit 7\n",
-        );
+        let child = fake_child("failure.sh");
         let store = Arc::new(DelegateResultStore::new());
         let runner = DelegateRunner::new(temp_dir.path().to_path_buf(), store.clone(), false)
             .with_child_agent_binary(child);
@@ -3948,11 +3930,7 @@ This agent runs in write mode and can modify files.
     #[tokio::test]
     async fn delegate_runner_times_out_and_kills_silent_child() {
         let temp_dir = TempDir::new().unwrap();
-        let child = write_fake_child(
-            temp_dir.path(),
-            "fake-child-timeout.sh",
-            "#!/bin/sh\nexec sleep 10\n",
-        );
+        let child = fake_child("timeout.sh");
         let store = Arc::new(DelegateResultStore::new());
         let runner = DelegateRunner::new(temp_dir.path().to_path_buf(), store.clone(), false)
             .with_child_agent_binary(child)
@@ -4030,16 +4008,7 @@ This agent runs in write mode and can modify files.
     async fn delegate_runner_idle_timeout_kills_quiet_child_after_initial_activity() {
         let temp_dir = TempDir::new().unwrap();
         let descendant_pid_path = temp_dir.path().join("descendant.pid");
-        let child = write_fake_child(
-            temp_dir.path(),
-            "fake-child-idle-timeout.sh",
-            "#!/bin/sh
-sleep 10 </dev/null >/dev/null 2>&1 &
-echo $! > descendant.pid
-echo initial activity >&2
-wait
-",
-        );
+        let child = fake_child("idle-timeout.sh");
         let store = Arc::new(DelegateResultStore::new());
         let runner = DelegateRunner::new(temp_dir.path().to_path_buf(), store.clone(), false)
             .with_child_agent_binary(child)

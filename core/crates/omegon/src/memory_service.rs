@@ -44,12 +44,51 @@ pub(crate) const MAX_CONTEXT_PINS: usize = 1_000;
 
 #[derive(Debug, Clone)]
 pub(crate) struct MemoryWorkerConfig {
+    pub memory_token_cap: Option<usize>,
+    pub workspace_root: Option<PathBuf>,
     pub project_memory_root: PathBuf,
     pub project_db_path: PathBuf,
     pub project_jsonl_path: PathBuf,
     pub global_db_path: Option<PathBuf>,
     pub vault: Option<MemoryVaultConfigV1>,
     pub startup_sync_enabled: bool,
+}
+
+/// Host-owned checkout identity and HEAD commit, without invoking Git/jj processes.
+pub(crate) fn applicability_context(
+    root: Option<&std::path::Path>,
+) -> omegon_memory::ApplicabilityContext {
+    let mut context = omegon_memory::ApplicabilityContext::local();
+    if let Some(root) = root
+        .and_then(|root| root.canonicalize().ok())
+        .filter(|root| root.is_dir())
+    {
+        let workspace = crate::workspace::runtime::workspace_id_from_path(&root);
+        if workspace.len() <= 2048
+            && workspace.trim() == workspace
+            && !workspace.chars().any(char::is_control)
+        {
+            context.workspace = Some(workspace);
+        }
+        context.revision = git2::Repository::discover(&root).ok().and_then(|repo| {
+            repo.head()
+                .ok()?
+                .peel_to_commit()
+                .ok()
+                .map(|commit| format!("git:{}", commit.id()))
+        });
+    }
+    context
+}
+
+fn applicable_filter(
+    config: &MemoryWorkerConfig,
+    mut filter: omegon_memory::SearchFilter,
+) -> omegon_memory::backend::Result<omegon_memory::SearchFilter> {
+    if filter.context.is_none() && filter.intent == omegon_memory::SearchIntent::Current {
+        filter.context = Some(applicability_context(config.workspace_root.as_deref()));
+    }
+    filter.resolved()
 }
 
 #[derive(Debug, Clone)]
@@ -189,6 +228,31 @@ pub(crate) enum MemoryToolMutationV1 {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum MemoryRequestV1 {
+    SelectContext {
+        scope: MemoryScopeV1,
+        mind: String,
+        query: String,
+        pins: Vec<String>,
+        host_budget: usize,
+        intent: omegon_memory::MemorySelectionIntent,
+        fetch_limit: usize,
+        #[serde(skip, default)]
+        cancellation: CancellationToken,
+    },
+    GetFactRecord {
+        scope: MemoryScopeV1,
+        mind: String,
+        id: String,
+        #[serde(skip, default)]
+        cancellation: CancellationToken,
+    },
+    GetPendingFact {
+        scope: MemoryScopeV1,
+        mind: String,
+        id: String,
+        #[serde(skip, default)]
+        cancellation: CancellationToken,
+    },
     Status {
         scope: MemoryScopeV1,
         #[serde(skip, default)]
@@ -219,7 +283,13 @@ pub(crate) enum MemoryRequestV1 {
         scope: MemoryScopeV1,
         mind: String,
         query: String,
+        #[serde(default)]
+        filter: omegon_memory::SearchFilter,
         query_vector: Option<Vec<f32>>,
+        #[serde(default)]
+        query_space: Option<omegon_memory::EmbeddingSpace>,
+        #[serde(default)]
+        include_diagnostics: bool,
         limit: usize,
         fetch_limit: usize,
         min_similarity: f32,
@@ -229,6 +299,8 @@ pub(crate) enum MemoryRequestV1 {
     ContextSnapshot {
         scope: MemoryScopeV1,
         mind: String,
+        #[serde(default)]
+        query: Option<String>,
         working_memory: Vec<String>,
         fact_limit: usize,
         episode_limit: usize,
@@ -245,6 +317,8 @@ pub(crate) enum MemoryRequestV1 {
         scope: MemoryScopeV1,
         mind: String,
         query: String,
+        #[serde(default)]
+        filter: omegon_memory::SearchFilter,
         limit: usize,
         #[serde(skip, default)]
         cancellation: CancellationToken,
@@ -253,6 +327,8 @@ pub(crate) enum MemoryRequestV1 {
         scope: MemoryScopeV1,
         mind: String,
         vector: Vec<f32>,
+        #[serde(default)]
+        space: Option<omegon_memory::EmbeddingSpace>,
         limit: usize,
         min_similarity: f32,
         #[serde(skip, default)]
@@ -261,6 +337,19 @@ pub(crate) enum MemoryRequestV1 {
     EmbeddingMetadata {
         scope: MemoryScopeV1,
         mind: String,
+        #[serde(skip, default)]
+        cancellation: CancellationToken,
+    },
+    EmbeddingIndexState {
+        scope: MemoryScopeV1,
+        fact_id: String,
+        space: omegon_memory::EmbeddingSpace,
+        #[serde(skip, default)]
+        cancellation: CancellationToken,
+    },
+    EmbeddingIndexingRecord {
+        scope: MemoryScopeV1,
+        fact_id: String,
         #[serde(skip, default)]
         cancellation: CancellationToken,
     },
@@ -275,6 +364,20 @@ pub(crate) enum MemoryRequestV1 {
         scope: MemoryScopeV1,
         mind: String,
         limit: usize,
+        #[serde(skip, default)]
+        cancellation: CancellationToken,
+    },
+    PendingFormations {
+        scope: MemoryScopeV1,
+        mind: String,
+        model: String,
+        limit: usize,
+        #[serde(skip, default)]
+        cancellation: CancellationToken,
+    },
+    FormationCursor {
+        scope: MemoryScopeV1,
+        key: omegon_memory::FormationCaptureKey,
         #[serde(skip, default)]
         cancellation: CancellationToken,
     },
@@ -371,6 +474,9 @@ impl MemoryRequestV1 {
             Self::Status { cancellation, .. }
             | Self::Stats { cancellation, .. }
             | Self::GetFact { cancellation, .. }
+            | Self::SelectContext { cancellation, .. }
+            | Self::GetFactRecord { cancellation, .. }
+            | Self::GetPendingFact { cancellation, .. }
             | Self::ListFactsPage { cancellation, .. }
             | Self::HybridSearch { cancellation, .. }
             | Self::ContextSnapshot { cancellation, .. }
@@ -378,8 +484,12 @@ impl MemoryRequestV1 {
             | Self::FtsSearch { cancellation, .. }
             | Self::VectorSearch { cancellation, .. }
             | Self::EmbeddingMetadata { cancellation, .. }
+            | Self::EmbeddingIndexState { cancellation, .. }
+            | Self::EmbeddingIndexingRecord { cancellation, .. }
             | Self::GetEdges { cancellation, .. }
             | Self::ListEpisodes { cancellation, .. }
+            | Self::PendingFormations { cancellation, .. }
+            | Self::FormationCursor { cancellation, .. }
             | Self::SearchEpisodes { cancellation, .. }
             | Self::ApplyMutation { cancellation, .. }
             | Self::ApplyToolMutation { cancellation, .. }
@@ -406,11 +516,16 @@ pub(crate) enum MemoryPayloadV1 {
     Fact(Box<Option<Fact>>),
     FactPage(FactPageV1),
     ContextSnapshot(ContextSnapshotV1),
+    Selection(omegon_memory::MemorySelection),
     ManagedStatus(ManagedMemoryStatusV1),
     ScoredFacts(Vec<ScoredFact>),
     EmbeddingMetadata(Option<EmbeddingMetadata>),
+    RecallReport(omegon_memory::VectorSearchReport),
+    EmbeddingIndexState(omegon_memory::EmbeddingIndexState),
+    EmbeddingIndexingRecord(Option<omegon_memory::EmbeddingIndexingRecord>),
     Edges(Vec<Edge>),
     Episodes(Vec<Episode>),
+    FormationCursor(Option<omegon_memory::FormationCursor>),
     Mutation(MemoryMutationOutcome),
     Jsonl(JsonlSyncReportV1),
     Vault(VaultSyncReportV1),
@@ -425,6 +540,8 @@ pub(crate) struct FactPageV1 {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ContextSnapshotV1 {
+    #[serde(default)]
+    pub context: omegon_memory::ApplicabilityContext,
     pub facts: Vec<Fact>,
     pub episodes: Vec<Episode>,
     pub working_memory: Vec<Fact>,
@@ -453,6 +570,8 @@ pub(crate) enum ManagedMemoryIndexStateV1 {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ManagedMemoryStatusV1 {
+    #[serde(default)]
+    pub indexing: omegon_memory::EmbeddingIndexingSummary,
     pub total_facts: usize,
     pub active_facts: usize,
     pub project_facts: usize,
@@ -555,6 +674,7 @@ pub(crate) enum MemoryServiceErrorCodeV1 {
     StoreUnavailable,
     FactNotFound,
     EmbeddingDimensionMismatch,
+    EmbeddingIdentityRequired,
     NoEmbeddings,
     OperationConflict,
     FactVersionConflict,
@@ -600,6 +720,9 @@ impl MemoryServiceErrorV1 {
                 MemoryServiceErrorCodeV1::EmbeddingDimensionMismatch
             }
             MemoryError::NoEmbeddings => MemoryServiceErrorCodeV1::NoEmbeddings,
+            MemoryError::EmbeddingIdentityRequired => {
+                MemoryServiceErrorCodeV1::EmbeddingIdentityRequired
+            }
             MemoryError::OperationConflict(_) => MemoryServiceErrorCodeV1::OperationConflict,
             MemoryError::FactVersionConflict { .. } => {
                 MemoryServiceErrorCodeV1::FactVersionConflict
@@ -994,6 +1117,7 @@ fn run_worker(
         }
     }
     let _ = startup.send(Ok(()));
+    let mut selection_cache = omegon_memory::selection_cache::MemorySelectionCache::default();
 
     while let Some(command) = receiver.blocking_recv() {
         if state.stopping.load(Ordering::Acquire) {
@@ -1012,6 +1136,7 @@ fn run_worker(
             &project,
             global.as_ref(),
             &config,
+            &mut selection_cache,
             command.request,
             &|| {
                 caller.is_cancelled()
@@ -1314,6 +1439,7 @@ fn execute_request(
     project: &SqliteBackend,
     global: Option<&SqliteBackend>,
     config: &MemoryWorkerConfig,
+    selection_cache: &mut omegon_memory::selection_cache::MemorySelectionCache,
     request: MemoryRequestV1,
     cancelled: &(dyn Fn() -> bool + Send + Sync),
 ) -> Result<MemoryResponseV1, MemoryServiceErrorV1> {
@@ -1490,6 +1616,14 @@ fn execute_request(
                     .get_fact(&id)
                     .await
                     .map(|fact| MemoryPayloadV1::Fact(Box::new(fact))),
+                MemoryRequestV1::GetFactRecord { mind, id, .. } => backend
+                    .get_fact_record(&mind, &id)
+                    .await
+                    .map(|fact| MemoryPayloadV1::Fact(Box::new(fact))),
+                MemoryRequestV1::GetPendingFact { mind, id, .. } => backend
+                    .get_pending_fact(&mind, &id)
+                    .await
+                    .map(|fact| MemoryPayloadV1::Fact(Box::new(fact))),
                 MemoryRequestV1::ListFactsPage {
                     mind,
                     filter,
@@ -1509,38 +1643,53 @@ fn execute_request(
                 MemoryRequestV1::HybridSearch {
                     mind,
                     query,
+                    filter,
                     query_vector,
+                    query_space,
+                    include_diagnostics,
                     limit,
                     fetch_limit,
                     min_similarity,
                     ..
                 } => {
-                    let fts = backend.fts_search(&mind, &query, fetch_limit).await?;
+                    let filter = applicable_filter(config, filter)?;
+                    let fts = backend
+                        .fts_search_filtered(&mind, &query, fetch_limit, &filter)
+                        .await?;
                     if cancelled() {
                         return Err(MemoryError::Cancelled);
                     }
-                    let vector = if let Some(vector) = query_vector {
+                    let mut diagnostics = omegon_memory::VectorDiagnostics::default();
+                    let vector = if let (Some(vector), Some(space)) = (query_vector, query_space) {
                         if cancelled() {
                             return Err(MemoryError::Cancelled);
                         }
                         match backend
-                            .vector_search_cancellable(
+                            .search_identified(
                                 &mind,
-                                &vector,
+                                &omegon_memory::IdentifiedEmbedding {
+                                    space,
+                                    values: vector,
+                                },
                                 fetch_limit,
                                 min_similarity,
+                                &filter,
                                 cancelled,
                             )
                             .await
                         {
-                            Ok(results) => results,
-                            Err(MemoryError::NoEmbeddings) => Vec::new(),
-                            Err(error) => {
-                                tracing::debug!(%error, "vector search unavailable, FTS-only");
+                            Ok(report) => {
+                                diagnostics = report.diagnostics;
+                                report.results
+                            }
+                            Err(MemoryError::EmbeddingIdentityRequired) => {
+                                diagnostics.identity_unavailable = true;
                                 Vec::new()
                             }
+                            Err(error) => return Err(error),
                         }
                     } else {
+                        diagnostics.identity_unavailable = true;
                         Vec::new()
                     };
                     if cancelled() {
@@ -1551,46 +1700,108 @@ fn execute_request(
                     } else {
                         omegon_memory::rrf_merge(&fts, &vector, 60.0, fetch_limit)
                     };
-                    let results = omegon_memory::service::expand_edges_cancellable(
+                    let results = omegon_memory::service::expand_edges_filtered_checked(
                         backend,
                         &mind,
                         results,
                         fetch_limit,
+                        &filter,
                         cancelled,
                     )
-                    .await
-                    .ok_or(MemoryError::Cancelled)?
+                    .await?
                     .into_iter()
                     .take(limit)
                     .collect();
-                    Ok(MemoryPayloadV1::ScoredFacts(results))
+                    if include_diagnostics {
+                        Ok(MemoryPayloadV1::RecallReport(
+                            omegon_memory::VectorSearchReport {
+                                results,
+                                diagnostics,
+                            },
+                        ))
+                    } else {
+                        Ok(MemoryPayloadV1::ScoredFacts(results))
+                    }
                 }
                 MemoryRequestV1::ContextSnapshot {
                     mind,
+                    query,
                     working_memory,
                     fact_limit,
                     episode_limit,
                     ..
                 } => {
-                    let mut facts = backend.list_facts(&mind, FactFilter::default()).await?;
-                    facts.truncate(fact_limit);
-                    let episodes = backend.list_episodes(&mind, episode_limit).await?;
+                    let filter = applicable_filter(config, Default::default())?;
+                    let facts = omegon_memory::service::context_facts_filtered(
+                        backend,
+                        &mind,
+                        query.as_deref(),
+                        fact_limit,
+                        &filter,
+                    )
+                    .await?;
+                    let episodes = if let Some(query) =
+                        query.as_deref().filter(|query| !query.trim().is_empty())
+                    {
+                        backend.search_episodes(&mind, query, episode_limit).await?
+                    } else {
+                        backend.list_episodes(&mind, episode_limit).await?
+                    };
                     let mut pins = Vec::with_capacity(working_memory.len());
                     for id in working_memory {
-                        if let Some(fact) = backend.get_fact(&id).await? {
+                        if let Some(fact) = backend.get_fact(&id).await?
+                            && fact.mind == mind
+                            && filter.score(1.0, &fact).is_some()
+                        {
                             pins.push(fact);
                         }
                     }
                     Ok(MemoryPayloadV1::ContextSnapshot(ContextSnapshotV1 {
+                        context: filter.context.expect("resolved context"),
                         facts,
                         episodes,
                         working_memory: pins,
                     }))
                 }
-                MemoryRequestV1::ManagedStatus { .. } => {
+                MemoryRequestV1::SelectContext {
+                    mind,
+                    query,
+                    pins,
+                    host_budget,
+                    intent,
+                    fetch_limit,
+                    ..
+                } => {
+                    let context = applicability_context(config.workspace_root.as_deref());
+                    let memory_cap = config
+                        .memory_token_cap
+                        .unwrap_or(omegon_memory::selection::DEFAULT_MEMORY_TOKEN_CAP)
+                        .min(omegon_memory::selection::MAX_MEMORY_TOKEN_CAP);
+                    let selection = selection_cache
+                        .select(
+                            backend,
+                            &omegon_memory::MemorySelectionRequest {
+                                mind,
+                                query,
+                                pins,
+                                context,
+                                intent,
+                                host_budget,
+                                memory_cap,
+                                fetch_limit,
+                            },
+                            &omegon_memory::selection::ConservativeUtf8Counter,
+                            &omegon_memory::MarkdownRenderer,
+                        )
+                        .await?;
+                    Ok(MemoryPayloadV1::Selection(selection))
+                }
+                MemoryRequestV1::ManagedStatus { mind, .. } => {
                     let stats = backend.inventory_stats().await?;
+                    let indexing = backend.embedding_indexing_summary(&mind).await?;
                     let (authority, index_state) = managed_status_metadata(config);
                     Ok(MemoryPayloadV1::ManagedStatus(ManagedMemoryStatusV1 {
+                        indexing,
                         total_facts: stats.total_facts,
                         active_facts: stats.active_facts,
                         project_facts: stats.project_facts,
@@ -1604,21 +1815,51 @@ fn execute_request(
                     }))
                 }
                 MemoryRequestV1::FtsSearch {
-                    mind, query, limit, ..
-                } => backend
-                    .fts_search(&mind, &query, limit)
-                    .await
-                    .map(MemoryPayloadV1::ScoredFacts),
+                    mind,
+                    query,
+                    limit,
+                    filter,
+                    ..
+                } => {
+                    let filter = applicable_filter(config, filter)?;
+                    backend
+                        .fts_search_filtered(&mind, &query, limit, &filter)
+                        .await
+                        .map(MemoryPayloadV1::ScoredFacts)
+                }
                 MemoryRequestV1::VectorSearch {
                     mind,
                     vector,
+                    space,
                     limit,
                     min_similarity,
                     ..
-                } => backend
-                    .vector_search(&mind, &vector, limit, min_similarity)
+                } => {
+                    let space = space.ok_or(MemoryError::EmbeddingIdentityRequired)?;
+                    let filter = applicable_filter(config, Default::default())?;
+                    backend
+                        .search_identified(
+                            &mind,
+                            &omegon_memory::IdentifiedEmbedding {
+                                space,
+                                values: vector,
+                            },
+                            limit,
+                            min_similarity,
+                            &filter,
+                            cancelled,
+                        )
+                        .await
+                        .map(MemoryPayloadV1::RecallReport)
+                }
+                MemoryRequestV1::EmbeddingIndexState { fact_id, space, .. } => backend
+                    .embedding_index_state(&fact_id, &space)
                     .await
-                    .map(MemoryPayloadV1::ScoredFacts),
+                    .map(MemoryPayloadV1::EmbeddingIndexState),
+                MemoryRequestV1::EmbeddingIndexingRecord { fact_id, .. } => backend
+                    .embedding_indexing_record(&fact_id)
+                    .await
+                    .map(MemoryPayloadV1::EmbeddingIndexingRecord),
                 MemoryRequestV1::EmbeddingMetadata { mind, .. } => backend
                     .embedding_metadata(&mind)
                     .await
@@ -1631,6 +1872,16 @@ fn execute_request(
                     .list_episodes(&mind, limit)
                     .await
                     .map(MemoryPayloadV1::Episodes),
+                MemoryRequestV1::PendingFormations {
+                    mind, model, limit, ..
+                } => backend
+                    .pending_formations(&mind, &model, limit)
+                    .await
+                    .map(MemoryPayloadV1::Episodes),
+                MemoryRequestV1::FormationCursor { key, .. } => backend
+                    .formation_cursor(&key)
+                    .await
+                    .map(MemoryPayloadV1::FormationCursor),
                 MemoryRequestV1::SearchEpisodes {
                     mind, query, limit, ..
                 } => backend
@@ -1775,6 +2026,7 @@ fn validate_request(request: &MemoryRequestV1) -> Result<(), MemoryServiceErrorV
         | MemoryRequestV1::VectorSearch { limit, .. }
         | MemoryRequestV1::ListFactsPage { limit, .. }
         | MemoryRequestV1::ListEpisodes { limit, .. }
+        | MemoryRequestV1::PendingFormations { limit, .. }
         | MemoryRequestV1::SearchEpisodes { limit, .. } => Some(*limit),
         _ => None,
     };
@@ -1852,6 +2104,9 @@ fn request_scope(request: &MemoryRequestV1) -> MemoryScopeV1 {
         MemoryRequestV1::Status { scope, .. }
         | MemoryRequestV1::Stats { scope, .. }
         | MemoryRequestV1::GetFact { scope, .. }
+        | MemoryRequestV1::SelectContext { scope, .. }
+        | MemoryRequestV1::GetFactRecord { scope, .. }
+        | MemoryRequestV1::GetPendingFact { scope, .. }
         | MemoryRequestV1::ListFactsPage { scope, .. }
         | MemoryRequestV1::HybridSearch { scope, .. }
         | MemoryRequestV1::ContextSnapshot { scope, .. }
@@ -1859,8 +2114,12 @@ fn request_scope(request: &MemoryRequestV1) -> MemoryScopeV1 {
         | MemoryRequestV1::FtsSearch { scope, .. }
         | MemoryRequestV1::VectorSearch { scope, .. }
         | MemoryRequestV1::EmbeddingMetadata { scope, .. }
+        | MemoryRequestV1::EmbeddingIndexState { scope, .. }
+        | MemoryRequestV1::EmbeddingIndexingRecord { scope, .. }
         | MemoryRequestV1::GetEdges { scope, .. }
         | MemoryRequestV1::ListEpisodes { scope, .. }
+        | MemoryRequestV1::PendingFormations { scope, .. }
+        | MemoryRequestV1::FormationCursor { scope, .. }
         | MemoryRequestV1::SearchEpisodes { scope, .. }
         | MemoryRequestV1::ApplyMutation { scope, .. }
         | MemoryRequestV1::ApplyToolMutation { scope, .. }
@@ -1987,9 +2246,49 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn token_selection_intersects_profile_cap_and_host_allocation() {
+        for (cap, host, expected) in [
+            (0, 900, 0),
+            (64, 900, 64),
+            (1024, 200, 200),
+            (100_000, 100_000, 8192),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut config = worker_config(directory.path().join("facts.db"), None);
+            config.memory_token_cap = Some(cap);
+            let (mut bus, handle) = managed_service_with_config(config).await;
+            let response = handle
+                .invoke(MemoryRequestV1::SelectContext {
+                    scope: MemoryScopeV1::Project,
+                    mind: MIND.into(),
+                    query: "fixture task".into(),
+                    pins: vec![],
+                    host_budget: host,
+                    intent: omegon_memory::MemorySelectionIntent::Ambient,
+                    fetch_limit: 10,
+                    cancellation: CancellationToken::new(),
+                })
+                .await
+                .unwrap();
+            assert!(
+                bus.shutdown_managed_services()
+                    .await
+                    .all_resources_settled()
+            );
+            let MemoryPayloadV1::Selection(selected) = response.payload else {
+                panic!("selection");
+            };
+            assert_eq!(selected.report.budget, expected);
+            assert_eq!(selected.report.accounted_tokens, 0);
+        }
+    }
+
     fn worker_config(project: PathBuf, global: Option<PathBuf>) -> MemoryWorkerConfig {
         let project_memory_root = project.parent().unwrap().to_path_buf();
         MemoryWorkerConfig {
+            workspace_root: Some(project_memory_root.clone()),
+            memory_token_cap: None,
             project_memory_root,
             project_jsonl_path: project.parent().unwrap().join("facts.jsonl"),
             project_db_path: project,
@@ -2001,6 +2300,9 @@ mod tests {
 
     fn jsonl_fact(id: &str, content: &str) -> String {
         serde_json::to_string(&JsonlRecord::Fact(JsonlFact {
+            applicability: None,
+            lifecycle_inference: None,
+            operational: None,
             id: id.into(),
             mind: MIND.into(),
             content: content.into(),
@@ -2138,6 +2440,12 @@ mod tests {
         else {
             panic!("expected second fact");
         };
+        let space = omegon_memory::EmbeddingSpace {
+            model: "test-model".into(),
+            revision: "fixture-v1".into(),
+            preprocessing: "raw-v1".into(),
+            dimensions: 2,
+        };
         for (id, version, vector) in [
             (first_id.clone(), first_version, vec![1.0, 0.0]),
             (second_id.clone(), second_version, vec![0.8, 0.2]),
@@ -2146,13 +2454,15 @@ mod tests {
                 .invoke(request(
                     MemoryScopeV1::Project,
                     &format!("embedding-{id}"),
-                    MemoryMutation::StoreEmbedding {
+                    MemoryMutation::StoreIdentifiedEmbedding {
                         fact: FactPrecondition {
                             id,
                             expected_version: version,
                         },
-                        model_name: "test-model".into(),
-                        embedding: vector,
+                        embedding: omegon_memory::IdentifiedEmbedding {
+                            space: space.clone(),
+                            values: vector,
+                        },
                     },
                 ))
                 .await
@@ -2181,6 +2491,9 @@ mod tests {
                 mind: MIND.into(),
                 query: "OAuth authentication".into(),
                 query_vector: Some(vec![1.0, 0.0]),
+                query_space: Some(space),
+                include_diagnostics: true,
+                filter: Default::default(),
                 limit: 2,
                 fetch_limit: 4,
                 min_similarity: 0.1,
@@ -2189,8 +2502,8 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            matches!(hybrid.payload, MemoryPayloadV1::ScoredFacts(results)
-            if results.len() == 2 && results[0].fact.id == first_id)
+            matches!(hybrid.payload, MemoryPayloadV1::RecallReport(report)
+            if report.results.len() == 2 && report.results[0].fact.id == first_id && report.diagnostics.compatible == 2)
         );
 
         let fts_only = handle
@@ -2199,6 +2512,9 @@ mod tests {
                 mind: MIND.into(),
                 query: "OAuth authentication".into(),
                 query_vector: None,
+                query_space: None,
+                include_diagnostics: false,
+                filter: Default::default(),
                 limit: 1,
                 fetch_limit: 2,
                 min_similarity: 0.1,
@@ -2214,6 +2530,7 @@ mod tests {
         let context = handle
             .invoke(MemoryRequestV1::ContextSnapshot {
                 scope: MemoryScopeV1::Project,
+                query: None,
                 mind: MIND.into(),
                 working_memory: vec![second_id.clone(), first_id.clone()],
                 fact_limit: 10,
@@ -2480,6 +2797,8 @@ mod tests {
         std::os::unix::fs::symlink(&outside, root.join("facts.jsonl")).unwrap();
         for startup_sync_enabled in [true, false] {
             let error = match start_candidate(MemoryWorkerConfig {
+                workspace_root: Some(dir.path().to_path_buf()),
+                memory_token_cap: None,
                 project_memory_root: root.clone(),
                 project_db_path: root.join("facts.db"),
                 project_jsonl_path: root.join("facts.jsonl"),
@@ -2506,6 +2825,8 @@ mod tests {
         let root = dir.path().join("memory");
         std::fs::create_dir(&root).unwrap();
         let error = match start_candidate(MemoryWorkerConfig {
+            workspace_root: Some(dir.path().to_path_buf()),
+            memory_token_cap: None,
             project_memory_root: root.clone(),
             project_db_path: root.join("facts.db"),
             project_jsonl_path: dir.path().join("facts.jsonl"),
@@ -2538,6 +2859,8 @@ mod tests {
         )
         .unwrap();
         let config = MemoryWorkerConfig {
+            workspace_root: Some(dir.path().to_path_buf()),
+            memory_token_cap: None,
             project_memory_root: dir.path().to_path_buf(),
             project_jsonl_path: dir.path().join("facts.jsonl"),
             project_db_path: project,
@@ -2724,10 +3047,37 @@ mod tests {
 
     #[test]
     fn version_one_dtos_serialize_and_every_backend_error_maps_typed() {
+        for kind in ["fts_search", "hybrid_search"] {
+            let legacy = serde_json::json!({
+                "kind": kind, "scope": "project", "mind": MIND,
+                "query": "zircon", "limit": 1, "fetch_limit": 2,
+                "query_vector": null, "min_similarity": 0.1
+            });
+            let decoded: MemoryRequestV1 = serde_json::from_value(legacy).unwrap();
+            let filter = match &decoded {
+                MemoryRequestV1::FtsSearch { filter, .. }
+                | MemoryRequestV1::HybridSearch { filter, .. } => filter,
+                _ => panic!("expected search request"),
+            };
+            assert_eq!(filter, &omegon_memory::SearchFilter::default());
+            let encoded = serde_json::to_value(decoded).unwrap();
+            assert_eq!(encoded["filter"]["intent"], "current");
+        }
+        let legacy_context: MemoryRequestV1 = serde_json::from_value(serde_json::json!({
+            "kind":"context_snapshot", "scope":"project", "mind":MIND,
+            "working_memory":[], "fact_limit":10, "episode_limit":1
+        }))
+        .unwrap();
+        assert!(matches!(
+            legacy_context,
+            MemoryRequestV1::ContextSnapshot { query: None, .. }
+        ));
+
         let encoded = serde_json::to_value(MemoryRequestV1::VectorSearch {
             scope: MemoryScopeV1::Global,
             mind: MIND.into(),
             vector: vec![1.0, 0.0],
+            space: None,
             limit: 3,
             min_similarity: 0.2,
             cancellation: CancellationToken::new(),
@@ -2830,6 +3180,8 @@ mod tests {
         )
         .unwrap();
         let config = MemoryWorkerConfig {
+            workspace_root: Some(dir.path().to_path_buf()),
+            memory_token_cap: None,
             project_memory_root: dir.path().to_path_buf(),
             project_jsonl_path: project.with_extension("jsonl"),
             project_db_path: project,
@@ -2917,6 +3269,8 @@ mod tests {
         std::fs::create_dir_all(vault.join("ai/memory")).unwrap();
         let project = dir.path().join("facts.db");
         let config = MemoryWorkerConfig {
+            workspace_root: Some(dir.path().to_path_buf()),
+            memory_token_cap: None,
             project_memory_root: dir.path().to_path_buf(),
             project_jsonl_path: project.with_extension("jsonl"),
             project_db_path: project,
@@ -3034,6 +3388,7 @@ mod tests {
         let error = handle
             .invoke(MemoryRequestV1::FtsSearch {
                 scope: MemoryScopeV1::Project,
+                filter: Default::default(),
                 mind: MIND.into(),
                 query: "bounded".into(),
                 limit: MAX_RESULT_LIMIT + 1,

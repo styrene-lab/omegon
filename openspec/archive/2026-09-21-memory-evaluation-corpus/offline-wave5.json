@@ -1,0 +1,794 @@
+{
+  "manifest": {
+    "accounting": "conservative_utf8_bytes",
+    "backend": "sqlite_in_memory",
+    "candidate_cap": 256,
+    "clock": "case cutoff for applicability; fixed 9999 reinforcement epoch neutralizes wall-clock decay",
+    "corpus_sha256": "478fcfeb26d4a0bb946cac7439075ff2dfe780c8c61c7dca96b79cb171c3673a",
+    "current_cap": 1024,
+    "embedding": "disabled",
+    "extractor": "controlled_supported_observation_copy_v1",
+    "file_curation_labor": "unmeasured",
+    "labels_sha256": "846de4d22f5b5e380bb8bbb8b66739424e167c22dd133287ed4369b9e2004f9d",
+    "latency": "not measured in deterministic contract tier",
+    "provider_cost_usd": 0,
+    "provider_tokens": 0,
+    "quality_scope": "synthetic deterministic policy contract, not model quality",
+    "reader": "scripted_verbatim_claims_or_abstain_v1",
+    "revision": "memory-wave5d-v1",
+    "scorer_revision": "cutoff-grounded-verbatim-claims-v1",
+    "split": "heldout",
+    "tier": "offline"
+  },
+  "rows": [
+    {
+      "case_id": "held-cutoff",
+      "evidence_recall": 0.0,
+      "formation": "miss",
+      "latency_ms": null,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "miss",
+      "selection": "miss",
+      "stale_memory_used": false,
+      "task": "miss",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "no_memory",
+        "budget": 1024,
+        "context": "",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-cutoff",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": null,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"topaz requires serial installation\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "file_search",
+        "budget": 1024,
+        "context": "[h1] topaz requires serial installation\n",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 40,
+        "query_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "retained": [
+          "h1"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "h1"
+        ],
+        "selected": [
+          "h1"
+        ],
+        "selected_claims": [
+          "topaz requires serial installation"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-cutoff",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": null,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"topaz requires serial installation\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "current_memory",
+        "budget": 1024,
+        "context": "# Project Memory\n\n## Constraints\n- [eval-0] v0: topaz requires serial installation _(applicability unknown)_",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 108,
+        "query_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "retained": [
+          "h1"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "h1"
+        ],
+        "selected": [
+          "h1"
+        ],
+        "selected_claims": [
+          "topaz requires serial installation"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-cutoff",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": null,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"topaz requires serial installation\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "candidate_policy",
+        "budget": 256,
+        "context": "# Project Memory\n\n## Constraints\n- [eval-0] v0: topaz requires serial installation _(applicability unknown)_",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 108,
+        "query_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "retained": [
+          "h1"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "h1"
+        ],
+        "selected": [
+          "h1"
+        ],
+        "selected_claims": [
+          "topaz requires serial installation"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-absent",
+      "evidence_recall": null,
+      "formation": "not_applicable",
+      "latency_ms": null,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "not_applicable",
+      "selection": "not_applicable",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "no_memory",
+        "budget": 1024,
+        "context": "",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-absent",
+      "evidence_recall": null,
+      "formation": "not_applicable",
+      "latency_ms": null,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "not_applicable",
+      "selection": "not_applicable",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "file_search",
+        "budget": 1024,
+        "context": "",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-absent",
+      "evidence_recall": null,
+      "formation": "not_applicable",
+      "latency_ms": null,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "not_applicable",
+      "selection": "not_applicable",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "current_memory",
+        "budget": 1024,
+        "context": "",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-absent",
+      "evidence_recall": null,
+      "formation": "not_applicable",
+      "latency_ms": null,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "not_applicable",
+      "selection": "not_applicable",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "candidate_policy",
+        "budget": 256,
+        "context": "",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-failure",
+      "evidence_recall": 0.0,
+      "formation": "miss",
+      "latency_ms": null,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "miss",
+      "selection": "miss",
+      "stale_memory_used": false,
+      "task": "miss",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "no_memory",
+        "budget": 1024,
+        "context": "",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-failure",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": null,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"beryl upgrade failed twice; disable cache before retry\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "file_search",
+        "budget": 1024,
+        "context": "[h4] beryl upgrade failed twice; disable cache before retry\n",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 60,
+        "query_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "retained": [
+          "h4"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "h4"
+        ],
+        "selected": [
+          "h4"
+        ],
+        "selected_claims": [
+          "beryl upgrade failed twice; disable cache before retry"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-failure",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": null,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"beryl upgrade failed twice; disable cache before retry\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "current_memory",
+        "budget": 1024,
+        "context": "# Project Memory\n\n## Constraints\n- [eval-0] v0: beryl upgrade failed twice; disable cache before retry _(applicability unknown)_",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 128,
+        "query_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "retained": [
+          "h4"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "h4"
+        ],
+        "selected": [
+          "h4"
+        ],
+        "selected_claims": [
+          "beryl upgrade failed twice; disable cache before retry"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-failure",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": null,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"beryl upgrade failed twice; disable cache before retry\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "candidate_policy",
+        "budget": 256,
+        "context": "# Project Memory\n\n## Constraints\n- [eval-0] v0: beryl upgrade failed twice; disable cache before retry _(applicability unknown)_",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 128,
+        "query_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "retained": [
+          "h4"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "h4"
+        ],
+        "selected": [
+          "h4"
+        ],
+        "selected_claims": [
+          "beryl upgrade failed twice; disable cache before retry"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-constraint",
+      "evidence_recall": 0.0,
+      "formation": "miss",
+      "latency_ms": null,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "miss",
+      "selection": "miss",
+      "stale_memory_used": false,
+      "task": "miss",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "no_memory",
+        "budget": 1024,
+        "context": "",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-constraint",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": null,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"onyx requires macOS for signing\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "file_search",
+        "budget": 1024,
+        "context": "[h5] onyx requires macOS for signing\n",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 37,
+        "query_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "retained": [
+          "h5",
+          "h6"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "h5"
+        ],
+        "selected": [
+          "h5"
+        ],
+        "selected_claims": [
+          "onyx requires macOS for signing"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-constraint",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": null,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"onyx requires macOS for signing\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "current_memory",
+        "budget": 1024,
+        "context": "# Project Memory\n\n## Constraints\n- [eval-0] v0: onyx requires macOS for signing _(applicability unknown)_",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 105,
+        "query_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "retained": [
+          "h5",
+          "h6"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "h5"
+        ],
+        "selected": [
+          "h5"
+        ],
+        "selected_claims": [
+          "onyx requires macOS for signing"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-constraint",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": null,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"onyx requires macOS for signing\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "candidate_policy",
+        "budget": 256,
+        "context": "# Project Memory\n\n## Constraints\n- [eval-0] v0: onyx requires macOS for signing _(applicability unknown)_",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 105,
+        "query_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "retained": [
+          "h5",
+          "h6"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "h5"
+        ],
+        "selected": [
+          "h5"
+        ],
+        "selected_claims": [
+          "onyx requires macOS for signing"
+        ],
+        "selection_error": null
+      }
+    }
+  ],
+  "summary": [
+    {
+      "adapter": "no_memory",
+      "budgets": [
+        1024
+      ],
+      "cases": 4,
+      "completed": 4,
+      "evidence_recall": 0.0,
+      "incomplete": 0,
+      "injected_tokens": 0,
+      "judge_uncertain": 0,
+      "latency_max_ms": null,
+      "latency_p50_ms": null,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 0.25
+    },
+    {
+      "adapter": "file_search",
+      "budgets": [
+        1024
+      ],
+      "cases": 4,
+      "completed": 4,
+      "evidence_recall": 1.0,
+      "incomplete": 0,
+      "injected_tokens": 137,
+      "judge_uncertain": 0,
+      "latency_max_ms": null,
+      "latency_p50_ms": null,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 1.0
+    },
+    {
+      "adapter": "current_memory",
+      "budgets": [
+        1024
+      ],
+      "cases": 4,
+      "completed": 4,
+      "evidence_recall": 1.0,
+      "incomplete": 0,
+      "injected_tokens": 341,
+      "judge_uncertain": 0,
+      "latency_max_ms": null,
+      "latency_p50_ms": null,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 1.0
+    },
+    {
+      "adapter": "candidate_policy",
+      "budgets": [
+        256
+      ],
+      "cases": 4,
+      "completed": 4,
+      "evidence_recall": 1.0,
+      "incomplete": 0,
+      "injected_tokens": 341,
+      "judge_uncertain": 0,
+      "latency_max_ms": null,
+      "latency_p50_ms": null,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 1.0
+    }
+  ]
+}

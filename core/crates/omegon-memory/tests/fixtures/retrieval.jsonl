@@ -1,0 +1,7 @@
+{"_type":"fact","id":"obsolete","mind":"wave","content":"zircon archived workaround","section":"Known Issues","status":"archived","created_at":"2000-01-01T00:00:00Z"}
+{"_type":"fact","id":"sleeping","mind":"wave","content":"zircon dormant investigation","section":"Known Issues","status":"dormant","created_at":"2000-01-01T00:00:00Z"}
+{"_type":"fact","id":"replaced","mind":"wave","content":"zircon superseded decision","section":"Decisions","status":"superseded","created_at":"2000-01-01T00:00:00Z"}
+{"_type":"fact","id":"current","mind":"wave","content":"zircon current architecture","section":"Architecture","status":"active","created_at":"2099-01-01T00:00:00Z"}
+{"_type":"fact","id":"foreign","mind":"other","content":"zircon archived foreign scope","section":"Known Issues","status":"archived","created_at":"2000-01-01T00:00:00Z"}
+{"_type":"fact","id":"foreign_current","mind":"other","content":"zircon atomic migration in a foreign scope","section":"Constraints","status":"active","created_at":"2099-01-01T00:00:00Z"}
+{"_type":"fact","id":"constraint","mind":"wave","content":"zircon requires atomic migration","section":"Constraints","status":"active","created_at":"2099-01-01T00:00:00Z"}

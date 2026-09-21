@@ -156,6 +156,8 @@ mod managed_agent_supervisor;
 mod managed_service_bus;
 #[cfg(test)]
 mod memory_campaign;
+#[cfg(test)]
+mod memory_evaluation;
 mod memory_service;
 mod model_catalog;
 mod model_preferences;
@@ -1853,7 +1855,7 @@ async fn main() -> anyhow::Result<()> {
             .await
         }
         Some(Commands::Ollama { ref action }) => run_ollama_command(action).await,
-        Some(Commands::Embedding { ref action }) => run_embedding_command(action).await,
+        Some(Commands::Embedding { ref action }) => run_embedding_command(action, &cli.cwd).await,
         Some(Commands::Sentry {
             ref config,
             control_port,
@@ -4241,7 +4243,10 @@ async fn ollama_status() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
+async fn run_embedding_command(
+    action: &EmbeddingAction,
+    cwd: &std::path::Path,
+) -> anyhow::Result<()> {
     match action {
         EmbeddingAction::Download { model } => {
             let short_name = model.rsplit('/').next().unwrap_or(model);
@@ -4315,7 +4320,10 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
                         &model_dir,
                         &default_model,
                     ) {
-                        Ok(svc) => println!("Model loads successfully ({})", svc.model_name()),
+                        Ok(svc) => println!(
+                            "Model loads successfully ({})",
+                            omegon_memory::EmbeddingService::model_name(&svc)
+                        ),
                         Err(e) => println!("Model failed to load: {e}"),
                     }
                 }
@@ -4327,7 +4335,7 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
             }
         }
         EmbeddingAction::Backfill => {
-            let cwd = std::fs::canonicalize(std::env::current_dir()?)?;
+            let cwd = std::fs::canonicalize(cwd)?;
             let project_root = setup::find_project_root(&cwd);
 
             let memory_dir = {
@@ -4359,18 +4367,15 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
                         match crate::local_embedding::LocalEmbeddingService::from_default_dir() {
                             Ok(svc) => Box::new(svc),
                             Err(e) => {
-                                println!("No embedding service available: {e}");
-                                println!("Run: omegon embedding download");
-                                return Ok(());
+                                anyhow::bail!("No embedding service available: {e}");
                             }
                         }
                     }
                     #[cfg(not(feature = "local-embeddings"))]
                     {
-                        println!(
+                        anyhow::bail!(
                             "No embedding service available (Ollama not reachable, local-embeddings feature not enabled)"
                         );
-                        return Ok(());
                     }
                 }
             };
@@ -4380,6 +4385,8 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
             bus.register(Box::new(crate::memory_service::MemoryDeclarationFeature));
             let candidate =
                 crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
+                    workspace_root: Some(cwd.clone()),
+                    memory_token_cap: None,
                     project_memory_root: memory_dir.clone(),
                     project_db_path: db_path,
                     project_jsonl_path: memory_dir.join("facts.jsonl"),
@@ -4391,6 +4398,8 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
             bus.stage_managed_generation("memory", candidate)?;
             let operation = async {
                 bus.try_finalize_managed().await?;
+                let indexing_binding = crate::memory_service::MemoryBinding::default();
+                indexing_binding.capture(&bus)?;
                 let handle = bus
                     .managed_service::<crate::memory_service::MemoryService>(
                         &crate::memory_service::memory_capability_id(),
@@ -4406,6 +4415,8 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
                 let mut failed = 0usize;
                 let mut skipped = 0usize;
                 let mut failures = Vec::new();
+                let repair_run = uuid::Uuid::new_v4();
+                let mut repair_space: Option<omegon_memory::EmbeddingSpace> = None;
                 loop {
                     let response = handle
                         .invoke(crate::memory_service::MemoryRequestV1::ListFactsPage {
@@ -4442,24 +4453,76 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
                     }
                     for fact in page.facts {
                         attempted += 1;
-                        match embed_svc.embed(&fact.content).await {
+                        let had_pending = match handle.invoke(crate::memory_service::MemoryRequestV1::EmbeddingIndexingRecord {
+                            scope: crate::memory_service::MemoryScopeV1::Project, fact_id: fact.id.clone(), cancellation: cancellation.clone(),
+                        }).await {
+                            Ok(crate::memory_service::MemoryResponseV1 { payload: crate::memory_service::MemoryPayloadV1::EmbeddingIndexingRecord(record), .. }) => record.is_some(),
+                            _ => { failed += 1; if failures.len() < 10 { failures.push("indexing attempt inspection failed".into()); } continue; }
+                        };
+                        if !had_pending && let Some(space) = &repair_space {
+                            match handle.invoke(crate::memory_service::MemoryRequestV1::EmbeddingIndexState {
+                                scope:crate::memory_service::MemoryScopeV1::Project, fact_id:fact.id.clone(), space:space.clone(), cancellation:cancellation.clone(),
+                            }).await {
+                                Ok(crate::memory_service::MemoryResponseV1 {payload:crate::memory_service::MemoryPayloadV1::EmbeddingIndexState(omegon_memory::EmbeddingIndexState::Ready),..}) => { skipped += 1; continue; }
+                                Err(error) => { failed += 1; if failures.len() < 10 { failures.push(format!("{}: index inspection failed: {error:?}", fact.id)); } continue; }
+                                Ok(crate::memory_service::MemoryResponseV1 {payload:crate::memory_service::MemoryPayloadV1::EmbeddingIndexState(_),..}) => {},
+                                Ok(_) => { failed += 1; if failures.len() < 10 { failures.push("unexpected index inspection response".into()); } continue; }
+                            }
+                        }
+                        let mut indexing_record = omegon_memory::EmbeddingIndexingRecord {
+                            fact: omegon_memory::FactPrecondition { id: fact.id.clone(), expected_version: fact.version },
+                            attempt_id: omegon_memory::retrieval::raw_content_hash(&format!("repair:{repair_run}:{}", fact.id)),
+                            space: repair_space.clone(),
+                            reason: omegon_memory::EmbeddingIndexingReason::Pending,
+                        };
+                        if !crate::embedding::apply_index_mutation(&indexing_binding, format!("{}:pending", indexing_record.attempt_id),
+                            omegon_memory::MemoryMutation::RecordEmbeddingIndexing { record: indexing_record.clone() }, tokio_util::sync::CancellationToken::new()).await {
+                            failed += 1;
+                            if failures.len() < 10 { failures.push("indexing attempt persistence failed".into()); }
+                            continue;
+                        }
+                        let generated = crate::embedding::generate_identified(
+                            embed_svc.as_ref(),
+                            &fact.content,
+                            std::time::Duration::from_secs(30),
+                            &cancellation,
+                        ).await;
+                        match generated {
                             Ok(embedding) => {
+                                if repair_space.as_ref().is_some_and(|space| space != &embedding.space) {
+                                    failed += 1;
+                                    failures.push("embedding space changed during repair; rerun against a stable model".into());
+                                    indexing_record.reason = omegon_memory::EmbeddingIndexingReason::Incompatible;
+                                    crate::embedding::apply_index_mutation(&indexing_binding, format!("{}:incompatible", indexing_record.attempt_id), omegon_memory::MemoryMutation::RecordEmbeddingIndexing { record: indexing_record }, tokio_util::sync::CancellationToken::new()).await;
+                                    cancellation.cancel();
+                                    break;
+                                }
+                                repair_space.get_or_insert_with(|| embedding.space.clone());
+                                let already_ready = match handle.invoke(crate::memory_service::MemoryRequestV1::EmbeddingIndexState {
+                                    scope:crate::memory_service::MemoryScopeV1::Project, fact_id:fact.id.clone(), space:embedding.space.clone(), cancellation:cancellation.clone(),
+                                }).await {
+                                    Ok(crate::memory_service::MemoryResponseV1 {payload:crate::memory_service::MemoryPayloadV1::EmbeddingIndexState(omegon_memory::EmbeddingIndexState::Ready),..}) => true,
+                                    Ok(crate::memory_service::MemoryResponseV1 {payload:crate::memory_service::MemoryPayloadV1::EmbeddingIndexState(_),..}) => false,
+                                    Err(error) => { failed += 1; if failures.len() < 10 { failures.push(format!("{}: index inspection failed: {error:?}", fact.id)); } continue; }
+                                    Ok(_) => { failed += 1; if failures.len() < 10 { failures.push("unexpected index inspection response".into()); } continue; }
+                                };
                                 match handle
                                     .invoke(
                                         crate::memory_service::MemoryRequestV1::ApplyMutation {
                                             scope: crate::memory_service::MemoryScopeV1::Project,
                                             operation_id: format!(
-                                                "embedding-backfill:{}:{}:{}",
-                                                embed_svc.model_name(),
+                                                "embedding-backfill:{repair_run}:{}:{}:{}:{}",
+                                                embedding.space.fingerprint(),
                                                 fact.id,
-                                                fact.version
+                                                fact.version,
+                                                omegon_memory::retrieval::raw_content_hash(&fact.content)
                                             ),
-                                            mutation: omegon_memory::MemoryMutation::StoreEmbedding {
+                                            mutation: omegon_memory::MemoryMutation::CompleteEmbeddingIndexing {
+                                                attempt_id: indexing_record.attempt_id.clone(),
                                                 fact: omegon_memory::FactPrecondition {
                                                     id: fact.id.clone(),
                                                     expected_version: fact.version,
                                                 },
-                                                model_name: embed_svc.model_name().into(),
                                                 embedding,
                                             },
                                             cancellation: cancellation.clone(),
@@ -4478,7 +4541,7 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
                                             _,
                                         ),
                                         ..
-                                    }) => succeeded += 1,
+                                    }) => { if already_ready { skipped += 1; } else { succeeded += 1; } },
                                     Ok(_) => {
                                         failed += 1;
                                         if failures.len() < 10 {
@@ -4490,6 +4553,8 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
                                     }
                                     Err(error) => {
                                         failed += 1;
+                                        indexing_record.reason = omegon_memory::EmbeddingIndexingReason::WriteFailed;
+                                        crate::embedding::apply_index_mutation(&indexing_binding, format!("{}:write-failed", indexing_record.attempt_id), omegon_memory::MemoryMutation::RecordEmbeddingIndexing { record: indexing_record.clone() }, tokio_util::sync::CancellationToken::new()).await;
                                         if failures.len() < 10 {
                                             failures.push(format!(
                                                 "{}: embedding store failed: {error:?}",
@@ -4501,12 +4566,20 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
                             }
                             Err(error) => {
                                 failed += 1;
+                                indexing_record.reason = match &error {
+                                    crate::embedding::BoundedEmbeddingError::Cancelled => omegon_memory::EmbeddingIndexingReason::Cancelled,
+                                    crate::embedding::BoundedEmbeddingError::DeadlineExceeded => omegon_memory::EmbeddingIndexingReason::Timeout,
+                                    crate::embedding::BoundedEmbeddingError::Generation(omegon_memory::EmbedError::Unavailable(_)) => omegon_memory::EmbeddingIndexingReason::Unavailable,
+                                    crate::embedding::BoundedEmbeddingError::Generation(_) => omegon_memory::EmbeddingIndexingReason::GenerationFailed,
+                                };
+                                crate::embedding::apply_index_mutation(&indexing_binding, format!("{}:generation-failed", indexing_record.attempt_id), omegon_memory::MemoryMutation::RecordEmbeddingIndexing { record: indexing_record.clone() }, tokio_util::sync::CancellationToken::new()).await;
                                 if failures.len() < 10 {
                                     failures.push(format!(
                                         "{}: embedding generation failed: {error}",
                                         fact.id
                                     ));
                                 }
+                                if !matches!(error, crate::embedding::BoundedEmbeddingError::Generation(omegon_memory::EmbedError::RequestFailed(_))) { cancellation.cancel(); break; }
                             }
                         }
                         if attempted.is_multiple_of(50) || attempted == inventory_total {
@@ -4516,7 +4589,7 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
                         }
                     }
                     cursor = page.next_cursor;
-                    if cursor.is_none() {
+                    if cursor.is_none() || cancellation.is_cancelled() {
                         break;
                     }
                 }
@@ -6174,6 +6247,7 @@ fn build_tui_secret_readiness_snapshot(
                     .await;
                 if let Ok(Some(plan)) = planning {
                     let payload = &plan.payload;
+                    runtime_state.bus.before_context_eviction(CancellationToken::new()).await;
                     match session_execution::boot_execution_binding()
                         .compact(bridge_guard.as_ref(), payload, &stream_options)
                         .await
@@ -11966,6 +12040,8 @@ mod tests {
         bus.register(Box::new(crate::memory_service::MemoryDeclarationFeature));
         let candidate =
             crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
+                workspace_root: Some(directory.path().to_path_buf()),
+                memory_token_cap: None,
                 project_memory_root: directory.path().to_path_buf(),
                 project_db_path: database.clone(),
                 project_jsonl_path: directory.path().join("facts.jsonl"),

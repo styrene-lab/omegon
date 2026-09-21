@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "evidence": {
+    "run_id": "35655580961",
+    "revision": "39ac5ef143d99c005712e11902fe5e39983f62bc",
+    "job": "Additive composition ladder",
+    "target": "x86_64-unknown-linux-gnu",
+    "cargo_profile": "release",
+    "row": "full-product"
+  },
+  "model_schema_tokens": {
+    "cleave": 468,
+    "codescan-adapter": 211,
+    "context-provider": 265,
+    "core-tools": 2242,
+    "delegate": 552,
+    "lifecycle": 1135,
+    "local-inference": 266,
+    "loop": 195,
+    "manage-tools": 136,
+    "memory": 1375,
+    "mutation": 189,
+    "render": 200,
+    "secret-tools": 230,
+    "skills": 596,
+    "variable-tools": 253,
+    "view": 89,
+    "web-search": 270
+  },
+  "callable_capabilities": [
+    "tool:ask_local_model", "tool:bash", "tool:chronos",
+    "tool:cleave_assess", "tool:cleave_run", "tool:codebase_search",
+    "tool:commit", "tool:context_clear", "tool:context_compact", "tool:context_status",
+    "tool:delegate", "tool:delegate_cancel", "tool:delegate_result", "tool:delegate_status",
+    "tool:design_tree", "tool:design_tree_update", "tool:edit", "tool:list_local_models",
+    "tool:loop_create", "tool:loop_list", "tool:loop_status", "tool:loop_stop",
+    "tool:manage_ollama", "tool:manage_tools",
+    "tool:memory_archive", "tool:memory_compact", "tool:memory_confirm",
+    "tool:memory_episodes", "tool:memory_focus", "tool:memory_inspect",
+    "tool:memory_query", "tool:memory_recall", "tool:memory_release",
+    "tool:memory_selection", "tool:memory_set_applicability", "tool:memory_store",
+    "tool:memory_supersede", "tool:mutation_accept", "tool:mutation_reject",
+    "tool:mutation_review", "tool:mutation_stats", "tool:plan", "tool:read",
+    "tool:render_diagram", "tool:request_context", "tool:secret_delete",
+    "tool:secret_list", "tool:secret_set", "tool:serve", "tool:skills_create",
+    "tool:skills_delete", "tool:skills_get", "tool:skills_import", "tool:skills_install",
+    "tool:skills_list", "tool:skills_reload", "tool:terminal", "tool:validate",
+    "tool:variable_delete", "tool:variable_get", "tool:variable_list", "tool:variable_set",
+    "tool:view", "tool:wait_for_operator", "tool:web_fetch", "tool:web_search",
+    "tool:whoami", "tool:write"
+  ],
+  "memory_schema_changes": {
+    "memory_store": {"before": 212, "after": 355},
+    "memory_recall": {"before": 138, "after": 211},
+    "memory_confirm": {"before": 0, "after": 69},
+    "memory_inspect": {"before": 0, "after": 72},
+    "memory_set_applicability": {"before": 0, "after": 245},
+    "memory_selection": {"before": 0, "after": 64}
+  }
+}

@@ -985,6 +985,7 @@ fn historical_surfaces(
         .find(|entry| entry.meta.session_id == session_id)
         .ok_or(StatusCode::NOT_FOUND)?;
     let target = crate::session_consumers::SessionViewTarget {
+        binding_id: uuid::Uuid::new_v4(),
         snapshot: entry.path,
         session_id: session_id.to_string(),
         stream_id: None,

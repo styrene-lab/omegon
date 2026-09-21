@@ -26,6 +26,17 @@ pub trait EmbeddingService: Send + Sync {
     /// Generate an embedding vector for the given text.
     async fn embed(&self, text: &str) -> Result<Vec<f32>, EmbedError>;
 
+    /// Memory retrieval requires a verifiable model/revision and preprocessing contract.
+    /// Legacy services remain usable by non-memory consumers but cannot assert identity.
+    async fn embed_identified(
+        &self,
+        _text: &str,
+    ) -> Result<crate::IdentifiedEmbedding, EmbedError> {
+        Err(EmbedError::Unavailable(
+            "embedding-space identity is unavailable".into(),
+        ))
+    }
+
     /// The model name this service uses (stored in `embedding_metadata`).
     fn model_name(&self) -> &str;
 }

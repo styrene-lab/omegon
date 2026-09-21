@@ -64,6 +64,8 @@ pub struct HarnessStatus {
 
     // ── Memory ───────────────────────────────────────────────
     pub memory: MemoryStatus,
+    #[serde(default)]
+    pub memory_capabilities: crate::surfaces::memory_status::MemoryCapabilityReadiness,
 
     // ── Cloud providers ──────────────────────────────────────
     pub providers: Vec<ProviderStatus>,
@@ -344,6 +346,43 @@ pub(crate) fn managed_memory_status_snapshot_for(path: &Path) -> ManagedMemorySt
         .unwrap_or_default()
 }
 
+fn memory_capability_cache()
+-> &'static RwLock<BTreeMap<PathBuf, crate::surfaces::memory_status::MemoryCapabilityReadiness>> {
+    static CACHE: OnceLock<
+        RwLock<BTreeMap<PathBuf, crate::surfaces::memory_status::MemoryCapabilityReadiness>>,
+    > = OnceLock::new();
+    CACHE.get_or_init(|| RwLock::new(BTreeMap::new()))
+}
+
+/// Publish observations only from configuration or completed operations. Status
+/// rendering must not resolve credentials or contact providers.
+pub(crate) fn update_memory_capabilities(
+    root: &Path,
+    update: impl FnOnce(&mut crate::surfaces::memory_status::MemoryCapabilityReadiness),
+) {
+    if let Ok(mut cache) = memory_capability_cache().write() {
+        update(cache.entry(memory_status_cache_key(root)).or_default());
+    }
+}
+
+pub(crate) fn memory_capabilities_snapshot_for(
+    root: &Path,
+) -> crate::surfaces::memory_status::MemoryCapabilityReadiness {
+    let observations = memory_capability_cache()
+        .read()
+        .ok()
+        .and_then(|cache| cache.get(&memory_status_cache_key(root)).cloned())
+        .unwrap_or_default();
+    let mut projection = crate::surfaces::memory_status::project_memory_capabilities(
+        managed_memory_status_snapshot_for(root).available,
+        observations.extraction,
+        observations.embeddings,
+        observations.pending_indexing,
+    );
+    projection.indexing = observations.indexing;
+    projection
+}
+
 pub(crate) fn memory_federation_surface_observation(
     cwd: &Path,
 ) -> crate::surfaces::memory_status::MemoryFederationObservation {
@@ -470,6 +509,11 @@ pub(crate) async fn refresh_managed_memory_status_for_mind(
         })) => {
             let authority = status.authority.clone();
             let index_state = status.index_state;
+            update_memory_capabilities(project_root, |observed| {
+                observed.pending_indexing =
+                    Some(status.indexing.pending + status.indexing.untracked);
+                observed.indexing = Some(status.indexing.clone());
+            });
             ManagedMemoryStatusSnapshot {
                 project_root: project_root.to_path_buf(),
                 available: true,
@@ -677,6 +721,7 @@ impl HarnessStatus {
         status.memory = memory.status;
         status.memory_available = memory.available;
         status.memory_warning = memory.warning;
+        status.memory_capabilities = memory_capabilities_snapshot_for(project_root);
 
         status
     }
@@ -693,6 +738,7 @@ impl HarnessStatus {
         self.memory = memory.status;
         self.memory_available = memory.available;
         self.memory_warning = memory.warning;
+        self.memory_capabilities = memory_capabilities_snapshot_for(bus.project_root());
         self.cleave_available = tool_defs
             .iter()
             .any(|t| t.name == crate::tool_registry::cleave::CLEAVE_ASSESS)
@@ -1203,6 +1249,7 @@ impl Default for HarnessStatus {
             memory_available: false,
             cleave_available: false,
             memory_warning: None,
+            memory_capabilities: Default::default(),
             mutation_artifacts_enabled: false,
             mutation_learned_skills: 0,
             mutation_diagnostics: 0,
@@ -1380,6 +1427,60 @@ mod tests {
     }
 
     #[test]
+    fn wave5_cached_readiness_is_read_only_and_survives_storage_outage() {
+        use crate::surfaces::memory_status::{
+            CapabilityReason, CapabilityState, ComponentReadiness,
+        };
+        let root = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        update_managed_memory_status(ManagedMemoryStatusSnapshot {
+            project_root: root.path().into(),
+            available: true,
+            ..Default::default()
+        });
+        update_memory_capabilities(root.path(), |observed| {
+            observed.extraction = ComponentReadiness {
+                state: CapabilityState::Unavailable,
+                reason: Some(CapabilityReason::ProviderUnavailable),
+            };
+            observed.embeddings = ComponentReadiness {
+                state: CapabilityState::Ready,
+                reason: None,
+            };
+            observed.pending_indexing = Some(2);
+        });
+        let first = memory_capabilities_snapshot_for(root.path());
+        assert_eq!(first.keyword_retrieval.state, CapabilityState::Ready);
+        assert_eq!(
+            first.semantic_retrieval.reason,
+            Some(CapabilityReason::IndexIncomplete)
+        );
+        for _ in 0..3 {
+            assert_eq!(memory_capabilities_snapshot_for(root.path()), first);
+        }
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+        assert_eq!(
+            memory_capabilities_snapshot_for(other.path())
+                .extraction
+                .state,
+            CapabilityState::Unknown
+        );
+        update_managed_memory_status(ManagedMemoryStatusSnapshot {
+            project_root: root.path().into(),
+            available: false,
+            ..Default::default()
+        });
+        let unavailable = memory_capabilities_snapshot_for(root.path());
+        assert_eq!(
+            unavailable.storage.reason,
+            Some(CapabilityReason::StorageUnavailable)
+        );
+        assert_eq!(unavailable.extraction, first.extraction);
+        assert_eq!(unavailable.embeddings, first.embeddings);
+        assert_eq!(unavailable.pending_indexing, Some(2));
+    }
+
+    #[test]
     fn managed_memory_status_isolated_between_runtime_roots() {
         let first = tempfile::tempdir().unwrap();
         let second = tempfile::tempdir().unwrap();
@@ -1419,6 +1520,8 @@ mod tests {
         bus.register(Box::new(crate::memory_service::MemoryDeclarationFeature));
         let candidate =
             crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
+                workspace_root: Some(directory.path().to_path_buf()),
+                memory_token_cap: None,
                 project_memory_root: directory.path().to_path_buf(),
                 project_db_path: directory.path().join("facts.db"),
                 project_jsonl_path: directory.path().join("facts.jsonl"),

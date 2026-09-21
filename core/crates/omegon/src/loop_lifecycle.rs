@@ -24,6 +24,10 @@ pub(crate) async fn process_turn_requests(
             }
             omegon_traits::BusRequest::RequestAggressiveDecay => {
                 tracing::info!("Bus: tier 1 aggressive decay requested");
+                invocations
+                    .runtime()
+                    .before_context_eviction(request.cancellation.clone())
+                    .await;
                 request.context.tighten_decay(request.conversation);
                 invocations
                     .runtime()
@@ -126,6 +130,10 @@ async fn compact_from_request(
             selection.reason.clone(),
         ),
     );
+    invocations
+        .runtime()
+        .before_context_eviction(request.cancellation.clone())
+        .await;
     let compaction_authority = match request.context.begin_compaction(
         &selection,
         request.invocation_scope,

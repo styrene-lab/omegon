@@ -45,6 +45,7 @@ impl Section {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FactStatus {
+    Pending,
     Active,
     Dormant,
     Archived,
@@ -56,6 +57,10 @@ pub enum FactStatus {
 /// A memory fact. Mirrors FactRecord in api-types.ts.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Fact {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applicability: Option<Box<RecordedApplicability>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle_inference: Option<Box<LifecycleInference>>,
     pub id: String,
     pub mind: String,
     pub content: String,
@@ -122,15 +127,290 @@ pub enum DecayProfileName {
     RecentWork,
 }
 
+/// Recorded provenance class; not a permission or execution proof.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProvenanceBasis {
+    LegacyUnknown,
+    ExplicitArtifact,
+    UnconfirmedInference,
+    OperatorConfirmedInference,
+    InvalidMetadata,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceAvailability {
+    NotChecked,
+    NoReference,
+    SnapshotMatches,
+    SnapshotChanged,
+    ReadableUnverified,
+    Unavailable,
+    UnsupportedReference,
+}
+
+/// Read-only fact/provenance projection. Excerpts are explicitly bounded previews.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FactInspection {
+    pub applicability: Option<Box<RecordedApplicability>>,
+    #[serde(default)]
+    pub applicability_status: ApplicabilityStatus,
+    #[serde(default)]
+    pub applicability_context: ApplicabilityContext,
+    pub id: String,
+    pub mind: String,
+    pub section: Section,
+    pub status: FactStatus,
+    pub version: u64,
+    pub content_excerpt: String,
+    pub content_truncated: bool,
+    pub content_sha256: String,
+    pub created_at: String,
+    pub created_session: Option<String>,
+    pub last_reinforced: String,
+    pub reinforcement_count: u32,
+    pub confidence: f64,
+    pub supersedes: Option<String>,
+    pub superseded_at: Option<String>,
+    pub archived_at: Option<String>,
+    pub basis: ProvenanceBasis,
+    pub artifact: Option<Box<LifecycleConclusionSource>>,
+    pub inference: Option<Box<LifecycleInference>>,
+    pub source_excerpt: Option<String>,
+    pub source_truncated: bool,
+    pub evidence_availability: EvidenceAvailability,
+    pub diagnostic: Option<String>,
+}
+
+/// An explicit embedding-space identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmbeddingSpace {
+    pub model: String,
+    pub revision: String,
+    pub preprocessing: String,
+    pub dimensions: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IdentifiedEmbedding {
+    pub space: EmbeddingSpace,
+    pub values: Vec<f32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VectorDiagnostics {
+    pub compatible: usize,
+    pub legacy: usize,
+    pub incompatible: usize,
+    pub stale: usize,
+    pub identity_unavailable: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct VectorSearchReport {
+    pub results: Vec<ScoredFact>,
+    pub diagnostics: VectorDiagnostics,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EmbeddingIndexState {
+    Missing,
+    Legacy,
+    Incompatible,
+    Stale,
+    Ready,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EmbeddingIndexingReason {
+    Pending,
+    Unavailable,
+    Timeout,
+    Cancelled,
+    GenerationFailed,
+    WriteFailed,
+    Incompatible,
+    SourceChanged,
+}
+
+impl EmbeddingIndexingReason {
+    pub fn retryable(self) -> bool {
+        !matches!(self, Self::Incompatible | Self::SourceChanged)
+    }
+}
+
+/// One outstanding attempt per fact. Unknown space is permitted before the
+/// provider returns verified identity; it must never be inferred from a label.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmbeddingIndexingRecord {
+    pub fact: FactPrecondition,
+    pub attempt_id: String,
+    pub space: Option<EmbeddingSpace>,
+    pub reason: EmbeddingIndexingReason,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmbeddingIndexingSummary {
+    pub pending: usize,
+    pub retryable: usize,
+    pub terminal: usize,
+    /// Active facts with no identified vector and no recorded attempt.
+    pub untracked: usize,
+    pub reasons: std::collections::BTreeMap<EmbeddingIndexingReason, usize>,
+}
+
+/// A fact with search scoring attached.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemorySelectionIntent {
+    #[default]
+    Ambient,
+    Explicit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "method", rename_all = "snake_case")]
+pub enum MemoryTokenAccounting {
+    ConservativeUtf8Bytes,
+    Exact { tokenizer: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryExclusionReason {
+    Duplicate,
+    Lifecycle,
+    Applicability,
+    Confidence,
+    Budget,
+    EpisodeBudget,
+    LowSignal,
+    InputBound,
+    MissingPin,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryEvidenceHandle {
+    pub id: String,
+    pub version: Option<u64>,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryExclusion {
+    pub id: String,
+    pub id_truncated: bool,
+    pub reason: MemoryExclusionReason,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryPinResolution {
+    pub requested_id: String,
+    pub replacement_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemorySelectionReport {
+    #[serde(default)]
+    pub cache_hit: bool,
+    #[serde(default)]
+    pub selected_at: Option<String>,
+    #[serde(default)]
+    pub cache_expires_at: Option<String>,
+    pub intent: MemorySelectionIntent,
+    pub low_signal: bool,
+    pub accounting: MemoryTokenAccounting,
+    pub budget: usize,
+    pub accounted_tokens: usize,
+    pub selected: Vec<MemoryEvidenceHandle>,
+    pub exclusions: Vec<MemoryExclusion>,
+    pub exclusion_counts: std::collections::BTreeMap<MemoryExclusionReason, usize>,
+    pub exclusions_truncated: bool,
+    pub budget_exhausted: bool,
+    pub pin_resolutions: Vec<MemoryPinResolution>,
+    pub retrieval_degradation: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemorySelection {
+    pub markdown: String,
+    pub report: MemorySelectionReport,
+}
+
+#[derive(Clone)]
+pub struct MemorySelectionRequest {
+    pub mind: String,
+    pub query: String,
+    pub pins: Vec<String>,
+    pub context: ApplicabilityContext,
+    pub intent: MemorySelectionIntent,
+    pub host_budget: usize,
+    pub memory_cap: usize,
+    pub fetch_limit: usize,
+}
+
 /// A fact with search scoring attached.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoredFact {
+    #[serde(default)]
+    pub applicability: ApplicabilityStatus,
     #[serde(flatten)]
     pub fact: Fact,
-    /// Raw cosine similarity (0.0–1.0), or FTS5 rank score.
+    /// Legacy raw cosine (-1.0–1.0), lexical, or proximity value. Prefer named scores.
     pub similarity: f64,
-    /// Combined score: similarity × decay-adjusted confidence.
+    /// Ranking value, potentially fused or graph-derived. Not a probability.
     pub score: f64,
+    #[serde(default)]
+    pub scores: RetrievalScores,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub graph_evidence: Vec<GraphEvidence>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RetrievalScores {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lexical: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cosine: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rrf: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphRelationKind {
+    Related,
+    Support,
+    Contradiction,
+    Supersession,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GraphEvidence {
+    pub edge_id: String,
+    pub other_fact_id: String,
+    pub relation: String,
+    pub outgoing: bool,
+    pub kind: GraphRelationKind,
+}
+
+impl ScoredFact {
+    pub fn new(fact: Fact, similarity: f64, score: f64) -> Self {
+        Self {
+            applicability: ApplicabilityStatus::Unknown,
+            fact,
+            similarity,
+            score,
+            scores: Default::default(),
+            graph_evidence: vec![],
+        }
+    }
 }
 
 /// A session episode narrative.
@@ -155,6 +435,110 @@ pub struct Episode {
     /// jj change ID that created this episode (permanent, survives rebase).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jj_change_id: Option<String>,
+    /// Bounded source-linked formation evidence. Candidates are not admitted facts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formation: Option<Box<EpisodeFormation>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum FormationSource {
+    Available {
+        session_id: String,
+        stream_id: String,
+        sequence: u64,
+        event_id: String,
+    },
+    Unavailable {
+        session_id: String,
+        reason: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceKind {
+    UserStatement,
+    AssistantReport,
+    ToolResult,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceOutcome {
+    Succeeded,
+    Failed,
+    Denied,
+    NotDispatched,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FormationEvidence {
+    pub event_id: String,
+    pub sequence: u64,
+    pub recorded_at: String,
+    pub kind: EvidenceKind,
+    pub excerpt: String,
+    pub truncated: bool,
+    pub outcome: Option<EvidenceOutcome>,
+}
+
+/// An unadmitted model inference supported by references into the bounded evidence set.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryCandidate {
+    pub content: String,
+    pub section: Section,
+    pub evidence_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum ExtractionOutcome {
+    Disabled,
+    Pending { model: String },
+    Complete { model: String },
+    Unavailable { model: String, reason: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FormationCoverage {
+    /// Inclusive first scanned canonical sequence; the source frontier is the last.
+    pub first_sequence: u64,
+    /// Version of the producer's evidence-selection rules, not extraction policy.
+    pub policy_version: u16,
+}
+
+/// Local capture namespace. Imported episodes do not advance this namespace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FormationCaptureKey {
+    pub mind: String,
+    pub session_id: String,
+    pub stream_id: String,
+    pub policy_version: u16,
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FormationCursor {
+    pub sequence: u64,
+    pub event_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EpisodeFormation {
+    pub version: u16,
+    pub source: FormationSource,
+    /// Explicit scanned range for version 2. Legacy snapshots have unknown coverage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<FormationCoverage>,
+    pub evidence: Vec<FormationEvidence>,
+    pub candidates: Vec<MemoryCandidate>,
+    pub extraction: ExtractionOutcome,
+    pub truncated: bool,
+    pub rejected_candidates: usize,
 }
 
 /// A directional relationship between two facts.
@@ -225,6 +609,53 @@ pub struct FactFilter {
     pub status: Option<FactStatus>,
 }
 
+/// Retrieval population. Historical evidence remains searchable regardless of decay.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchIntent {
+    #[default]
+    Current,
+    Historical,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchFilter {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<ApplicabilityContext>,
+    #[serde(default)]
+    pub intent: SearchIntent,
+    #[serde(default)]
+    pub section: Option<Section>,
+}
+
+impl SearchFilter {
+    pub fn matches(&self, fact: &Fact) -> bool {
+        let status_matches = match self.intent {
+            SearchIntent::Current => fact.status == FactStatus::Active,
+            SearchIntent::Historical => matches!(
+                fact.status,
+                FactStatus::Archived | FactStatus::Dormant | FactStatus::Superseded
+            ),
+        };
+        status_matches
+            && self.applicability_status(fact) != ApplicabilityStatus::Inapplicable
+            && self
+                .section
+                .as_ref()
+                .is_none_or(|section| section == &fact.section)
+    }
+
+    pub fn score(&self, relevance: f64, fact: &Fact) -> Option<f64> {
+        if !self.matches(fact) {
+            return None;
+        }
+        match self.intent {
+            SearchIntent::Current => crate::decay::ambient_score(relevance, fact),
+            SearchIntent::Historical => Some(relevance),
+        }
+    }
+}
+
 /// One bounded keyset page over facts present at the first page's Lamport
 /// watermark. Facts inserted after that watermark are intentionally deferred
 /// to a later scan; status changes may remove facts but cannot duplicate them.
@@ -290,6 +721,8 @@ pub struct StoreEpisode {
     pub files_changed: Vec<String>,
     pub tags: Vec<String>,
     pub tool_calls_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formation: Option<Box<EpisodeFormation>>,
 }
 
 /// Stats from a JSONL import.
@@ -313,6 +746,31 @@ pub struct FactPrecondition {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MemoryMutation {
+    StoreApplicableFact {
+        request: StoreFact,
+        constraints: Box<ApplicabilityConstraints>,
+    },
+    SetFactApplicability {
+        fact: FactPrecondition,
+        constraints: Box<ApplicabilityConstraints>,
+    },
+    ConfirmLifecycleCandidate {
+        candidate: FactPrecondition,
+        snapshot_hash: String,
+        session_id: String,
+        request_id: String,
+        surface: ConfirmationSurface,
+        supersedes: Option<FactPrecondition>,
+    },
+    StoreLifecycleConclusion {
+        request: StoreFact,
+        source: Box<crate::lifecycle::LifecycleConclusionSource>,
+        supersedes: Option<FactPrecondition>,
+    },
+    StoreLifecycleInference {
+        request: StoreFact,
+        inference: Box<LifecycleInference>,
+    },
     ImportJsonl {
         jsonl: String,
     },
@@ -342,12 +800,32 @@ pub enum MemoryMutation {
         model_name: String,
         embedding: Vec<f32>,
     },
+    StoreIdentifiedEmbedding {
+        fact: FactPrecondition,
+        embedding: IdentifiedEmbedding,
+    },
+    RecordEmbeddingIndexing {
+        record: EmbeddingIndexingRecord,
+    },
+    CompleteEmbeddingIndexing {
+        fact: FactPrecondition,
+        attempt_id: String,
+        embedding: IdentifiedEmbedding,
+    },
     CreateEdge {
         mind: String,
         request: CreateEdge,
     },
     StoreEpisode {
         request: StoreEpisode,
+    },
+    StoreCoveragePage {
+        request: StoreEpisode,
+        expected: Option<FormationCursor>,
+    },
+    CompleteFormation {
+        episode_id: String,
+        formation: Box<EpisodeFormation>,
     },
 }
 
@@ -356,6 +834,9 @@ pub enum MemoryMutation {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MemoryMutationEffect {
+    ApplicabilityUpdated {
+        fact: FactPrecondition,
+    },
     JsonlImported {
         imported: usize,
         reinforced: usize,
@@ -385,10 +866,22 @@ pub enum MemoryMutationEffect {
         model_name: String,
         dims: u32,
     },
+    EmbeddingIndexingRecorded {
+        fact: FactPrecondition,
+        attempt_id: String,
+    },
     EdgeCreated {
         edge_id: String,
     },
     EpisodeStored {
+        episode_id: String,
+    },
+    CoverageStored {
+        episode_id: String,
+        key: FormationCaptureKey,
+        cursor: FormationCursor,
+    },
+    FormationCompleted {
         episode_id: String,
     },
 }
@@ -406,6 +899,9 @@ pub struct MemoryMutationOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "_type")]
 pub enum JsonlRecord {
+    /// Scope-aware readers are required; older readers must not treat this as unrestricted.
+    #[serde(rename = "applicable_fact")]
+    ApplicableFact(JsonlFact),
     #[serde(rename = "fact")]
     Fact(JsonlFact),
     #[serde(rename = "episode")]
@@ -416,12 +912,15 @@ pub enum JsonlRecord {
     Mind(MindRecord),
 }
 
-/// Minimal fact representation in the JSONL transport format.
-/// The JSONL contains a subset of the full Fact fields — DB-only fields
-/// (confidence, reinforcement_count, decay_rate, etc.) are NOT in the JSONL.
-/// These are reconstructed from defaults on import.
+/// Fact transport. Legacy records omit operational state; modern exports retain it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonlFact {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applicability: Option<Box<RecordedApplicability>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle_inference: Option<Box<LifecycleInference>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operational: Option<Box<FactOperationalState>>,
     pub id: String,
     pub mind: String,
     pub content: String,
@@ -451,6 +950,278 @@ pub struct JsonlFact {
     /// Searchable tags for domain classification.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+}
+
+/// Declared applicability rules. Empty rules preserve unknown applicability.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApplicabilityConstraints {
+    #[serde(default)]
+    pub platforms: Vec<String>,
+    #[serde(default)]
+    pub workspaces: Vec<String>,
+    #[serde(default)]
+    pub revisions: Vec<String>,
+    #[serde(default)]
+    pub components: Vec<String>,
+    #[serde(default)]
+    pub valid_from: Option<String>,
+    #[serde(default)]
+    pub valid_until: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecordedApplicability {
+    pub constraints: ApplicabilityConstraints,
+    pub recorded_at: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApplicabilityContext {
+    pub platform: Option<String>,
+    pub workspace: Option<String>,
+    pub revision: Option<String>,
+    pub component: Option<String>,
+    pub at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicabilityStatus {
+    #[default]
+    Unknown,
+    Matches,
+    Inapplicable,
+}
+
+/// Supported classes of explicit structured lifecycle conclusion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LifecycleConclusionKind {
+    Decision,
+    Constraint,
+    Specification,
+}
+
+/// Portable attribution to the exact artifact snapshot parsed by the host.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LifecycleConclusionSource {
+    pub kind: LifecycleConclusionKind,
+    pub artifact_path: String,
+    pub artifact_id: Option<String>,
+    pub artifact_sub: String,
+    pub artifact_sha256: String,
+    pub statement_sha256: String,
+}
+
+/// Attribution supplied with an unconfirmed lifecycle summary, not verified evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LifecycleInference {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmation: Option<CandidateConfirmation>,
+    pub source_kind: String,
+    pub artifact_ref_type: Option<String>,
+    pub artifact_ref_path: Option<String>,
+    pub artifact_ref_sub: Option<String>,
+    /// Proposed correction only; admission must not apply it before confirmation.
+    pub proposed_supersedes: Option<String>,
+}
+
+impl LifecycleInference {
+    pub fn validate(&self) -> crate::backend::Result<()> {
+        if let Some(confirmation) = &self.confirmation {
+            confirmation.validate()?;
+        }
+        for value in [
+            Some(&self.source_kind),
+            self.artifact_ref_type.as_ref(),
+            self.artifact_ref_path.as_ref(),
+            self.artifact_ref_sub.as_ref(),
+            self.proposed_supersedes.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if value.trim().is_empty() || value.len() > 2048 || value.chars().any(char::is_control)
+            {
+                return Err(crate::MemoryError::InvalidMutation(
+                    "invalid lifecycle inference reference".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn validate_inference_status(
+    status: &FactStatus,
+    inference: Option<&LifecycleInference>,
+    content: &str,
+) -> crate::backend::Result<()> {
+    if (*status == FactStatus::Pending)
+        != inference.is_some_and(|inference| inference.confirmation.is_none())
+    {
+        return Err(crate::MemoryError::InvalidMutation(
+            "lifecycle inferences must remain pending".into(),
+        ));
+    }
+    if let Some(inference) = inference {
+        inference.validate()?;
+        if inference.confirmation.as_ref().is_some_and(|confirmation| {
+            confirmation.content_sha256 != crate::retrieval::raw_content_hash(content)
+        }) {
+            return Err(crate::MemoryError::InvalidMutation(
+                "confirmed content does not match operator review".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfirmationSurface {
+    /// Shared native agent-event approval channel; not a specific frontend identity.
+    NativeEvent,
+    Acp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CandidateConfirmation {
+    pub reviewed_version: u64,
+    pub snapshot_sha256: String,
+    pub session_id: String,
+    pub request_id: String,
+    pub surface: ConfirmationSurface,
+    pub confirmed_at: String,
+    pub content_sha256: String,
+}
+
+impl CandidateConfirmation {
+    pub fn validate(&self) -> crate::backend::Result<()> {
+        for value in [&self.session_id, &self.request_id] {
+            if value.is_empty() || value.len() > 2048 || value.chars().any(char::is_control) {
+                return Err(crate::MemoryError::InvalidMutation(
+                    "invalid confirmation provenance".into(),
+                ));
+            }
+        }
+        if self.reviewed_version > i64::MAX as u64
+            || self.snapshot_sha256.len() != 64
+            || !self
+                .snapshot_sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+            || chrono::DateTime::parse_from_rfc3339(&self.confirmed_at).is_err()
+            || self.content_sha256.len() != 64
+            || !self
+                .content_sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(crate::MemoryError::InvalidMutation(
+                "invalid confirmation timestamp or digest".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn validate_inference_import(
+    existing: Option<&LifecycleInference>,
+    incoming: Option<&LifecycleInference>,
+    status: &FactStatus,
+) -> crate::backend::Result<()> {
+    if let Some(existing) = existing {
+        if existing.confirmation.is_none()
+            && (*status != FactStatus::Pending
+                || incoming.is_some_and(|inference| inference.confirmation.is_some()))
+        {
+            return Err(crate::MemoryError::InvalidMutation(
+                "transport cannot confirm lifecycle inference".into(),
+            ));
+        }
+        if existing.confirmation.is_some() && incoming != Some(existing) {
+            return Err(crate::MemoryError::InvalidMutation(
+                "transport cannot rewrite operator confirmation attribution".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Persisted operational state, transported without reinforcement or clock resets.
+/// Absence on a legacy record means unknown, not a request to reset existing state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FactOperationalState {
+    pub confidence: f64,
+    pub reinforcement_count: u32,
+    pub decay_rate: f64,
+    pub last_reinforced: String,
+    pub last_accessed: Option<String>,
+    pub created_session: Option<String>,
+    pub superseded_at: Option<String>,
+    pub archived_at: Option<String>,
+    pub jj_change_id: Option<String>,
+}
+
+impl From<&Fact> for FactOperationalState {
+    fn from(fact: &Fact) -> Self {
+        Self {
+            confidence: fact.confidence,
+            reinforcement_count: fact.reinforcement_count,
+            decay_rate: fact.decay_rate,
+            last_reinforced: fact.last_reinforced.clone(),
+            last_accessed: fact.last_accessed.clone(),
+            created_session: fact.created_session.clone(),
+            superseded_at: fact.superseded_at.clone(),
+            archived_at: fact.archived_at.clone(),
+            jj_change_id: fact.jj_change_id.clone(),
+        }
+    }
+}
+
+impl FactOperationalState {
+    pub fn validate(&self) -> crate::backend::Result<()> {
+        if !self.confidence.is_finite()
+            || !(0.0..=1.0).contains(&self.confidence)
+            || !self.decay_rate.is_finite()
+            || self.decay_rate < 0.0
+        {
+            return Err(crate::MemoryError::InvalidMutation(
+                "invalid fact operational numeric state".into(),
+            ));
+        }
+        for time in [
+            Some(&self.last_reinforced),
+            self.last_accessed.as_ref(),
+            self.superseded_at.as_ref(),
+            self.archived_at.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if chrono::DateTime::parse_from_rfc3339(time).is_err() {
+                return Err(crate::MemoryError::InvalidMutation(
+                    "invalid fact operational timestamp".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn apply_to(self, fact: &mut Fact) {
+        fact.confidence = self.confidence;
+        fact.reinforcement_count = self.reinforcement_count;
+        fact.decay_rate = self.decay_rate;
+        fact.last_reinforced = self.last_reinforced;
+        fact.last_accessed = self.last_accessed;
+        fact.created_session = self.created_session;
+        fact.superseded_at = self.superseded_at;
+        fact.archived_at = self.archived_at;
+        fact.jj_change_id = self.jj_change_id;
+    }
 }
 
 /// Mind record in the JSONL transport.
@@ -483,6 +1254,9 @@ mod tests {
     #[test]
     fn jsonl_fact_round_trip() {
         let fact = JsonlFact {
+            applicability: None,
+            lifecycle_inference: None,
+            operational: None,
             id: "abc123".into(),
             mind: "default".into(),
             content: "Some architecture fact".into(),

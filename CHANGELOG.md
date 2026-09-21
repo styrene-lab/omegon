@@ -18,6 +18,50 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- CI now serializes main-crate tests to respect process-global fixture isolation, with a matching integration-job time budget. Delegate process tests use checked-in executable fixtures to avoid Linux executable-write races.
+
+- Composition surface baselines now account for the four admitted memory tools and applicability schemas in the Wave 5 prerequisite stack. Recorded Linux artifact evidence and budget regressions preserve existing growth allowances and reduced-host limits.
+
+- Memory status now reports storage, extraction, embedding, and indexing readiness independently without provider probes. Schema v14 preserves version- and attempt-bound indexing failures across restart, completes compatible vector writes atomically, and supports bounded repair without reinforcing facts.
+
+- Memory evaluation now provides time-filtered synthetic cases, stage-attributed paired policy reports, and an opt-in live runner with one aggregate token/deadline budget. Reports retain unknown costs, incomplete provider execution, and frozen smoke thresholds instead of treating unavailable runs as quality success.
+
+- Memory checkpoints now retain successive bounded evidence ranges with atomic local resume receipts. Capture resumes across restart, drains overflow in bounded passes, rejects replaced source cursors, and reports capture backpressure. Session finalization shares the range contract and bounds concurrent workers.
+
+- Memory formation envelopes now support explicit versioned evidence-coverage ranges. Storage validates range bounds and preserves coverage through extraction completion, replay, SQLite reopen, and JSONL transport. Legacy snapshots retain unknown coverage.
+
+- Compaction and aggressive decay now await optional, published feature checkpoint hooks under a shared deadline. Memory acknowledges a durable bounded snapshot or reports unavailable capture, reusing its owned worker and receipts; optional memory failure does not block compaction.
+
+- Hosted memory now captures bounded committed-evidence snapshots every eight turn-end notifications before session finalization. A single interval worker coalesces scheduling pressure, replays identical captures, and leaves extraction to background recovery; `memory_query` reports capture admission state.
+
+- Pending memory extraction now progresses through continuous bounded recovery passes, with idle polling and capped retry backoff. Hosted `memory_query` exposes content-free scheduler observations. Managed shutdown joins the worker, and feature drop signals cancellation.
+
+- Hosted memory now resumes a bounded batch of pending extraction checkpoints on session startup using retained evidence and the recorded model. Completed work is excluded, overflow remains durable, and managed shutdown cancels recovery without falsely completing checkpoints.
+
+- Memory selection now reuses bounded snapshots when task, scope, pins, budgets, policy, and backend state agree. Connection-bound change stamps invalidate local and external writes; applicability and confidence-floor deadlines prevent stale eligibility. Reports expose cache hits and snapshot times. Custom backends/renderers without reliable cache contracts remain uncached.
+
+- Ambient memory and explicit memory context packs now share whole-block counted selection with a configurable `memoryContextTokens` cap. Reports identify conservative UTF-8-byte accounting, selected handles, exclusions, and pin replacements. Low-signal turns use eligible pins, episodes have a bounded share, and static provider injections replace older values for every TTL instead of accumulating them.
+
+- Memory facts can carry platform, workspace, exact Git revision, component, and valid-time applicability. Current lexical/vector/graph retrieval filters known mismatches before candidate limits and labels unknown applicability. Version-checked scope updates preserve reinforcement and lifecycle state; context injections retire when scope changes or cannot be revalidated. Schema v13 and the `applicable_fact` JSONL tag preserve declared scope across persistence and transport, and vault projections display it.
+
+- `memory_inspect` provides mind-scoped, read-only inspection of active, historical, and pending facts. It reports bounded content previews, recorded provenance, and supported artifact availability without reinforcement or reactivation. Changed snapshots and readable-but-unverified references remain distinct from validated evidence; the standalone provider explicitly reports references it has not checked.
+
+- `memory_confirm` now requests per-candidate operator approval through TUI or ACP. Only the runtime's internal confirmation route can activate the reviewed snapshot, with version-checked atomic corrections and durable session/surface attribution. Schema v12 distinguishes confirmed inferences from pending ones and preserves their metadata through transport; corrupt confirmed rows fail inventory reads rather than disappearing from vault publication.
+
+- Explicit lifecycle ingestion now checks bounded repository artifacts before admitting decisions, constraints, or baseline/archived specification conclusions. Portable source attribution retains artifact and statement hashes. Corrections require a target version and commit supersession atomically within one mind; recall now displays fact versions for those preconditions.
+
+- Inferred lifecycle summaries now persist as pending candidates with declared artifact references and proposed supersession intent. They are excluded from recall, ambient/pinned context, indexing, and vault publication. Schema v11 preserves candidate attribution and replay receipts; supported v5–v10 stores migrate through the existing backup workflow. JSONL transport cannot promote a retained inference to active knowledge.
+
+- Memory JSONL exports now retain archived, dormant, and superseded facts alongside active facts, including persisted confidence, reinforcement timestamps/counts, and source-session metadata. Modern imports preserve this state without reinforcement; legacy updates retain existing operational metadata. Unknown imported sources remain unknown, and corrupt fact rows fail export instead of disappearing from history.
+
+- Memory retrieval now requires model/revision/preprocessing identity and source fingerprints for vector comparison. Schema v10 preserves legacy vectors as unverified until repair. Recall reports named scores and index degradation, labels directional conflicts, and avoids obsolete supersession expansion. Embedding backfill honors `--cwd`, skips ready vectors, uses version-checked writes, and reports unavailable/incomplete repair as an error.
+
+- Memory formation now bounds provider text while streaming and requires terminal completion, preserves contiguous excerpts across unreadable chunks, and rejects contradictory evidence identities. Capture-policy v2 removes volatile retry metadata and separates mind-scoped receipts; invalid model configuration preserves source capture. Episode search tolerates quoted queries and matches titles consistently across both backends.
+
+- Session memory now captures bounded, attributed semantic evidence before extraction. Extraction is independently configurable with `memoryExtractionModel` and `memoryExtractionEnabled`; generated candidates remain pending inferences. Memory schema v9 preserves formation evidence and extraction outcomes, with verified migration from v5–v8 and atomic completion, search updates, and stale episode-vector invalidation.
+
+- Memory archive search now returns labeled historical facts, and section filters apply before lexical, vector, and graph result limits. Ambient memory uses task-matched evidence, avoids duplicate pins and oversized-fact starvation, and clears stale injections when a task has no matches. SQLite search failures remain errors instead of appearing as empty results.
+
 - Inline menus and inspectors borrow a clean screen instead of unexpectedly exposing the resumed transcript and fullscreen workspace behind them.
 
 - A shared live action area now identifies thinking, response streaming, and running tools in inline and fullscreen. Inline activity stays below the response tail and above input, clears on authoritative completion, and honors the activity visibility setting.

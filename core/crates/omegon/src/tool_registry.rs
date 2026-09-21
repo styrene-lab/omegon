@@ -71,6 +71,11 @@ pub mod memory {
     pub const MEMORY_COMPACT: &str = "memory_compact";
     pub const MEMORY_SEARCH_ARCHIVE: &str = "memory_search_archive";
     pub const MEMORY_INGEST_LIFECYCLE: &str = "memory_ingest_lifecycle";
+    pub const MEMORY_CONFIRM: &str = "memory_confirm";
+    pub const MEMORY_INSPECT: &str = "memory_inspect";
+    pub const MEMORY_SET_APPLICABILITY: &str = "memory_set_applicability";
+    pub const MEMORY_SELECTION: &str = "memory_selection";
+    pub const MEMORY_APPLY_CONFIRMATION: &str = "memory_apply_confirmation";
 }
 
 /// Lifecycle tools (design tree + openspec) — owned by `features::lifecycle`
@@ -195,7 +200,7 @@ pub mod loop_jobs {
 /// **Maintenance rule**: every `pub const` above MUST appear here.
 /// The `registry_count_is_current` test will catch omissions.
 /// Number of statically registered tools (for splash screen display).
-pub const TOOL_COUNT: usize = 81;
+pub const TOOL_COUNT: usize = 86;
 
 pub fn all_static_names() -> Vec<&'static str> {
     vec![
@@ -225,7 +230,7 @@ pub fn all_static_names() -> Vec<&'static str> {
         local_inference::ASK_LOCAL_MODEL,
         local_inference::LIST_LOCAL_MODELS,
         local_inference::MANAGE_OLLAMA,
-        // memory (12)
+        // memory
         memory::MEMORY_STORE,
         memory::MEMORY_RECALL,
         memory::MEMORY_QUERY,
@@ -238,6 +243,11 @@ pub fn all_static_names() -> Vec<&'static str> {
         memory::MEMORY_COMPACT,
         memory::MEMORY_SEARCH_ARCHIVE,
         memory::MEMORY_INGEST_LIFECYCLE,
+        memory::MEMORY_CONFIRM,
+        memory::MEMORY_INSPECT,
+        memory::MEMORY_SET_APPLICABILITY,
+        memory::MEMORY_SELECTION,
+        memory::MEMORY_APPLY_CONFIRMATION,
         // lifecycle (4)
         lifecycle::DESIGN_TREE,
         lifecycle::DESIGN_TREE_UPDATE,

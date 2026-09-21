@@ -896,6 +896,12 @@ async fn materialize_to_vault_with_subdir_cancellable(
                 "- {} [confidence: {:.2}, id: {}]\n",
                 fact.content, fact.confidence, fact.id
             ));
+            let applicability = match &fact.applicability {
+                Some(record) => serde_json::to_string(record)
+                    .map_err(|error| VaultSyncError::Storage(error.to_string()))?,
+                None => "unknown".into(),
+            };
+            content.push_str(&format!("  - Declared applicability: {applicability}\n"));
         }
         if !facts.is_empty() {
             index_rows.push((slug, facts.len(), stable_date.to_string()));
@@ -1953,6 +1959,7 @@ mod tests {
                     files_changed: vec![],
                     tags: vec![],
                     tool_calls_count: Some(calls),
+                    formation: None,
                 })
                 .await
                 .unwrap();

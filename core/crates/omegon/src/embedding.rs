@@ -12,6 +12,167 @@ use serde::Deserialize;
 const DEFAULT_EMBED_URL: &str = "http://localhost:11434";
 const DEFAULT_EMBED_MODEL: &str = "nomic-embed-text";
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum BoundedEmbeddingError {
+    #[error("embedding generation cancelled")]
+    Cancelled,
+    #[error("embedding generation deadline exceeded")]
+    DeadlineExceeded,
+    #[error("embedding generation failed")]
+    Generation(#[source] EmbedError),
+}
+
+/// One bounded identified request. Dropping the owned inference future releases
+/// its HTTP request; no detached inference task is spawned by this boundary.
+pub(crate) async fn generate_identified(
+    service: &dyn EmbeddingService,
+    content: &str,
+    budget: std::time::Duration,
+    cancellation: &tokio_util::sync::CancellationToken,
+) -> Result<omegon_memory::IdentifiedEmbedding, BoundedEmbeddingError> {
+    tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => Err(BoundedEmbeddingError::Cancelled),
+        result = tokio::time::timeout(budget, service.embed_identified(content)) => {
+            result.map_err(|_| BoundedEmbeddingError::DeadlineExceeded)?
+                .map_err(BoundedEmbeddingError::Generation)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IndexFactOutcome {
+    Indexed,
+    Incomplete(omegon_memory::EmbeddingIndexingReason),
+    StorageUnavailable,
+}
+
+/// Persist pending state before optional inference. Settlement uses a fresh,
+/// bounded token so cancellation of inference cannot cancel its durable reason.
+pub(crate) async fn index_fact(
+    service: &dyn EmbeddingService,
+    binding: &crate::memory_service::MemoryBinding,
+    fact: omegon_memory::FactPrecondition,
+    content: &str,
+    operation_id: &str,
+    cancellation: &tokio_util::sync::CancellationToken,
+) -> IndexFactOutcome {
+    use crate::memory_service::MemoryServiceErrorCodeV1 as Code;
+    use omegon_memory::{EmbeddingIndexingReason as Reason, MemoryMutation};
+    let mut record = omegon_memory::EmbeddingIndexingRecord {
+        fact: fact.clone(),
+        attempt_id: omegon_memory::retrieval::raw_content_hash(operation_id),
+        space: None,
+        reason: Reason::Pending,
+    };
+    if let Err(error) = apply_index_mutation_result(
+        binding,
+        format!("{operation_id}:pending"),
+        MemoryMutation::RecordEmbeddingIndexing {
+            record: record.clone(),
+        },
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    {
+        return if error == Code::FactVersionConflict {
+            IndexFactOutcome::Incomplete(Reason::SourceChanged)
+        } else {
+            IndexFactOutcome::StorageUnavailable
+        };
+    }
+    let reason = match generate_identified(
+        service,
+        content,
+        std::time::Duration::from_secs(30),
+        cancellation,
+    )
+    .await
+    {
+        Ok(embedding) => {
+            let result = apply_index_mutation_result(
+                binding,
+                format!("{operation_id}:complete"),
+                MemoryMutation::CompleteEmbeddingIndexing {
+                    fact,
+                    attempt_id: record.attempt_id.clone(),
+                    embedding,
+                },
+                cancellation.child_token(),
+            )
+            .await;
+            match result {
+                Ok(()) => return IndexFactOutcome::Indexed,
+                Err(Code::FactVersionConflict) => {
+                    return IndexFactOutcome::Incomplete(Reason::SourceChanged);
+                }
+                Err(Code::InvalidMutation) => {
+                    return IndexFactOutcome::Incomplete(Reason::Incompatible);
+                }
+                Err(_) if cancellation.is_cancelled() => Reason::Cancelled,
+                Err(_) => Reason::WriteFailed,
+            }
+        }
+        Err(BoundedEmbeddingError::Cancelled) => Reason::Cancelled,
+        Err(BoundedEmbeddingError::DeadlineExceeded) => Reason::Timeout,
+        Err(BoundedEmbeddingError::Generation(EmbedError::Unavailable(_))) => Reason::Unavailable,
+        Err(BoundedEmbeddingError::Generation(EmbedError::RequestFailed(_))) => {
+            Reason::GenerationFailed
+        }
+    };
+    record.reason = reason;
+    if apply_index_mutation(
+        binding,
+        format!("{operation_id}:failure:{reason:?}"),
+        MemoryMutation::RecordEmbeddingIndexing { record },
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    {
+        IndexFactOutcome::Incomplete(reason)
+    } else {
+        IndexFactOutcome::StorageUnavailable
+    }
+}
+
+pub(crate) async fn apply_index_mutation(
+    binding: &crate::memory_service::MemoryBinding,
+    operation_id: String,
+    mutation: omegon_memory::MemoryMutation,
+    cancellation: tokio_util::sync::CancellationToken,
+) -> bool {
+    apply_index_mutation_result(binding, operation_id, mutation, cancellation)
+        .await
+        .is_ok()
+}
+
+async fn apply_index_mutation_result(
+    binding: &crate::memory_service::MemoryBinding,
+    operation_id: String,
+    mutation: omegon_memory::MemoryMutation,
+    cancellation: tokio_util::sync::CancellationToken,
+) -> Result<(), crate::memory_service::MemoryServiceErrorCodeV1> {
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        binding.invoke(crate::memory_service::MemoryRequestV1::ApplyMutation {
+            scope: crate::memory_service::MemoryScopeV1::Project,
+            operation_id,
+            mutation,
+            cancellation: cancellation.clone(),
+        }),
+    )
+    .await;
+    cancellation.cancel();
+    match result {
+        Ok(Ok(crate::memory_service::MemoryResponseV1 {
+            payload: crate::memory_service::MemoryPayloadV1::Mutation(_),
+            ..
+        })) => Ok(()),
+        Ok(Err(omegon_traits::ManagedServiceCallError::Operation(error))) => Err(error.code),
+        _ => Err(crate::memory_service::MemoryServiceErrorCodeV1::Unavailable),
+    }
+}
+
 /// Embedding service backed by Ollama's `/api/embed` endpoint.
 pub struct OllamaEmbeddingService {
     /// Lazy-initialized HTTP client. Deferred to avoid triggering macOS
@@ -24,6 +185,47 @@ pub struct OllamaEmbeddingService {
 #[derive(Deserialize)]
 struct EmbedResponse {
     embeddings: Vec<Vec<f32>>,
+}
+
+#[derive(Deserialize)]
+struct ModelsResponse {
+    models: Vec<ModelIdentity>,
+}
+#[derive(Deserialize, PartialEq, Eq)]
+struct ModelIdentity {
+    name: String,
+    digest: String,
+    #[serde(default)]
+    remote_model: Option<String>,
+    #[serde(default)]
+    remote_host: Option<String>,
+}
+
+async fn bounded_json<T: serde::de::DeserializeOwned>(
+    mut response: reqwest::Response,
+) -> Result<T, EmbedError> {
+    const MAX_BYTES: usize = 2 * 1024 * 1024;
+    if !response.status().is_success() {
+        return Err(EmbedError::RequestFailed(format!(
+            "embedding HTTP {}",
+            response.status()
+        )));
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| EmbedError::RequestFailed(error.without_url().to_string()))?
+    {
+        if bytes.len().saturating_add(chunk.len()) > MAX_BYTES {
+            return Err(EmbedError::RequestFailed(
+                "embedding response exceeds byte budget".into(),
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&bytes)
+        .map_err(|_| EmbedError::RequestFailed("invalid embedding response schema".into()))
 }
 
 impl OllamaEmbeddingService {
@@ -64,11 +266,6 @@ impl OllamaEmbeddingService {
             .await
     }
 
-    /// The configured base URL (for logging).
-    pub fn base_url(&self) -> &str {
-        &self.base_url
-    }
-
     /// Probe whether the embedding endpoint is reachable.
     ///
     /// Uses the lazy-initialized HTTP client to GET `/api/tags`. The client
@@ -84,11 +281,52 @@ impl OllamaEmbeddingService {
             .map(|r| r.status().is_success())
             .unwrap_or(false)
     }
+
+    async fn identity(&self) -> Result<ModelIdentity, EmbedError> {
+        let response = self
+            .client()
+            .await
+            .get(format!("{}/api/tags", self.base_url))
+            .send()
+            .await
+            .map_err(|error| EmbedError::Unavailable(error.without_url().to_string()))?;
+        let models: ModelsResponse = bounded_json(response).await?;
+        let configured = self.model.strip_suffix(":latest").unwrap_or(&self.model);
+        let mut identity = models
+            .models
+            .into_iter()
+            .find(|model| model.name.strip_suffix(":latest").unwrap_or(&model.name) == configured)
+            .ok_or_else(|| {
+                EmbedError::Unavailable(
+                    "configured embedding model is absent from model inventory".into(),
+                )
+            })?;
+        let digest = identity
+            .digest
+            .strip_prefix("sha256:")
+            .unwrap_or(&identity.digest);
+        if identity.remote_model.is_some()
+            || identity.remote_host.is_some()
+            || digest.len() != 64
+            || !digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(EmbedError::Unavailable(
+                "verifiable embedding content digest is unavailable".into(),
+            ));
+        }
+        identity.digest = digest.to_ascii_lowercase();
+        Ok(identity)
+    }
 }
 
 #[async_trait]
 impl EmbeddingService for OllamaEmbeddingService {
     async fn embed(&self, text: &str) -> Result<Vec<f32>, EmbedError> {
+        if text.len() > 65_536 {
+            return Err(EmbedError::RequestFailed(
+                "embedding input exceeds byte budget".into(),
+            ));
+        }
         let body = serde_json::json!({
             "model": self.model,
             "input": text,
@@ -101,18 +339,9 @@ impl EmbeddingService for OllamaEmbeddingService {
             .json(&body)
             .send()
             .await
-            .map_err(|e| EmbedError::Unavailable(e.to_string()))?;
+            .map_err(|e| EmbedError::Unavailable(e.without_url().to_string()))?;
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(EmbedError::RequestFailed(format!("{status}: {text}")));
-        }
-
-        let data: EmbedResponse = resp
-            .json()
-            .await
-            .map_err(|e| EmbedError::RequestFailed(e.to_string()))?;
+        let data: EmbedResponse = bounded_json(resp).await?;
 
         data.embeddings
             .into_iter()
@@ -123,11 +352,280 @@ impl EmbeddingService for OllamaEmbeddingService {
     fn model_name(&self) -> &str {
         &self.model
     }
+
+    async fn embed_identified(
+        &self,
+        text: &str,
+    ) -> Result<omegon_memory::IdentifiedEmbedding, EmbedError> {
+        let before = self.identity().await?;
+        let values = self.embed(text).await?;
+        if before != self.identity().await? {
+            return Err(EmbedError::Unavailable(
+                "embedding model changed during generation".into(),
+            ));
+        }
+        let result = omegon_memory::IdentifiedEmbedding {
+            space: omegon_memory::EmbeddingSpace {
+                model: format!("ollama:{}", before.name),
+                revision: before.digest,
+                preprocessing: "ollama-api-embed/raw-v1".into(),
+                dimensions: values.len() as u32,
+            },
+            values,
+        };
+        result
+            .validate()
+            .map_err(|_| EmbedError::RequestFailed("invalid identified embedding".into()))?;
+        Ok(result)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct HangingEmbedding {
+        entered: tokio::sync::Notify,
+        dropped: std::sync::atomic::AtomicBool,
+    }
+
+    #[tokio::test]
+    async fn wave5_cancelled_indexing_persists_reason_after_commit_and_reopen() {
+        use omegon_memory::{EmbeddingIndexingReason, MemoryBackend, SqliteBackend};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("facts.db");
+        let backend = SqliteBackend::open(&path).unwrap();
+        let fact = backend
+            .store_fact(omegon_memory::StoreFact {
+                mind: "fixture".into(),
+                content: "committed cancellation evidence".into(),
+                section: omegon_memory::Section::Architecture,
+                source: None,
+                decay_profile: Default::default(),
+            })
+            .await
+            .unwrap()
+            .fact;
+        drop(backend);
+        let binding = crate::memory_service::MemoryBinding::default();
+        let mut bus = crate::bus::EventBus::new();
+        bus.register(Box::new(crate::memory_service::MemoryDeclarationFeature));
+        let candidate =
+            crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
+                workspace_root: Some(dir.path().into()),
+                memory_token_cap: None,
+                project_memory_root: dir.path().into(),
+                project_db_path: path.clone(),
+                project_jsonl_path: dir.path().join("facts.jsonl"),
+                global_db_path: None,
+                vault: None,
+                startup_sync_enabled: false,
+            })
+            .await
+            .unwrap();
+        bus.stage_managed_generation("memory", candidate).unwrap();
+        bus.try_finalize_managed().await.unwrap();
+        binding.capture(&bus).unwrap();
+        let service = HangingEmbedding {
+            entered: Default::default(),
+            dropped: false.into(),
+        };
+        let token = tokio_util::sync::CancellationToken::new();
+        let cancel = async {
+            service.entered.notified().await;
+            token.cancel();
+        };
+        let (outcome, ()) = tokio::join!(
+            index_fact(
+                &service,
+                &binding,
+                omegon_memory::FactPrecondition {
+                    id: fact.id.clone(),
+                    expected_version: fact.version
+                },
+                &fact.content,
+                "cancelled-fixture",
+                &token
+            ),
+            cancel
+        );
+        assert_eq!(
+            outcome,
+            IndexFactOutcome::Incomplete(EmbeddingIndexingReason::Cancelled)
+        );
+        assert!(service.dropped.load(std::sync::atomic::Ordering::SeqCst));
+        crate::status::refresh_managed_memory_status_for_mind(&binding, dir.path(), "fixture")
+            .await;
+        let status = crate::status::memory_capabilities_snapshot_for(dir.path());
+        assert_eq!(status.pending_indexing, Some(1));
+        assert_eq!(
+            status.indexing.unwrap().reasons[&EmbeddingIndexingReason::Cancelled],
+            1
+        );
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        let reopened = SqliteBackend::open(&path).unwrap();
+        assert_eq!(
+            reopened
+                .embedding_indexing_record(&fact.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .reason,
+            EmbeddingIndexingReason::Cancelled
+        );
+        assert_eq!(
+            reopened
+                .fts_search("fixture", "committed", 5)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            serde_json::to_value(reopened.get_fact(&fact.id).await.unwrap().unwrap()).unwrap(),
+            serde_json::to_value(fact).unwrap()
+        );
+    }
+
+    #[async_trait]
+    impl EmbeddingService for HangingEmbedding {
+        async fn embed(&self, _: &str) -> Result<Vec<f32>, EmbedError> {
+            panic!("identified generation must not use the legacy API")
+        }
+
+        async fn embed_identified(
+            &self,
+            _: &str,
+        ) -> Result<omegon_memory::IdentifiedEmbedding, EmbedError> {
+            struct Guard<'a>(&'a std::sync::atomic::AtomicBool);
+            impl Drop for Guard<'_> {
+                fn drop(&mut self) {
+                    self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+            let _guard = Guard(&self.dropped);
+            self.entered.notify_one();
+            std::future::pending().await
+        }
+
+        fn model_name(&self) -> &str {
+            "hanging-fixture"
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wave5_embedding_deadline_drops_owned_inference() {
+        let service = HangingEmbedding {
+            entered: Default::default(),
+            dropped: false.into(),
+        };
+        let token = tokio_util::sync::CancellationToken::new();
+        let result = generate_identified(
+            &service,
+            "fixture",
+            std::time::Duration::from_secs(30),
+            &token,
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(BoundedEmbeddingError::DeadlineExceeded)
+        ));
+        assert!(service.dropped.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn wave5_embedding_cancellation_drops_owned_inference() {
+        let service = HangingEmbedding {
+            entered: Default::default(),
+            dropped: false.into(),
+        };
+        let token = tokio_util::sync::CancellationToken::new();
+        let cancel = async {
+            service.entered.notified().await;
+            token.cancel();
+        };
+        let (result, ()) = tokio::join!(
+            generate_identified(
+                &service,
+                "fixture",
+                std::time::Duration::from_secs(30),
+                &token
+            ),
+            cancel
+        );
+        assert!(matches!(result, Err(BoundedEmbeddingError::Cancelled)));
+        assert!(service.dropped.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn wave5_precancelled_embedding_never_starts_inference() {
+        let service = HangingEmbedding {
+            entered: Default::default(),
+            dropped: false.into(),
+        };
+        let token = tokio_util::sync::CancellationToken::new();
+        token.cancel();
+        let result = generate_identified(
+            &service,
+            "fixture",
+            std::time::Duration::from_secs(30),
+            &token,
+        )
+        .await;
+        assert!(matches!(result, Err(BoundedEmbeddingError::Cancelled)));
+        assert!(!service.dropped.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn wave4_ollama_identity_is_checked_around_generation() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        for change in [false, true] {
+            let changed = Arc::new(AtomicBool::new(false));
+            let tags_changed = changed.clone();
+            let app = axum::Router::new()
+                .route("/api/tags", axum::routing::get(move || {
+                    let flag = tags_changed.clone();
+                    async move { axum::Json(serde_json::json!({"models":[{"name":"fixture:latest", "digest":if flag.load(Ordering::SeqCst) { "b".repeat(64) } else { "a".repeat(64) }}]})) }
+                }))
+                .route("/api/embed", axum::routing::post(move |axum::Json(body): axum::Json<serde_json::Value>| {
+                    let flag = changed.clone();
+                    async move {
+                        assert_eq!(body["model"], "fixture");
+                        assert_eq!(body["input"], "evidence");
+                        if change { flag.store(true, Ordering::SeqCst); }
+                        axum::Json(serde_json::json!({"embeddings":[[1.0,0.0]]}))
+                    }
+                }));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                axum::serve(listener, app).await.unwrap();
+            });
+            let service = OllamaEmbeddingService::from_config(
+                Some(&format!("http://{address}")),
+                Some("fixture"),
+            );
+            let result = service.embed_identified("evidence").await;
+            server.abort();
+            let _ = server.await;
+            if change {
+                assert!(result.is_err());
+            } else {
+                let embedding = result.unwrap();
+                assert_eq!(embedding.space.revision, "a".repeat(64));
+                assert_eq!(embedding.space.dimensions, 2);
+                assert_eq!(embedding.space.model, "ollama:fixture:latest");
+            }
+        }
+    }
 
     #[test]
     fn config_uses_defaults_when_nothing_set() {

@@ -2866,6 +2866,10 @@ pub async fn context_compact_response(
                 reason: retention_reason.clone(),
             },
         ));
+        runtime_state
+            .bus
+            .before_context_eviction(tokio_util::sync::CancellationToken::new())
+            .await;
         let compact_result = if let Some(authority) = authority_compaction.as_ref() {
             crate::session_execution::boot_execution_binding()
                 .compact_scoped(
@@ -3264,6 +3268,7 @@ fn publish_session_view_binding(
     agent
         .session_view_binding
         .replace(crate::session_consumers::SessionViewTarget {
+            binding_id: uuid::Uuid::new_v4(),
             snapshot,
             session_id: outcome.session_id.clone(),
             stream_id: (outcome.projection.stream_id != uuid::Uuid::nil())

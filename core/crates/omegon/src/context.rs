@@ -201,26 +201,14 @@ impl ContextManager {
             context_budget_tokens: system_budget,
         };
 
-        // Collect injections from all providers
-        for provider in &self.providers {
-            if let Some(injection) = provider.provide_context(&signals) {
-                // A persistent injection is a *replacement* for that source's
-                // previous state, not an addition. Without this, a provider
-                // that injects every turn with an infinite TTL accumulates one
-                // copy per turn. Under progressive disclosure each copy differs
-                // (bodies are admitted per prompt), so the model would see N
-                // contradictory skill sets instead of the current one.
-                if injection.ttl_turns == u32::MAX {
-                    let source = injection.source.clone();
-                    self.active_injections
-                        .retain(|a| a.injection.source != source);
-                }
-                self.active_injections.push(ActiveInjection {
-                    remaining_turns: injection.ttl_turns,
-                    injection,
-                });
-            }
-        }
+        // Static providers and runtime features share replacement-by-source
+        // semantics, including finite TTLs and explicit empty replacements.
+        let injections = self
+            .providers
+            .iter()
+            .filter_map(|provider| provider.provide_context(&signals))
+            .collect();
+        self.inject_external(injections);
 
         // Inject tool-group and file-type guidance based on recent activity
         self.inject_tool_group_context();
@@ -614,6 +602,52 @@ mod tests {
     struct VaryingPersistentProvider {
         source: &'static str,
         calls: std::sync::atomic::AtomicUsize,
+    }
+
+    struct FiniteMemoryProvider(std::sync::atomic::AtomicUsize);
+    impl omegon_traits::ContextProvider for FiniteMemoryProvider {
+        fn provide_context(&self, _signals: &ContextSignals<'_>) -> Option<ContextInjection> {
+            let turn = self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if turn >= 3 {
+                return None;
+            }
+            Some(ContextInjection {
+                source: "memory".into(),
+                content: match turn {
+                    0 => "obsolete-memory-marker",
+                    1 => "replacement-memory-marker",
+                    _ => "",
+                }
+                .into(),
+                priority: 200,
+                ttl_turns: if turn == 2 { 1 } else { 3 },
+            })
+        }
+    }
+
+    #[test]
+    fn finite_memory_selection_replacements_cannot_accumulate_or_reappear() {
+        let mut manager = ContextManager::new(
+            String::new(),
+            vec![Box::new(FiniteMemoryProvider(
+                std::sync::atomic::AtomicUsize::new(0),
+            ))],
+        );
+        let conversation = ConversationState::new();
+        for _ in 0..3 {
+            manager.build_system_prompt("memory", &conversation);
+            assert!(
+                manager
+                    .active_injections
+                    .iter()
+                    .filter(|active| active.injection.source == "memory")
+                    .count()
+                    <= 1
+            );
+        }
+        let prompt = manager.build_system_prompt("memory", &conversation);
+        assert!(!prompt.contains("obsolete-memory-marker"));
+        assert!(!prompt.contains("replacement-memory-marker"));
     }
 
     impl omegon_traits::ContextProvider for VaryingPersistentProvider {
