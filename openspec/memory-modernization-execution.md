@@ -360,6 +360,21 @@ valid knowledge. Inspection explains each transition and its evidence.
 
 **Corpus:** [memory-procedural-learning](changes/memory-procedural-learning/proposal.md).
 
+**Post-Wave-5 entry:** The [drift assessment](changes/memory-procedural-learning/assessment.md)
+uses integrated `main` at `7b2da402`. Reuse existing skills parsing, provenance,
+guarded project writes, reload, activation, and disclosure. The missing contracts
+are versioned procedure/application state, task-verification evidence, strict
+promotion diagnostics, and recoverable cross-store publication. Tool disposition
+success is not verified workflow success, and parsing alone is not validation.
+
+**Delivery:** `feat/memory-wave8-procedural-learning` is a sibling planning seed
+from main. Automatic admission/correction needs accepted Wave 6 contracts; evidence,
+usage, validity, and stale-feedback semantics need the accepted Wave 7 policy slice.
+Freeze shared identities, promotion DTOs, and operator authorization before parallel
+integration. Start promotion with prompt-only artifacts at new project-local
+destinations. Replacement, broader installation scope, and executable assets are
+explicitly outside that slice, not implicit uses of existing force-write options.
+
 **Scope:** Form scoped procedures and gotchas from episodes. Retain prerequisites,
 validation, counterexamples, and application evidence. Use shared context budgeting.
 Promote explicitly through existing skill validation and registered command ownership,
@@ -370,6 +385,13 @@ Retrieval alone is not successful application. Inapplicable procedures are exclu
 from direct guidance. Counterexamples preserve history. Promotion passes the existing
 skill parser and replay checks; concurrent human edits remain intact.
 
+Require actual application and postcondition evidence, fail closed on unknown
+required prerequisites, and account for complete guidance units in the shared
+context budget. Publication grants no new authority or activation bypass. Journal
+filesystem publication and database receipts separately, with ownership-aware
+forward recovery that never overwrites newer human edits. Test actual registered
+TUI/CLI/ACP dispatch instead of assuming existing `/skills` routes provide parity.
+
 **Adversarial review:** Present one accidental success as a universal recipe. Vary
 platform and tool version. Retrieve without executing. Inject text claiming extra
 tool authority. Edit a skill after planning promotion. Repeat promotion. Test a
@@ -379,6 +401,12 @@ procedure that improves one task class while harming another.
 repeated-error and task-success criteria within the resource budget. If benefits do
 not justify complexity, retain inspectable candidates and explicit skill workflows
 while revising automatic learning policy.
+
+Build repeated-failure opportunities, negative-transfer controls, and held-out
+environment/tool-version cases with application traces. Wave 5's zero repeated-error
+smoke cases cannot prove a reduction. Freeze development-derived thresholds and
+obtain a fresh live-run authorization; retain inspectable candidates if quality
+acceptance fails. Review composition budgets for any new tool or schema surface.
 
 ## Validation and evidence records
 
