@@ -1,6 +1,6 @@
 # Wave 2 verification — immediate context selection repairs
 
-See [Wave 1](../memory-retrieval-contract/verification-wave-1.md) for source identity,
+See [Wave 1](../2026-09-21-memory-retrieval-contract/verification-wave-1.md) for source identity,
 fixture ownership, toolchain execution, and shared landing checks.
 
 ## Scoped behavior

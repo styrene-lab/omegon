@@ -26,7 +26,7 @@ Test paths below are under `core/crates/omegon-memory/tests/` except where noted
 ## Current checks and remaining integration
 
 - The closure-domain command recorded in
-  `../memory-provenance-validity/verification-wave-5-closure.md` passed all 61 tests,
+  `../2026-09-21-memory-provenance-validity/verification-wave-5-closure.md` passed all 61 tests,
   including initial-wave and episode-search scenarios.
 - `cargo test -p omegon-memory --test retrieval_wave4 --locked`: 11 passed.
 - Named OpenSpec validation passed (`verifying`). The read-only

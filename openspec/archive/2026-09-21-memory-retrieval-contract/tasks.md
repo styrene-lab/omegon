@@ -28,4 +28,4 @@
 <!-- specs: memory/search-stability -->
 
 - [x] RED/GREEN: Fix quoted episode queries, title matching, and empty-query behavior across both backends.
-- [x] Complete the final landing recheck in ../memory-evidence-capture/adversarial-review-wave-3.md.
+- [x] Complete the final landing recheck in ../2026-09-21-memory-evidence-capture/adversarial-review-wave-3.md.

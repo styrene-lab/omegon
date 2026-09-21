@@ -21,7 +21,7 @@
 
 - [x] Add nullable episode formation storage in schema v9, supported v5–v8 migration, legacy unknown preservation, and JSONL/reopen fixtures.
 - [x] Verify migration rollback and atomic completion of episode metadata, search index, vector invalidation, and receipts.
-- [x] Complete the scoped Wave 3 landing gate linked from ../memory-evidence-capture/verification-wave-3.md.
+- [x] Complete the scoped Wave 3 landing gate linked from ../2026-09-21-memory-evidence-capture/verification-wave-3.md.
 - [x] RED: Add supported legacy DB and JSONL fixtures plus failed-migration, reopen, and vault round-trip cases.
 - [x] GREEN: Implement migration and schema-contract updates preserving legacy unknowns and operational metadata.
 - [x] Verify vault idempotency/path boundaries and both backends; record scenario mappings and red/green outcomes.

@@ -1,35 +1,29 @@
-+++
-id = "cc1ef366-c2df-42d9-b1b2-676c3fb4680a"
-tags = []
-aliases = []
-imported_reference = false
-
-[publication]
-enabled = false
-visibility = "private"
-+++
-
-# Memory Search Stability
+# memory/search-stability - Baseline
 
 ### Requirement: Malformed FTS-like user queries do not crash memory retrieval
-Memory search MUST tolerate user-entered apostrophes and FTS-like punctuation without surfacing syntax errors to the operator.
 
-#### Scenario: Apostrophe-bearing search remains valid
-- **Given** facts containing words with apostrophes
-- **When** search is executed with a query like `user's auth`
-- **Then** memory search returns matching facts
-- **And** it does not raise an FTS syntax error
+Lexical search SHALL treat user terms as search data rather than executable FTS
+syntax, preserving useful technical identifier tokens.
 
-#### Scenario: Technical identifier search preserves useful recall
-- **Given** facts containing path-like or identifier-like technical text such as `extensions/project-memory/factstore.ts` or `openai-codex`
-- **When** memory search is executed with those technical query forms
-- **Then** the generated FTS query preserves useful identifier tokens instead of destroying them into unusable fragments
-- **And** matching facts remain discoverable
+#### Scenario: Quotes and operators are input data
+Given stored facts containing apostrophes, quoted names, paths, and hyphenated identifiers
+When recall receives those terms with unmatched quotes or FTS-like operators
+Then retrieval does not surface an FTS syntax error
+And matching identifier-bearing facts remain discoverable
+
+#### Scenario: Episode search handles quoted names and title-only matches
+Given an episode whose title contains the query term
+When episode search receives that term with an unmatched quote
+Then both supported backends return the episode without an FTS syntax error
+And an empty episode query returns an empty result set
 
 ### Requirement: Operational storage failures remain observable
-Memory search should be tolerant of malformed input, but it MUST NOT silently convert unrelated storage or FTS operational failures into empty results.
 
-#### Scenario: Non-query operational failure is surfaced
-- **Given** the underlying fact store encounters an operational failure unrelated to user query syntax
-- **When** a memory search is executed
-- **Then** the failure is surfaced to the caller rather than being silently converted into an empty result set
+Storage and index operational failures SHALL remain distinguishable from an
+empty match set. Optional vector unavailability SHALL be identified as degradation.
+
+#### Scenario: Lexical storage fails during hybrid recall
+Given the lexical storage operation fails for a reason unrelated to query syntax
+When hybrid recall executes
+Then the caller receives a typed operational failure
+And the operation is not reported as no matching facts

@@ -10,26 +10,25 @@ The nine change corpora own requirements and implementation tasks. This plan ord
 their implementation slices and defines verification gates; it is not a second backlog.
 
 The initial Waves 0–2 shipping slice is **accepted** at `f6846622`. Scoped evidence is recorded in
-[Wave 0](changes/memory-evaluation-corpus/verification-wave-0.md),
-[Wave 1](changes/memory-retrieval-contract/verification-wave-1.md), and
-[Wave 2](changes/memory-context-selection/verification-wave-2.md).
-The parent corpora retain their later-wave tasks. The Wave 3 slice is **accepted**
+[Wave 0](archive/2026-09-21-memory-evaluation-corpus/verification-wave-0.md),
+[Wave 1](archive/2026-09-21-memory-retrieval-contract/verification-wave-1.md), and
+[Wave 2](archive/2026-09-21-memory-context-selection/verification-wave-2.md).
+The Wave 3 slice is **accepted**
 at `f90e793e`, with
-[formation evidence and gate results](changes/memory-evidence-capture/verification-wave-3.md).
+[formation evidence and gate results](archive/2026-09-21-memory-evidence-capture/verification-wave-3.md).
 Wave 4 is **accepted** at `fa8b0959`; see its
-[verification record](changes/memory-retrieval-contract/verification-wave-4.md).
-Wave 5 is **implementing**, beginning with the
-[transport prerequisite](changes/memory-provenance-validity/verification-wave-5-transport.md).
-Provenance/applicability slices and shared counted selection are accepted. The
-[semantic cache gate](changes/memory-context-selection/verification-wave-5-cache.md)
-passed on 2026-09-16. Wave 5C recovery scheduling, interval snapshots, and
-[awaited pre-compaction capture](changes/memory-evidence-capture/verification-wave-5-pre-eviction.md)
-are accepted. The [durable coverage contract](changes/memory-evidence-capture/verification-wave-5-coverage.md)
-is accepted. Host incremental capture, remaining queue/readiness contracts,
-and Wave 5D comparative evaluation remain open. Accepted slices do not imply
-completion of all parent contracts.
+[verification record](archive/2026-09-21-memory-retrieval-contract/verification-wave-4.md).
+Wave 5 is **accepted and archived** on 2026-09-21. Implementation commit
+`c922504b` completes incremental capture, bounded replay, source fencing,
+finalization queues, readiness, and comparative evaluation. Acceptance-docs commit
+`9b382467` records the final gates. All six foundation corpora were archived with
+the official OpenSpec tool, updating nine memory baseline files. See
+[joint acceptance and archival](memory-wave-5-verification.md) for archive links,
+full workspace and feature-matrix results, and the frozen synthetic live comparison.
+The comparison passes its smoke criteria without establishing general model-quality
+superiority or superiority over file search.
 Waves 6–8 remain **planned**.
-The [post-Wave-3 adversarial review](changes/memory-evidence-capture/adversarial-review-wave-3.md)
+The [post-Wave-3 adversarial review](archive/2026-09-21-memory-evidence-capture/adversarial-review-wave-3.md)
 is accepted at `987272da`; six reproduced findings were fixed before Wave 4.
 Consult those records for gate outcomes rather
 than inferring completion from this plan. Preserve unrelated work during execution.
@@ -143,7 +142,10 @@ there is explicit intent to close the change.
 
 ## Wave 0 — Minimal offline regression corpus
 
-**Corpus:** [memory-evaluation-corpus](changes/memory-evaluation-corpus/proposal.md).
+Waves 0–4 below retain their original slice scope and exit criteria. References to
+later work describe those historical boundaries; Wave 5 closes the foundations.
+
+**Corpus:** [memory-evaluation-corpus](archive/2026-09-21-memory-evaluation-corpus/proposal.md).
 
 **Scope:** Establish synthetic fixtures with stable evidence IDs, timestamps, and
 minds. Separate ingestion data from expected answers and future corrections. Cover
@@ -163,7 +165,7 @@ Full model evaluation and quality/cost reporting remain open for Wave 5.
 
 ## Wave 1 — Restore truthful search contracts
 
-**Corpus:** [memory-retrieval-contract](changes/memory-retrieval-contract/proposal.md).
+**Corpus:** [memory-retrieval-contract](archive/2026-09-21-memory-retrieval-contract/proposal.md).
 
 **Scope:** Make archive search select historical statuses with labels. Enforce
 section filtering before candidate limits in every participating retrieval channel.
@@ -185,7 +187,7 @@ embedding identity, score semantics, and graph work in Wave 4.
 
 ## Wave 2 — Remove high-cost context mistakes
 
-**Corpus:** [memory-context-selection](changes/memory-context-selection/proposal.md).
+**Corpus:** [memory-context-selection](archive/2026-09-21-memory-context-selection/proposal.md).
 
 **Scope:** Deduplicate pins and retrieved facts. Skip oversized candidates rather
 than ending selection. Apply existing current-fact eligibility before formatting.
@@ -209,9 +211,9 @@ Do not claim general model-quality improvement from these deterministic cases al
 
 ## Wave 3 — Better formation input and independent readiness
 
-**Corpora:** [memory-capability-independence](changes/memory-capability-independence/proposal.md),
-[memory-evidence-capture](changes/memory-evidence-capture/proposal.md), and the minimum
-[memory-provenance-validity](changes/memory-provenance-validity/proposal.md) slice.
+**Corpora:** [memory-capability-independence](archive/2026-09-21-memory-capability-independence/proposal.md),
+[memory-evidence-capture](archive/2026-09-21-memory-evidence-capture/proposal.md), and the minimum
+[memory-provenance-validity](archive/2026-09-21-memory-provenance-validity/proposal.md) slice.
 
 **Entry decisions:** Resolve the legacy model-default conflict before changing
 setup behavior. Select a minimal durable evidence-reference format before emitting
@@ -241,8 +243,8 @@ Durable checkpoint recovery and complete evidence-retention policy remain open.
 
 ## Wave 4 — Trustworthy retrieval signals
 
-**Corpora:** remaining [memory-retrieval-contract](changes/memory-retrieval-contract/proposal.md)
-and indexing recovery from [memory-capability-independence](changes/memory-capability-independence/proposal.md).
+**Corpora:** remaining [memory-retrieval-contract](archive/2026-09-21-memory-retrieval-contract/proposal.md)
+and indexing recovery from [memory-capability-independence](archive/2026-09-21-memory-capability-independence/proposal.md).
 
 **Scope:** Bind vectors to model/revision, preprocessing, and dimensions. Handle
 legacy unknown spaces explicitly and provide bounded repair. Expose named score
@@ -264,6 +266,11 @@ and cross-mind graphs. Inspect score descriptions in lexical-only and fused mode
 observable and recoverable. Preserve the corrected lexical baseline for comparison.
 
 ## Wave 5 — Complete durable foundations
+
+**Status: accepted and archived.** All subwaves and six foundation corpora are
+closed. The [joint verification record](memory-wave-5-verification.md) owns final
+gate outcomes and archive locations; the following scope and gates describe the
+completed acceptance contract.
 
 **Corpora:** Remaining provenance, context selection, evidence capture, capability
 independence, and evaluation requirements.

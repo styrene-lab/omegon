@@ -2,8 +2,31 @@
 
 Wave 5 is accepted on 2026-09-21 on `feat/memory-wave5-completion`, based on
 `4785970b`. The reviewed implementation is committed as `c922504b`.
-The six foundational changes are ready for joint archival after their
-final named validation and archive checks. Waves 6–8 remain planned.
+Acceptance documentation is committed as `9b382467`. All six foundational changes
+were archived successfully on 2026-09-21 with the official OpenSpec tool after
+named validation and archive checks. Their requirements were merged into nine
+memory baseline files. Waves 6–8 remain planned with unchecked implementation tasks.
+
+## Archived changes
+
+- [Retrieval contract](archive/2026-09-21-memory-retrieval-contract/)
+- [Provenance and validity](archive/2026-09-21-memory-provenance-validity/)
+- [Capability independence](archive/2026-09-21-memory-capability-independence/)
+- [Context selection](archive/2026-09-21-memory-context-selection/)
+- [Evidence capture](archive/2026-09-21-memory-evidence-capture/)
+- [Evaluation corpus](archive/2026-09-21-memory-evaluation-corpus/)
+
+Earlier slice verification records retain their historical outcomes and pending-work
+statements. This joint record supplies the final acceptance and archival status.
+
+Scoped OpenSpec validation, archive checks, and actual archival passed for all six
+foundations. Official status leaves only candidate reconciliation, maintenance
+revalidation, and procedural learning active among the memory corpora; all three
+remain planned with zero completed tasks. Repository-wide validation still reports
+the unrelated `styrene-identity-secrets` task group 1 missing
+`specs/secrets/store.md`. That change contained only design, proposal, and tasks
+at `4785970b`, and its diff against that base is empty. No repository-wide
+all-valid result is claimed.
 
 ## Accepted foundations
 
@@ -64,7 +87,8 @@ All configurations had zero stale-memory and repeated-error rubric matches.
 The result passes the frozen **synthetic smoke** thresholds. It does not establish
 general model-quality superiority or superiority over file search. Unknown USD
 pricing remains disclosed rather than fabricated. Raw reports and frozen manifests
-are retained with `memory-evaluation-corpus`.
+are retained with the archived
+[evaluation corpus](archive/2026-09-21-memory-evaluation-corpus/verification-wave-5.md).
 
 ## Review and compatibility
 

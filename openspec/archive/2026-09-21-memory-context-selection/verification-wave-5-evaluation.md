@@ -1,7 +1,7 @@
 # Wave 5 selection evaluation
 
 The shared evaluator and raw reports are documented in
-[Wave 5D verification](../memory-evaluation-corpus/verification-wave-5.md).
+[Wave 5D verification](../2026-09-21-memory-evaluation-corpus/verification-wave-5.md).
 
 ## Policy ablation
 
@@ -31,7 +31,7 @@ judgments occurred. The fixed smoke thresholds passed without a candidate regres
 
 The full development and held-out experiment used 7,541 tokens and 149.616 seconds,
 including prior authentication attempts. Original unavailable reports remain
-preserved. See [Codex continuation](../memory-evaluation-corpus/codex-continuation.md)
+preserved. See [Codex continuation](../2026-09-21-memory-evaluation-corpus/codex-continuation.md)
 for exact accounting, frozen configuration, independent-review corrections, and
 credential cleanup. The small extractive corpus does not establish general model
 superiority or justify changing the routine cap.

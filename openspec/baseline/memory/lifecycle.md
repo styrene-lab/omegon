@@ -1,57 +1,68 @@
-+++
-id = "11ae9d9a-eccf-4059-a04d-b36f888169d3"
-tags = []
-aliases = []
-imported_reference = false
-
-[publication]
-enabled = false
-visibility = "private"
-+++
-
-# memory/lifecycle
+# memory/lifecycle - Baseline
 
 ### Requirement: Structured lifecycle conclusions create memory candidates
 
-Project memory SHALL generate candidate facts from explicit lifecycle artifacts instead of relying on free-form workflow chatter.
+Lifecycle ingestion SHALL create candidates from explicit decisions, constraints,
+and archived behavioral specifications with durable artifact references.
 
-#### Scenario: Design decision produces a decision candidate
-Given a design-tree node records a decided decision with rationale
-When lifecycle memory integration processes that event
-Then it creates a candidate memory fact in the Decisions section
-And the candidate references the originating design artifact
+#### Scenario: Decision retains artifact identity
+Given a decided lifecycle artifact with rationale and a stable reference
+When ingestion stores its decision candidate
+Then the fact uses the Decisions section
+And the artifact reference and source kind survive database reopen and export/import
 
-#### Scenario: Implementation constraints produce constraint candidates
-Given design-tree implementation notes include one or more constraints
-When lifecycle memory integration processes those notes
-Then it creates candidate memory facts in the Constraints section
-And it does not emit candidates for open questions
+#### Scenario: Open question remains outside durable conclusions
+Given implementation notes contain an unresolved question and an explicit constraint
+When ingestion evaluates those notes
+Then only the constraint becomes a durable-conclusion candidate
+And its artifact reference is retained
 
-#### Scenario: OpenSpec archive produces durable spec candidates
-Given an OpenSpec change is archived into baseline
-When lifecycle memory integration processes the archive event
-Then it creates candidate memory facts for durable behavioral truths
-And those facts reference the archived spec domain or baseline artifact
+#### Scenario: Archived specification retains its source
+Given a completed OpenSpec change has been archived into baseline
+When ingestion processes its durable behavioral conclusion
+Then the resulting Specs candidate references the baseline or archived artifact
 
 ### Requirement: Candidate handling respects confidence and authority
 
-Lifecycle-driven memory writes SHALL auto-store explicit structured conclusions and require confirmation for inferred summaries.
+Explicit structured conclusions may be stored automatically after validation.
+Inferred lifecycle summaries SHALL require confirmation. Supersession intent and
+authority SHALL affect durable state rather than only response text.
 
-#### Scenario: Explicit structured conclusion auto-stores
-Given a lifecycle candidate is derived directly from a structured decision, constraint, or archived spec
-When the candidate passes deduplication checks
-Then it is stored automatically in project memory
+#### Scenario: Inferred lifecycle conclusion remains pending
+Given lifecycle ingestion receives an inferred summary without confirmation
+When candidate admission executes
+Then the candidate remains pending confirmation
+And it is excluded from automatic context as established knowledge
 
-#### Scenario: Inferred summary requires confirmation
-Given a lifecycle candidate is an inferred architecture or implementation summary rather than an explicit structured statement
-When lifecycle memory integration evaluates that candidate
-Then it is marked for operator confirmation instead of auto-storage
+#### Scenario: Confirmed correction atomically supersedes
+Given an admitted lifecycle correction references an existing fact and its expected version
+When the correction is committed
+Then the original becomes superseded and the replacement retains authority and evidence
+And replay returns the recorded outcome without a second replacement
 
-#### Scenario: Duplicate lifecycle fact supersedes or reuses existing memory
-Given a semantically equivalent lifecycle fact already exists in project memory
-When lifecycle memory integration processes a newer authoritative version
-Then it prefers supersede or reinforcement over storing a duplicate fact
-And stale superseded facts remain archived rather than active
+#### Scenario: Conflicting version prevents partial supersession
+Given the target fact changed after the correction captured its version
+When the correction is committed
+Then a version conflict is returned
+And no replacement, edge, or success receipt is partially committed
+
+#### Scenario: Model-supplied approval cannot confirm a candidate
+Given a pending lifecycle candidate
+When a model calls the public review tool with an approval flag or attempts the internal commit invocation
+Then the request cannot activate the candidate
+And confirmation requires the runtime's operator-response path
+
+#### Scenario: Operator confirms the reviewed snapshot
+Given a pending candidate and an affirmative per-request TUI or ACP response
+When the runtime commits the reviewed candidate
+Then the candidate becomes active with retained inference and review attribution
+And an altered candidate digest or stale version prevents admission
+
+#### Scenario: Operator denial or cancellation preserves pending state
+Given a pending candidate awaiting operator review
+When the operator denies the request or the wait is cancelled before approval
+Then no confirmation mutation is dispatched
+And the candidate remains pending
 
 ### Requirement: Ephemeral workflow chatter does not become durable memory by default
 

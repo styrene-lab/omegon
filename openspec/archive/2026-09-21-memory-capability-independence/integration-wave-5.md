@@ -84,6 +84,6 @@ CLI repair uses these mutations, persists generation failures, and completes
 existing ready vectors without rewriting identical vector data or reinforcing facts.
 
 Wave 4 already verifies explicit repair and no reinforcement; see
-`../memory-retrieval-contract/verification-wave-4.md`. Scheduling new automatic
+`../2026-09-21-memory-retrieval-contract/verification-wave-4.md`. Scheduling new automatic
 retry jobs is not required by the delta: bounded explicit repair is the recovery
 action, provided pending state and failure reasons are durable and observable.

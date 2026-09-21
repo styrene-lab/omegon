@@ -2,7 +2,9 @@
 
 ## Placement and status
 
-The canonical change corpora live in this repository's `openspec/changes/` tree.
+Active change corpora live in this repository's `openspec/changes/` tree. The six
+accepted foundation corpora are archived under `openspec/archive/2026-09-21-*`;
+their requirements are merged into nine memory baseline files.
 Memory behavior spans the domain crate, managed runtime, session evidence, context
 assembly, and skills. Do not create a second OpenSpec root inside a crate.
 Executable tests and synthetic fixtures live beside their owning code.
@@ -12,16 +14,20 @@ Each change owns its proposal, delta specifications, design, and TDD tasks.
 Specification validation does not establish a failing test or a passing
 implementation. The initial Waves 0–2 shipping slice is accepted at `f6846622`;
 its verification records identify red/green evidence, same-executor adversarial
-review, and passing landing gates. The parent corpora remain implementing for
-their later-wave requirements.
+review, and passing landing gates. Wave 5 completed the remaining foundation
+requirements and is **accepted and archived** as of 2026-09-21. Implementation
+commit: `c922504b`; acceptance-docs commit: `9b382467`. See the
+[joint acceptance and archive record](memory-wave-5-verification.md) for final
+gates, scenario evidence, and the bounded synthetic live comparison. Waves 6–8
+remain **planned**, with their implementation tasks unchecked.
 
 Wave 3's independent extraction and evidence-backed formation slice is accepted
 at `f90e793e`;
-see its [verification record](changes/memory-evidence-capture/verification-wave-3.md).
+see its [verification record](archive/2026-09-21-memory-evidence-capture/verification-wave-3.md).
 
 Wave 4 is accepted at `fa8b0959`: identified vectors, explicit score/relationship
 signals, schema-v10 migration, and the verified repair CLI. See its
-[verification record](changes/memory-retrieval-contract/verification-wave-4.md).
+[verification record](archive/2026-09-21-memory-retrieval-contract/verification-wave-4.md).
 
 The [phased execution plan](memory-modernization-execution.md) defines wave entry
 criteria, TDD verification, adversarial review, and acceptance/handoff gates.
@@ -30,12 +36,12 @@ criteria, TDD verification, adversarial review, and acceptance/handoff gates.
 
 | Change | Behavioral scope | Prerequisites |
 |---|---|---|
-| [memory-evaluation-corpus](changes/memory-evaluation-corpus/proposal.md) | Deterministic fixtures, task replay, attribution, cost and quality reports | None; establish a minimal fixture set before policy changes |
-| [memory-retrieval-contract](changes/memory-retrieval-contract/proposal.md) | Historical search, filters, embedding identity, score semantics, graph eligibility | Evaluation fixture conventions |
-| [memory-provenance-validity](changes/memory-provenance-validity/proposal.md) | Evidence, authority, applicability, migration and transport | Evaluation fixture conventions |
-| [memory-capability-independence](changes/memory-capability-independence/proposal.md) | Independent extraction, embedding and storage readiness | None for readiness; retrieval contract for compatible indexing repair |
-| [memory-context-selection](changes/memory-context-selection/proposal.md) | Shared task-aware selection, packing, pin handling, inspection | Retrieval contract and provenance |
-| [memory-evidence-capture](changes/memory-evidence-capture/proposal.md) | Structured episodes, checkpoints, recoverable extraction | Provenance and capability independence |
+| [memory-evaluation-corpus](archive/2026-09-21-memory-evaluation-corpus/proposal.md) — archived | Deterministic fixtures, task replay, attribution, cost and quality reports | None; establish a minimal fixture set before policy changes |
+| [memory-retrieval-contract](archive/2026-09-21-memory-retrieval-contract/proposal.md) — archived | Historical search, filters, embedding identity, score semantics, graph eligibility | Evaluation fixture conventions |
+| [memory-provenance-validity](archive/2026-09-21-memory-provenance-validity/proposal.md) — archived | Evidence, authority, applicability, migration and transport | Evaluation fixture conventions |
+| [memory-capability-independence](archive/2026-09-21-memory-capability-independence/proposal.md) — archived | Independent extraction, embedding and storage readiness | None for readiness; retrieval contract for compatible indexing repair |
+| [memory-context-selection](archive/2026-09-21-memory-context-selection/proposal.md) — archived | Shared task-aware selection, packing, pin handling, inspection | Retrieval contract and provenance |
+| [memory-evidence-capture](archive/2026-09-21-memory-evidence-capture/proposal.md) — archived | Structured episodes, checkpoints, recoverable extraction | Provenance and capability independence |
 | [memory-candidate-reconciliation](changes/memory-candidate-reconciliation/proposal.md) | Candidate admission, equivalence, corrections, unresolved conflicts | Provenance and evidence capture |
 | [memory-maintenance-revalidation](changes/memory-maintenance-revalidation/proposal.md) | Separate evidence confidence, freshness and salience; source revalidation | Provenance and reconciliation |
 | [memory-procedural-learning](changes/memory-procedural-learning/proposal.md) | Evidence-backed workflows and gotchas through existing skills ownership | Evidence capture, reconciliation and context selection |
@@ -45,7 +51,11 @@ separate slices. Land context-selection correctness before measuring its quality
 against the old injection policy. Introduce maintenance and procedural learning
 after the evidence and reconciliation contracts are available.
 
-## Effort and return prioritization
+## Original effort and return prioritization
+
+The estimates and queue below record the original planning rationale. Foundation
+work through queue item 6 is accepted; later learning work remains planned. These
+estimates are not measurements of implementation cost or demonstrated model quality.
 
 Prioritize independently testable behavior slices rather than finishing each corpus
 before starting the next. Full-corpus dependencies above do not block repairs that
@@ -157,21 +167,21 @@ verification are complete. Keep existing baselines unchanged until archival.
   audit requirements. The selection change modifies those titles in place.
 - `baseline/memory/lifecycle.md` already requires confirmation of inferred
   lifecycle summaries. Provenance preserves that policy and makes it durable.
-- `baseline/memory/models.md` names historical cloud defaults and subprocess
-  routing that do not match the inspected Rust setup. Capability independence
-  modifies degradation behavior, but does not invent a provider/model replacement.
-  Before implementing that change, decide whether to restore those defaults or
-  explicitly amend their requirements in the same delta.
+- `baseline/memory/models.md` now records independently configurable host routing,
+  explicit Rust defaults, profile overrides/disable, and the existing child policy.
+  Capability-independence archival replaced the historical cloud-default and
+  subprocess-routing requirements explicitly.
 - `baseline/memory.md` still contains legacy extension and `.pi/memory` vocabulary.
   Its transport and metrics obligations must be checked against any affected
   runtime surface. This map does not authorize silently dropping those contracts.
-- Select a routine memory token cap and per-kind allocation using the evaluation
-  corpus. Hard budget compliance is required independently of the chosen cap.
-- Select model-experiment success thresholds on a development split, then freeze
-  them before held-out evaluation. Do not manufacture numeric quality targets
-  without a measured baseline.
-- Define the canonical workspace/revision applicability descriptor and evidence
-  retention policy in provenance design before freezing its migration format.
+- The archived [selection design](archive/2026-09-21-memory-context-selection/design.md)
+  records the routine cap and allocation policy. Hard budget compliance remains
+  independent of policy choice.
+- The archived [evaluation evidence](archive/2026-09-21-memory-evaluation-corpus/verification-wave-5.md)
+  records frozen synthetic smoke criteria and held-out comparisons. These results
+  do not establish production or general model-quality superiority.
+- The archived [provenance design](archive/2026-09-21-memory-provenance-validity/design.md)
+  defines workspace/revision applicability and evidence retention.
 
 ## Research basis
 

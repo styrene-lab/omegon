@@ -12,8 +12,8 @@ equal numeric relevance scores.
 
 The first six tests produced behavioral failures for archive population, section
 filtering, duplicate pins, and oversized-candidate starvation. Later coverage exposed
-task-flood and FTS-error propagation defects. See the [Wave 1 evidence](../memory-retrieval-contract/verification-wave-1.md)
-and [Wave 2 evidence](../memory-context-selection/verification-wave-2.md) for mappings.
+task-flood and FTS-error propagation defects. See the [Wave 1 evidence](../2026-09-21-memory-retrieval-contract/verification-wave-1.md)
+and [Wave 2 evidence](../2026-09-21-memory-context-selection/verification-wave-2.md) for mappings.
 
 This is the initial fixture slice, not completion of the evaluation corpus. Simulated
 evidence cutoffs, future-event isolation, fake extraction availability, stage-level
