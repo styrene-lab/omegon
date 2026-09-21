@@ -1587,7 +1587,7 @@ pub async fn set_model_response(
         if !serving_matches {
             return SlashCommandResponse {
                 accepted: false,
-                output: Some(snapshot.operator_status()),
+                output: Some(snapshot.operator_problem()),
             };
         }
         if let Ok(mut s) = shared_settings.lock() {
@@ -2259,6 +2259,7 @@ pub async fn status_view_response(
         &session_kind,
         &authorization,
     );
+    status.contribution_loading = runtime_state.bus.contribution_health().snapshot();
     let bootstrap_markdown = crate::bootstrap_projection::render_bootstrap(&status, false);
     let projection = crate::surfaces::diagnostics::HarnessStatusProjection::new(
         serde_json::to_value(status).unwrap_or(serde_json::Value::Null),
@@ -3900,7 +3901,7 @@ async fn apply_profile_model_intent(
             .switch_model(model.to_string(), &crate::route::CredentialLedger, bridge)
             .await?;
         if snapshot.serving_model() != Some(model) {
-            anyhow::bail!(snapshot.operator_status());
+            anyhow::bail!(snapshot.operator_problem());
         }
         return Ok(Some(model.to_string()));
     }

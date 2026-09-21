@@ -18,6 +18,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Inline activity and publication status now sit in the composer frame, keeping working/cancellation hints out of the model response flow.
+
+- Inline assistant replies retain Markdown styling and structure in native scrollback. Prose wraps at word boundaries instead of splitting ordinary words; pending output follows terminal resizing without replaying published rows.
+
+- Inline replies now publish stable text into terminal scrollback during streaming. The small live area retains the unfinished tail and composer; completion does not replay published text. Tool runs preserve conversation order, and Full detail appends labeled reasoning after the streamed answer. Captured acceptance checks live scrollback before completion across long Unicode replies, resize, and a read-tool continuation.
+
+- `/connect` provider rows now open connection setup, with an explicit method choice when OAuth and API keys are both supported. Model selection stays an explicit action. Native provider admission preserves embedded authentication and transport ownership instead of treating catalog HTTP metadata as a custom manifest; route failures use actionable text rather than internal debug structures.
+
+- Fable 5.1 and Mythos 5.1 declare ordinary tool support in the model catalog so admitted tool requests reach their native provider transport.
+
+- Installation home recovery now provides inspection, dry-run, and resumable audited rebinding through `omegon-maintain home`. Recovery preserves existing contribution and session restrictions; supported macOS volume identity avoids repeated failures after device renumbering. Contribution loading failures appear in shared status and a compact TUI notice instead of silently becoming an empty inventory.
+
+- Home recovery reserves a bounded, temporary companion-local descriptor budget so large installations can retain every admission lock under the default macOS soft file limit. Insufficient hard limits cause a refusal before recovery records change.
+
+- Persistent inline notifications and command results append to terminal history instead of merging into already-published text. Retaining a bounded notification history preserves publication progress for new output.
+
+- Expired OAuth credentials remain unavailable after rejected refreshes, including cached client and environment-token copies. Refresh attempts share bounded work and suppress repeated rejected grants until credentials change or connection setup is retried. Provider inventory does not refresh credentials; explicit API-key and fresh external credential precedence remain intact.
+
 - GPT-6 Astra is available in native OpenAI API and Codex model choices and becomes their frontier/default model; saved selections and lower-cost grades remain intact. Direct OpenAI Astra uses Responses for text and tools, with supported reasoning parameters. Extra-high and maximum thinking are independently selectable. API and Codex context ceilings remain route-specific. Claude Fable 5.1 remains the verified Anthropic frontier default.
 
 - Fresh interactive sessions start without an implicit provider or model. Disconnected submission preserves the draft and opens connection choices; model, thinking, and context telemetry appear only for a usable route. Explicit CLI models override saved profiles, and provider defaults use the shared registry. `/connect free` offers reviewed anonymous OpenCode Zen models with data-use terms and live availability checks; free routes never fall back to paid providers.

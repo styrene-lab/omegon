@@ -26,6 +26,25 @@ This foundation covers fresh-session startup, terminal input, streaming completi
 
 ## Selecting a presentation
 
+For live inline scrollback, add `--streaming` to the PTY command. This scenario
+holds the provider stream at five checkpoints before completion. Each checkpoint
+requires the earliest delivered lines in primary terminal scrollback, beyond the
+visible screen. It checks 160 numbered Unicode lines across two turns and a real
+read-tool continuation, resizes from 120×40 to 72×24 during the first stream, and
+verifies final ordering without duplicates and compares each complete payload
+after removing terminal padding and wrap whitespace. Joined semantic captures and
+raw physical rows are retained separately. The fixture uses three local provider
+requests. Captures and failures retain the exact checkpoint and artifact identity.
+
+Use `--markdown` instead of `--streaming` to check inline presentation. This local
+fixture splits Markdown across transport chunks and holds an unfinished paragraph
+while the runner checks physical rows and SGR styles. It exercises headings, emphasis,
+inline code, lists, a table, and indented fenced code at 120, 72, and 160 columns.
+The checks reject raw delimiters, ordinary words split across rows, missing code
+indentation, stale wrapping width, and replay after completion. This complements
+the long-stream retention check; preserving payload alone does not prove readable
+formatting. Both scenarios use private headless terminals.
+
 Pass `--tui inline|fullscreen --ui active|full` to either the PTY runner or the
 operator kit's `prepare` command. `--entry om|omegon` instead exercises the actual
 launcher script against the frozen executable without passing layout/detail flags;

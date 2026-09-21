@@ -79,6 +79,7 @@ libc = { version = "0.2", optional = true }
 regex-lite = { version = "0.1", optional = true }
 url = { version = "2", optional = true }
 ratatui = { version = "0.30.0", optional = true }
+unicode-segmentation = { version = "1.13.2", optional = true }
 syntect = { version = "5", default-features = false, features = ["default-syntaxes", "default-themes", "regex-onig"] , optional = true }
 tui-syntax-highlight = { version = "0.2", optional = true }
 tachyonfx = { version = "0.25.0", features = ["sendable"] , optional = true }
@@ -211,7 +212,7 @@ product-domains = [
 kernel-host = []
 task-capsule = ["product"]
 self-update = ["dep:sigstore", "dep:x509-parser"]
-tui = ["dep:ratatui", "dep:syntect", "dep:tui-syntax-highlight", "dep:tachyonfx", "dep:crossterm", "dep:unicode-width", "dep:ratatui-image", "dep:image", "dep:ansi-to-tui", "dep:tui-tree-widget", "dep:ratatui-toaster", "dep:ratatui-textarea", "dep:tui-popup", "dep:hyperrat"]
+tui = ["dep:unicode-segmentation", "dep:ratatui", "dep:syntect", "dep:tui-syntax-highlight", "dep:tachyonfx", "dep:crossterm", "dep:unicode-width", "dep:ratatui-image", "dep:image", "dep:ansi-to-tui", "dep:tui-tree-widget", "dep:ratatui-toaster", "dep:ratatui-textarea", "dep:tui-popup", "dep:hyperrat"]
 local-embeddings = ["dep:ort", "dep:tokenizers", "dep:ndarray"]
 
 [dev-dependencies]

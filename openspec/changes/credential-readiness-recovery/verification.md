@@ -1,0 +1,17 @@
+# Verification evidence
+
+- RED: `/tmp/omegon-recovery-auth-red.log`, two failures. Existing Anthropic policy permitted expired tokens after refresh failure; sync resolution returned a copied expired OAuth environment token.
+- GREEN: `/tmp/omegon-recovery-auth-green.log`, eight tests passed. Local HTTP fixtures cover rejected grants, sanitized terminal/transient outcomes, HTTP deadlines, refresh coalescing, credential-generation changes, explicit retry invalidation, transient retry intervals, and success reuse without credential write-back.
+- Integration fixture verifies provider inventory sends no refresh request, rejected Anthropic credentials cannot enter inference, the credential ledger reports non-refreshable expired state, an independent API key recovers immediately, and a successful refresh with failed write-back remains usable consistently in sync resolution and the route ledger.
+- No live provider authentication, provider inference, user credential mutation, build installation, or native terminal windows were used for these checks.
+- Landing gate: `env -u NO_COLOR -u OMEGON_ASCII_GLYPHS RUST_TEST_THREADS=1 just test-commit --base 0d50ee5c` passed 5,354 tests across the three affected crates (11 ignored). `just clippy-changed --base 0d50ee5c`, `cargo fmt --all --check`, and `git diff --check` passed. Full logs are retained in the external installation-recovery evidence directory.
+
+Recovery preserves source precedence: a usable external credential can replace an expired stored grant. A different external grant that is itself already expired does not implicitly displace the stored refresh candidate; changing the stored credential or explicitly retrying clears the matching terminal suppression.
+
+- Race RED: `/tmp/omegon-recovery-auth-race-red.log` reproduced logout during an HTTP refresh recreating a usable grant.
+- Race GREEN: `/tmp/omegon-recovery-auth-race-green.log`, nine tests passed. Added absence-aware comparison, guarded write-back inside the auth-file lock, in-flight logout cancellation, and external CLI rotation during refresh. Replaced/inserted/deleted stored generations cannot be overwritten by the earlier refresh.
+- Final fixture refinement: `/tmp/omegon-recovery-auth-request-read-green.log` passed the integration test after requiring complete bounded HTTP request bodies in all four fixture exchanges. Production behavior is unchanged by this refinement.
+
+- Real startup capture found an additional refresh caller: empty model selection inferred Anthropic before a model-limit probe. `/tmp/omegon-recovery-auth-startup-red.log` reproduced it at the actual probe boundary. `/tmp/omegon-recovery-auth-startup-green.log` passed ten tests after making model-limit inventory read-only and guarding unselected startup. ACP status now uses the same synchronous resolver; live ACP acceptance was not run. The correction retains requested saved-route recovery. The Omegon landing gate is repeated after these runtime-driven corrections.
+
+- Final Omegon gate passed 5,252 tests (11 ignored); final affected-target Clippy passed. Accepted private PTY runs before and after home recovery used the same identified debug binary, sent no inference requests, logged no OAuth refresh, and preserved operator auth/profile hashes. The before run also completed 66 additional read-only status commands. Detailed manifests are in `before-home-recovery-debug-02/` and `after-home-recovery-debug/` under the external installation-recovery evidence directory. The deliberately rejected Anthropic grant was not replaced or renewed.

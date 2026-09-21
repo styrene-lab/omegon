@@ -1,6 +1,6 @@
 # Implementation tasks
 
-Implementation and captured acceptance are complete. Final workspace validation passed and PR #233 is open against main; see verification.md for evidence and limitations.
+The original implementation and acceptance are recorded in verification.md. Operator feedback exposed the connection-first follow-up below.
 
 ## 1. Quiet startup and failure guidance
 <!-- specs: provider-connections -->
@@ -34,3 +34,10 @@ Implementation and captured acceptance are complete. Final workspace validation 
 - [x] Reproduce and fix abandoned active/queued runtime decisions on authoritative completion, idle, and session reset; preserve drafts/menus and ignore advisory/stale completion.
 - [x] Correlate operator-wait completion with its tool-call identity so timeout promotes the next queued decision and stale completion cannot dismiss a newer wait; preserve external wire behavior.
 - [x] Obtain independent rereview of provider connections and integration corrections, run final current-source gates, and describe inherited parity/TUI scope accurately in the PR against main.
+
+## 5. Connection-first operator feedback
+<!-- specs: provider-connections -->
+
+- [x] Reproduce provider Enter opening a model prompt; make connection setup primary and expose supported authentication methods without side effects on browse or cancel.
+- [x] Replace Rust debug route summaries with actionable operator language; retain explicit diagnostic intent and state.
+- [x] Verify actual /connect, provider selection, method selection, and cancel in private PTYs; run crate and Clippy gates. Final installed operator handoff is recorded externally after the source commit.

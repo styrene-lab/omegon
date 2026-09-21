@@ -137,7 +137,7 @@ impl ModelBudget {
                 .switch_model(target.clone(), &crate::route::CredentialLedger, bridge)
                 .await?;
             if snapshot.serving_model() != Some(target.as_str()) {
-                anyhow::bail!(snapshot.operator_status());
+                anyhow::bail!(snapshot.operator_problem());
             }
         }
         {
@@ -184,7 +184,7 @@ impl ModelBudget {
                 .switch_model(target.clone(), &crate::route::CredentialLedger, bridge)
                 .await?;
             if snapshot.serving_model() != Some(target.as_str()) {
-                anyhow::bail!(snapshot.operator_status());
+                anyhow::bail!(snapshot.operator_problem());
             }
         }
         {

@@ -85,3 +85,38 @@ synthetic text in isolated workspaces; provider tool-call behavior, withdrawal a
 throttling were verified with deterministic HTTP fixtures. Real GUI-terminal
 compatibility was not rerun in this pass. The installed launcher and previous
 WezTerm preview were not replaced; the frozen artifact above was tested directly.
+
+
+## Native admission correction (2026-09-07)
+
+A real /model action exposed valid Codex credentials being routed through generic
+HTTP manifest admission. Native admission now checks registered native execution,
+canonical provider/model identity, and field provenance. Embedded transport/adapter/
+secret declarations retain native construction. Custom overrides retain manifest
+validation. Discovery cannot overwrite a declared offering's endpoint or native
+model identity, but can refresh observations or introduce new offerings.
+
+Four focused native-admission tests passed. They exercise actual Codex, Anthropic,
+and OpenAI bridge construction and controller switches using synthetic credentials;
+embedded and discovery inventories; critical operator overrides before and after
+discovery; declared identity preservation; new discovered identities; and ordinary
+tool request validation for Fable 5.1 and Mythos 5.1. The two model declarations now
+include verified tools evidence. No forced tool choice was added and the Anthropic
+adapter already omits tool_choice. Source references are recorded in design.md.
+
+Final validation passed all 5,264 Omegon tests (11 ignored), affected-target Clippy,
+formatting, and spec validation. Private inline/fullscreen configured captures
+confirmed Astra as serving without inference, OAuth refresh, browser launch, or
+fixture auth mutation. The connection verification document records artifact
+identity, accepted capture directories, cleanup and retained failed attempts.
+
+The first native fixture used the wrong credential-source label and later assumed
+Managed project overrides could reach route admission; both expectations were
+corrected to match existing contracts. Its tools requirement also exposed the
+Fable metadata omission; that failing result is retained before the data correction.
+Raw logs live under `../omegon-connect-feedback-evidence-01/logs`.
+
+This pass verifies current Fable 5.1/Mythos 5.1 tool declarations and Astra routing.
+Other Anthropic catalog entries still need a broader tool-capability evidence audit;
+this change does not infer tool support for every provider/model. No live provider
+inference, account access, or model context-limit assertion is claimed.

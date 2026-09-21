@@ -10182,6 +10182,141 @@ fn connect_opens_shared_menu_without_dispatching_authentication() {
 }
 
 #[tokio::test]
+async fn connect_existing_dual_method_provider_browses_then_enters_hidden_key_without_losing_draft()
+{
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    for terminal in [
+        crate::surfaces::layout::TerminalPresentation::Inline,
+        crate::surfaces::layout::TerminalPresentation::Fullscreen,
+    ] {
+        let mut app = test_app();
+        app.update_settings(|settings| settings.ui_terminal = terminal);
+        app.editor.set_text("preserved connection draft");
+        let model = app.settings().model.clone();
+        let (tx, mut rx) = test_tx_with_rx();
+        app.open_auth_menu();
+        let action = auth_menu_projection::build_provider_status_rows(
+            "auth.provider",
+            auth_menu_projection::ProviderRowPurpose::ConnectionSetup,
+            vec![crate::surfaces::menu::ProviderStatusProjection {
+                provider_id: "anthropic".into(),
+                display_name: "Anthropic/Claude".into(),
+                credential_state: "valid".into(),
+                credential_available: true,
+                availability: crate::surfaces::menu::ProviderAvailabilityProjection::Available,
+                remediation_command: None,
+            }],
+            &Default::default(),
+        )[0]
+        .primary_action
+        .clone()
+        .unwrap();
+        app.execute_active_menu_action(action, &tx);
+        assert!(
+            app.selector.is_none(),
+            "connecting must not open model selection"
+        );
+        let menu = app
+            .active_menu
+            .as_ref()
+            .expect("connection methods remain open");
+        assert_eq!(menu.projection.title, "Connect Anthropic/Claude");
+        let rows = &menu.projection.tabs[0].groups[0].rows;
+        assert!(rows.iter().any(|row| row.label == "Sign in with OAuth"));
+        let key_action = rows
+            .iter()
+            .find(|row| row.label == "Use an API key")
+            .unwrap()
+            .primary_action
+            .clone()
+            .unwrap();
+        assert!(rx.try_recv().is_err(), "browsing cannot start OAuth");
+        app.execute_active_menu_action(key_action, &tx);
+        assert!(app.active_menu.is_none());
+        assert!(app.command_panel.is_none());
+        assert!(
+            matches!(app.editor.mode(), editor::EditorMode::SecretInput { label, .. } if label == "ANTHROPIC_API_KEY")
+        );
+        app.handle_terminal_event(Event::Paste("connection-secret-canary".into()), &tx)
+            .await;
+        assert!(!render_app_to_string(&mut app, 120, 40).contains("connection-secret-canary"));
+        app.handle_terminal_event(
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            &tx,
+        )
+        .await;
+        assert_eq!(app.editor.render_text(), "preserved connection draft");
+        assert_eq!(app.settings().model, model);
+        assert!(
+            rx.try_recv().is_err(),
+            "cancelled setup cannot mutate credentials"
+        );
+    }
+}
+
+#[tokio::test]
+async fn connect_method_cancel_and_invalid_key_method_have_no_side_effects() {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+    app.editor.set_text("keep draft on method cancel");
+    app.handle_slash_command("/connect anthropic", &tx);
+    assert!(app.active_menu.is_some());
+    app.handle_terminal_event(
+        Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        &tx,
+    )
+    .await;
+    assert!(app.active_menu.is_none());
+    assert_eq!(app.editor.render_text(), "keep draft on method cancel");
+    for command in [
+        "/connect openai-codex --api-key",
+        "/connect anthropic --invalid",
+        "/connect anthropic --api-key unexpected",
+    ] {
+        assert!(matches!(
+            app.handle_slash_command(command, &tx),
+            SlashResult::Display(_)
+        ));
+        assert!(!matches!(
+            app.editor.mode(),
+            editor::EditorMode::SecretInput { .. }
+        ));
+    }
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn connect_dual_method_oauth_requires_explicit_choice_and_login_stays_compatible() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+    app.handle_slash_command("/connect anthropic", &tx);
+    assert!(
+        rx.try_recv().is_err(),
+        "method discovery cannot dispatch authentication"
+    );
+    let menu = app.active_menu.as_ref().expect("method menu");
+    let action = menu.projection.tabs[0].groups[0]
+        .rows
+        .iter()
+        .find(|row| row.label == "Sign in with OAuth")
+        .unwrap()
+        .primary_action
+        .clone()
+        .unwrap();
+    app.execute_active_menu_action(action, &tx);
+    assert!(app.active_menu.is_none());
+    assert!(
+        matches!(rx.try_recv().unwrap(), TuiCommand::AuthLogin { provider, .. } if provider == "anthropic")
+    );
+    app.handle_slash_command("/login anthropic", &tx);
+    assert!(
+        matches!(rx.try_recv().unwrap(), TuiCommand::AuthLogin { provider, .. } if provider == "anthropic")
+    );
+    assert!(rx.try_recv().is_err());
+}
+
+#[tokio::test]
 async fn connect_discovery_and_secret_cancel_preserve_drafts_and_routes_in_both_layouts() {
     use crate::surfaces::layout::TerminalPresentation;
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};

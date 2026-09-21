@@ -25,3 +25,10 @@
 - [x] Update Unreleased, record scenario evidence, validate OpenSpec, and commit focused changes.
 
 - [x] Isolate the existing user-profile capture test after detecting a write to the operator home; verify profile bytes or absence are unchanged.
+
+## 5. Embedded native provider admission
+<!-- specs: provider-onboarding -->
+
+- [x] Reproduce valid Codex credentials rejected by manifest admission and preserve native bridge selection using provider provenance.
+- [x] Declare verified ordinary tool support for Fable 5.1/Mythos 5.1 and exercise admitted request validation without provider I/O.
+- [x] Verify custom manifests retain endpoint/secret boundaries, run crate and Clippy gates, and capture a selectable Codex route without inference.

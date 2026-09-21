@@ -60,11 +60,42 @@ When the operator selects Add provider
 Then the shared searchable provider view opens
 And opening and filtering it do not change credentials or routes or launch a browser
 
+#### Scenario: Provider selection starts connection setup
+Given an existing or available provider row in /connect
+When the operator activates that row's primary action
+Then the provider's connection setup opens rather than its model selector
+And providers with multiple supported authentication methods offer an explicit method choice
+And browsing or canceling that choice does not launch OAuth or submit credentials
+And model selection remains available through /model or an explicit model action
+
+#### Scenario: Anonymous hosted model choice remains explicit
+Given the Connections view contains the free hosted option
+When the operator activates that option
+Then the reviewed free-model selector opens with its existing terms and admission checks
+
 #### Scenario: Inline cancellation preserves work
 Given an unsent draft in either TUI presentation
 When the operator opens and cancels the connection menu
 Then the original draft and route remain intact
 And the original terminal presentation is restored
+
+### Requirement: Route diagnostics use operator language
+
+Route status and failed connection or model actions must describe the usable route
+and recovery action without Rust debug structures or duplicated route headings.
+Detailed model intent remains available in explicit status.
+
+#### Scenario: Unselected route diagnostic
+Given no selected model and no serving provider
+When route status is requested
+Then the route summary says no provider is connected and directs the operator to /connect
+And it contains no empty provider identifier or Rust enum field dump
+
+#### Scenario: Selected route cannot serve
+Given a selected route with missing or expired credentials or unavailable service
+When route status is requested
+Then the summary names the selected route and describes its problem in plain language
+And it gives a connection recovery action without exposing internal enum names
 
 ### Requirement: Connect uses established authentication boundaries
 

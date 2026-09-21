@@ -254,6 +254,7 @@ impl MaintenanceStateV1 {
         let root = open_or_create_secure_dir_at(&maintain, b"v1")?;
         let locks = open_or_create_secure_dir_at(&root, b"locks")?;
         let _bootstrap = acquire_or_create_lock(&locks, b"bootstrap.lock", nonblocking)?;
+        crate::ensure_home_recovery_settled(&root)?;
 
         let deny = open_or_create_secure_dir_at(&root, b"deny")?;
         let session_deny = open_or_create_secure_dir_at(&root, b"session-deny")?;
@@ -298,12 +299,33 @@ impl MaintenanceStateV1 {
                 }
             }
         };
-        if installation.home != home_identity {
-            return Err(ContractError::InvalidValue(
-                "installation state is bound to a different home identity".into(),
-            ));
+        if !crate::home_binding_matches(home, &root, &installation, &home_identity)? {
+            return Err(ContractError::HomeIdentityMismatch {
+                stored: Box::new(installation.home.clone()),
+                observed: Box::new(home_identity),
+            });
         }
 
+        // Enrollment only follows strict matching legacy identity (or previously
+        // verified stable continuity). A mismatched legacy home never reaches it.
+        if installation.home == home_identity
+            && read_record_at::<crate::HomeContinuityV1>(&root, b"home-continuity.json")?.is_none()
+            && let Some(volume_uuid) = crate::stable_home_volume_uuid(home)?
+        {
+            let binding = crate::HomeContinuityV1 {
+                schema_version: SCHEMA_VERSION,
+                record_kind: "home_continuity".into(),
+                installation_uuid: installation.installation_uuid.clone(),
+                home: installation.home.clone(),
+                volume_uuid,
+            };
+            create_record_no_replace_at(
+                &root,
+                b"home-continuity.json",
+                &binding,
+                candidate_installation_uuid,
+            )?;
+        }
         if read_record_at::<AuditCheckpointV1>(&audit, b"checkpoint.json")?.is_none() {
             let digest = AuthorityKey::from_bytes([0; 32]);
             let checkpoint = AuditCheckpointV1 {
@@ -432,6 +454,7 @@ impl MaintenanceStateV1 {
             false,
             nonblocking,
         )?;
+        crate::ensure_home_recovery_settled(&self.root)?;
         match ProtocolLock::acquire_at(&self.locks, name, mode, true, nonblocking) {
             Ok(lock) => Ok(lock),
             Err(ContractError::Lock(error))

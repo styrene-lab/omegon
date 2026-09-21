@@ -2331,6 +2331,8 @@ fn acquire_domain_lock(
             }
             Err(error) => return Err(MutationError::before(error)),
         };
+        omegon_maintenance_contracts::ensure_home_recovery_settled(&state.root)
+            .map_err(MutationError::before)?;
         let domain =
             match ProtocolLock::acquire_at(&state.locks, name, LockMode::Exclusive, true, true) {
                 Ok(lock) => Ok(lock),
@@ -2442,6 +2444,34 @@ fn append_audit_inner(
     allow_expired: bool,
 ) -> Result<u64, MutationError> {
     let _audit_lock = acquire_audit_lock(state, context, allow_expired)?;
+    append_audit_locked_inner(state, context, request_id, command, outcome, allow_expired)
+}
+
+/// Caller holds the existing audit protocol lock; used by whole-home recovery.
+pub(super) fn append_home_recovery_audit_locked(
+    state: &mut MaintenanceStateV1,
+    context: &Context,
+    request_id: &str,
+) -> Result<u64, String> {
+    append_audit_locked_inner(
+        state,
+        context,
+        request_id,
+        "home.recover",
+        ResultStatus::Success,
+        false,
+    )
+    .map_err(|error| error.message)
+}
+
+fn append_audit_locked_inner(
+    state: &mut MaintenanceStateV1,
+    context: &Context,
+    request_id: &str,
+    command: &str,
+    outcome: ResultStatus,
+    allow_expired: bool,
+) -> Result<u64, MutationError> {
     state
         .reconcile_audit(request_id)
         .map_err(MutationError::before)?;
@@ -2718,4 +2748,52 @@ fn audit_event_name(operation: &str, fingerprint: AuthorityKey) -> String {
 
 fn now_utc() -> String {
     Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
+
+#[cfg(test)]
+mod home_recovery_tests {
+    use super::*;
+    use std::{os::unix::fs::MetadataExt, time::Instant};
+
+    #[test]
+    fn home_recovery_pending_blocks_cached_maintenance_mutation() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = || {
+            let file = omegon_maintenance_contracts::open_secure_root(temporary.path()).unwrap();
+            let metadata = file.metadata().unwrap();
+            super::super::AdmittedRoot {
+                path: temporary.path().into(),
+                file,
+                device: metadata.dev(),
+                inode: metadata.ino(),
+                unsafe_permissions: false,
+            }
+        };
+        let context = Context {
+            home: root(),
+            config_home: root(),
+            workspace: None,
+            started: Instant::now(),
+            deadline: Duration::from_secs(10),
+        };
+        let state = MaintenanceStateV1::bootstrap(
+            &context.home.file,
+            path_identity(&context.home.file).unwrap(),
+            "11111111-1111-1111-1111-111111111111",
+            true,
+        )
+        .unwrap();
+        let journal = omegon_maintenance_contracts::HomeRecoveryJournalV1 {
+            schema_version: SCHEMA_VERSION,
+            record_kind: "home_recovery_journal".into(),
+            request_id: "22222222-2222-2222-2222-222222222222".into(),
+            intent_key: derive_key("test", &[]),
+            phase: omegon_maintenance_contracts::HomeRecoveryPhase::Prepared,
+        };
+        create_record_no_replace_at(&state.root, b"home-recovery.json", &journal, "test").unwrap();
+        assert!(
+            acquire_domain_lock(&state, b"contribution-fixture.lock", &context).is_err(),
+            "cached maintenance state must honor pending recovery before domain mutation"
+        );
+    }
 }

@@ -100,10 +100,29 @@ fn bounded_system_notification(text: &str) -> String {
     bounded
 }
 
+/// Bounded coordinate changes from notification retention, without transcript copies.
+#[derive(Debug)]
+pub(super) struct PublicationPrune {
+    pub from_generation: u64,
+    pub to_generation: u64,
+    pub removed: Vec<usize>,
+}
+impl PublicationPrune {
+    pub fn rebase_boundary(&self, mut boundary: usize) -> usize {
+        for index in &self.removed {
+            if *index < boundary {
+                boundary -= 1;
+            }
+        }
+        boundary
+    }
+}
+
 /// Conversation view state — segment list + scroll.
 pub struct ConversationView {
     publication_generation: u64,
     publication_changed_at: Option<usize>,
+    publication_prune: Option<PublicationPrune>,
     segments: Vec<Segment>,
     /// Whether we're currently receiving streaming text.
     streaming: bool,
@@ -314,6 +333,7 @@ impl ConversationView {
             segments: Vec::new(),
             publication_generation: 0,
             publication_changed_at: None,
+            publication_prune: None,
             streaming: false,
             conv_state: ConvState::new(),
             image_cache: ImageCache::default(),
@@ -324,6 +344,10 @@ impl ConversationView {
         }
     }
 
+    pub(super) fn take_publication_prune(&mut self) -> Option<PublicationPrune> {
+        self.publication_prune.take()
+    }
+
     pub(super) fn take_publication_change(&mut self) -> usize {
         self.publication_changed_at.take().unwrap_or(0)
     }
@@ -331,6 +355,7 @@ impl ConversationView {
     pub(super) fn replace_source(&mut self, mut replacement: Self) {
         replacement.publication_generation = self.publication_generation.wrapping_add(1);
         replacement.publication_changed_at = Some(0);
+        replacement.publication_prune = None;
         *self = replacement;
     }
 
@@ -447,13 +472,28 @@ impl ConversationView {
         if excess == 0 {
             return;
         }
-        self.publication_changed_at = Some(0);
+        let from_generation = self.publication_generation;
         self.publication_generation = self.publication_generation.wrapping_add(1);
+        let prune = self
+            .publication_prune
+            .get_or_insert_with(|| PublicationPrune {
+                from_generation,
+                to_generation: self.publication_generation,
+                removed: Vec::new(),
+            });
+        prune.to_generation = self.publication_generation;
+        let mut retained_index = 0;
         self.segments.retain(|segment| {
             if excess > 0 && matches!(segment.content, SegmentContent::SystemNotification { .. }) {
                 excess -= 1;
+                // At most 64 notices existed at the previous observation. Later
+                // removals can only affect appended records beyond the old cursor.
+                if prune.removed.len() < MAX_SYSTEM_NOTIFICATION_SEGMENTS {
+                    prune.removed.push(retained_index);
+                }
                 false
             } else {
+                retained_index += 1;
                 true
             }
         });
@@ -479,23 +519,8 @@ impl ConversationView {
             return;
         }
 
-        // Merge consecutive system notifications into a single card to avoid
-        // excessive vertical padding (each card has border overhead). Bound
-        // the card: a repeated lifecycle/error producer must not turn this
-        // convenience merge into an unbounded String allocation storm.
-        if let Some(last) = self.segments.last_mut()
-            && let SegmentContent::SystemNotification {
-                text: ref mut existing,
-            } = last.content
-            && existing.len().saturating_add(text.len()).saturating_add(1)
-                <= MAX_SYSTEM_NOTIFICATION_BYTES
-        {
-            existing.push('\n');
-            existing.push_str(text);
-            self.conv_state.invalidate();
-            self.conv_state.auto_scroll_to_bottom();
-            return;
-        }
+        // Persistent notices are separate records: merging into a record already
+        // delivered to native scrollback would silently hide the later notice.
         self.segments
             .push(Segment::system(bounded_system_notification(text)));
         self.enforce_system_notification_limit();
@@ -798,6 +823,10 @@ impl ConversationView {
     }
 
     fn remove_segment(&mut self, idx: usize) {
+        if self.publication_prune.take().is_some() {
+            // Arbitrary rewrites invalidate the chronological prune coordinates.
+            self.publication_changed_at = Some(0);
+        }
         self.publication_changed_at = Some(
             self.publication_changed_at
                 .unwrap_or(idx.saturating_sub(1))
@@ -1685,6 +1714,7 @@ impl ConversationView {
 
     /// Clear all segments (for /clear command).
     pub fn clear(&mut self) {
+        self.publication_prune = None;
         self.publication_changed_at = Some(0);
         self.publication_generation = self.publication_generation.wrapping_add(1);
         self.segments.clear();
@@ -1958,6 +1988,33 @@ mod tests {
         };
         assert!(text.len() <= MAX_SYSTEM_NOTIFICATION_BYTES);
         assert!(text.ends_with('…'));
+    }
+
+    #[test]
+    fn notification_prune_metadata_is_bounded_and_invalidated_by_rewrites() {
+        let mut view = ConversationView::new();
+        for index in 0..512 {
+            view.push_system(&format!("notice {index}"));
+        }
+        assert_eq!(
+            view.publication_prune.as_ref().unwrap().removed.len(),
+            MAX_SYSTEM_NOTIFICATION_SEGMENTS
+        );
+        for operation in 0..3 {
+            let mut view = ConversationView::new();
+            for index in 0..65 {
+                view.push_system(&format!("notice {index}"));
+            }
+            let generation = view.publication_generation();
+            match operation {
+                0 => view.clear(),
+                1 => view.replace_source(ConversationView::new()),
+                _ => view.remove_segment(0),
+            }
+            assert!(view.take_publication_prune().is_none());
+            assert_eq!(view.take_publication_change(), 0);
+            assert_ne!(view.publication_generation(), generation);
+        }
     }
 
     #[test]

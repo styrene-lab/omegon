@@ -944,6 +944,15 @@ impl App {
             if shell_primed || command_primed {
                 editor_block = editor_block
                     .title_bottom(Line::styled(hint_text.clone(), t.style_dim()).right_aligned());
+            } else if let Some(status) = self.inline_composer_status() {
+                let status = widgets::truncate_str(
+                    status,
+                    usize::from(editor_area.width.saturating_sub(4)),
+                    "…",
+                );
+                editor_block = editor_block.title_bottom(
+                    Line::styled(format!(" {status} "), t.style_dim()).right_aligned(),
+                );
             } else if connected && self.footer_data.context_window > 0 {
                 let capacity = widgets::format_tokens(self.footer_data.context_window);
                 let percent = self.footer_data.context_percent.clamp(0.0, 100.0).round() as u8;

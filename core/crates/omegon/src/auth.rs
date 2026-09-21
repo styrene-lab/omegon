@@ -7,6 +7,9 @@
 //!
 //! Token refresh happens automatically when the stored token is expired.
 
+mod refresh;
+pub use refresh::{RefreshFailure, refresh_terminally_rejected, retry_provider_refresh};
+
 use crate::status::{ProviderAuthState, ProviderStatus};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -407,12 +410,18 @@ pub(crate) fn operator_remote_connect_guidance() -> &'static str {
 }
 
 /// Credential declarations also contain local endpoint configuration. Only
-/// actual API-key providers can use the hidden credential-entry surface.
+/// declared API-key alternatives can use the hidden credential-entry surface.
 pub(crate) fn operator_api_key_name(provider: &ProviderCredential) -> Option<&'static str> {
-    if provider.auth_method != AuthMethod::ApiKey || matches!(provider.id, "dwarfstar" | "ollama") {
+    if !matches!(provider.auth_method, AuthMethod::ApiKey | AuthMethod::OAuth)
+        || matches!(provider.id, "dwarfstar" | "ollama")
+    {
         return None;
     }
-    provider.env_vars.first().copied()
+    provider
+        .env_vars
+        .iter()
+        .copied()
+        .find(|name| !provider.oauth_env_vars.contains(name))
 }
 
 pub(crate) fn operator_oauth_setup_supported(provider: &ProviderCredential) -> bool {
@@ -450,6 +459,7 @@ pub fn operator_logout_success_message(provider_label: &str, cleared_session_env
     message
 }
 
+#[cfg(test)]
 fn provider_session_status_from_sources(
     env_present: bool,
     creds: Option<&OAuthCredentials>,
@@ -468,28 +478,21 @@ fn provider_session_status_from_sources(
 }
 
 pub fn provider_session_status(provider: &ProviderCredential) -> ProviderSessionStatus {
-    let env_present = provider
-        .env_vars
-        .iter()
-        .any(|v| std::env::var(v).is_ok_and(|s| !s.trim().is_empty()));
-    let creds = read_credentials(provider.auth_key);
-    let status = provider_session_status_from_sources(env_present, creds.as_ref());
-    if status == ProviderSessionStatus::Configured {
-        return status;
+    if crate::providers::resolve_api_key_sync(provider.id).is_some() {
+        return ProviderSessionStatus::Configured;
     }
-
-    // Keep status checks aligned with bridge resolution without resurrecting the
-    // old broad Keychain scan. This reads only provider-specific external OAuth
-    // files such as ~/.codex/auth.json; it does not query keyring secrets.
-    // A fresh external credential should also override an expired auth.json
-    // credential, matching resolve_with_refresh adoption behavior.
+    let stored = read_credentials(provider.auth_key);
     let external = read_external_credentials(provider.auth_key);
-    let external_status = provider_session_status_from_sources(false, external.as_ref());
-    if external_status == ProviderSessionStatus::Configured {
-        return external_status;
+    if stored
+        .as_ref()
+        .into_iter()
+        .chain(external.as_ref())
+        .any(|c| c.cred_type == "oauth" && c.is_expired())
+    {
+        ProviderSessionStatus::Expired
+    } else {
+        ProviderSessionStatus::Missing
     }
-
-    status
 }
 
 pub fn provider_connected_for_model(model_spec: &str) -> bool {
@@ -1047,67 +1050,24 @@ pub async fn probe_all_providers() -> AuthStatus {
 
 /// Probe a single provider for authentication status.
 async fn probe_provider(provider: &str) -> ProviderInfo {
-    // Check environment variables first
-    let env_keys = provider_env_vars(provider);
-
-    for key in env_keys {
-        if let Ok(val) = std::env::var(key)
-            && !val.is_empty()
-        {
-            let is_oauth = provider_env_var_is_oauth(provider, key);
-            return ProviderInfo {
-                name: provider.to_string(),
-                status: ProviderAuthStatus::Authenticated,
-                is_oauth,
-                details: Some(format!("env:{}", key)),
-            };
-        }
+    if let Some((_, is_oauth)) = crate::providers::resolve_api_key_sync(provider) {
+        return ProviderInfo {
+            name: provider.into(),
+            status: ProviderAuthStatus::Authenticated,
+            is_oauth,
+            details: Some("available credential".into()),
+        };
     }
-
-    // Check stored credentials
     let auth_key = auth_json_key(provider);
-    if let Some(creds) = read_credentials(auth_key) {
-        let status = if creds.cred_type == "oauth" && creds.is_expired() {
-            if resolve_with_refresh(provider).await.is_some() {
-                ProviderAuthStatus::Authenticated
-            } else {
-                ProviderAuthStatus::Expired
-            }
-        } else if creds.is_expired() {
-            ProviderAuthStatus::Expired
-        } else {
-            ProviderAuthStatus::Authenticated
-        };
-
-        return ProviderInfo {
-            name: provider.to_string(),
-            status,
-            is_oauth: creds.cred_type == "oauth",
-            details: Some("stored".to_string()),
-        };
-    }
-
-    if provider_by_id(provider).is_some_and(|p| p.auth_method == AuthMethod::OAuth)
-        && read_external_credentials(auth_key).is_some()
-    {
-        let status = if resolve_with_refresh(provider).await.is_some() {
-            ProviderAuthStatus::Authenticated
-        } else {
-            ProviderAuthStatus::Expired
-        };
-        return ProviderInfo {
-            name: provider.to_string(),
-            status,
-            is_oauth: true,
-            details: Some("external".to_string()),
-        };
-    }
-
-    // No credentials found
+    let credential = read_credentials(auth_key).or_else(|| read_external_credentials(auth_key));
     ProviderInfo {
-        name: provider.to_string(),
-        status: ProviderAuthStatus::Missing,
-        is_oauth: false,
+        name: provider.into(),
+        status: if credential.is_some() {
+            ProviderAuthStatus::Expired
+        } else {
+            ProviderAuthStatus::Missing
+        },
+        is_oauth: credential.is_some_and(|c| c.cred_type == "oauth"),
         details: None,
     }
 }
@@ -1119,6 +1079,7 @@ async fn probe_provider(provider: &str) -> ProviderInfo {
 pub fn logout_provider(provider: &str) -> anyhow::Result<()> {
     let canonical = canonical_provider_id(provider);
     provider_by_id(canonical).ok_or_else(|| anyhow::anyhow!("Unknown provider: {provider}"))?;
+    retry_provider_refresh(canonical);
 
     let path =
         auth_json_path().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
@@ -1219,142 +1180,136 @@ pub fn adopt_external_credentials(provider: &str) -> Option<OAuthCredentials> {
     }
 }
 
-/// Resolve API key with automatic token refresh.
-/// Returns (api_key, is_oauth_token).
-pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
-    trace_auth_store_probe(provider, "resolve_with_refresh:start");
-    // Use canonical provider map for env vars
-    let env_vars = provider_env_vars(provider);
-
-    // 1. Env vars first (not OAuth)
-    for key in env_vars
-        .iter()
-        .copied()
-        .filter(|key| !provider_env_var_is_oauth(provider, key))
-    {
-        if let Ok(val) = std::env::var(key)
-            && !val.is_empty()
-        {
-            return Some((val, false));
-        }
-    }
-
-    // OAuth env vars are checked only after refreshable auth.json/external
-    // credentials. Startup may hydrate OAuth env vars from auth.json for child
-    // process inheritance; treating those as authoritative here would shadow the
-    // persisted refresh token and keep using a stale access token.
-
-    // 2. auth.json — with refresh if expired (canonical key mapping)
-    let auth_key = auth_json_key(provider);
-    let mut creds = match read_credentials(auth_key) {
-        Some(c) => c,
-        None => {
-            // 3. Fallback: adopt credentials from supported external tools.
-            if let Some(c) = read_external_credentials(auth_key) {
-                tracing::info!(provider, "Adopted credentials from external tool");
-                let persist_result = if auth_key == "openai-codex" {
-                    let account_id = read_external_credential_extra(auth_key, "accountId");
-                    write_credentials_with_extra(auth_key, &c, account_id.as_deref())
-                } else {
-                    write_credentials(auth_key, &c)
-                };
-                if let Err(e) = persist_result {
-                    tracing::warn!(
-                        provider = auth_key,
-                        error = %auth_write_failure_operator_message(&e),
-                        "adopted provider credential could not be persisted"
-                    );
-                }
-                c
-            } else {
-                for key in env_vars
-                    .iter()
-                    .copied()
-                    .filter(|key| provider_env_var_is_oauth(provider, key))
-                {
-                    if let Ok(val) = std::env::var(key)
-                        && !val.is_empty()
-                    {
-                        tracing::info!(
-                            provider = auth_key,
-                            env = key,
-                            decision = "use_oauth_env_fallback",
-                            "provider credential resolved from OAuth env fallback"
-                        );
-                        return Some((val, true));
-                    }
-                }
-                tracing::warn!(
-                    provider = auth_key,
-                    decision = "missing_all_sources",
-                    "provider credential resolution failed"
-                );
-                return None;
-            }
-        }
-    };
-    if creds.cred_type != "oauth" {
-        return Some((creds.access, false));
-    }
-
-    if creds.is_expired() {
-        tracing::info!(provider, auth_key, "OAuth token expired — refreshing");
-        match refresh_token(auth_key, &creds.refresh).await {
-            Ok(new_creds) => {
-                if let Err(e) = write_refreshed_credentials(auth_key, &new_creds) {
-                    tracing::warn!(
-                        provider = auth_key,
-                        error = %auth_write_failure_operator_message(&e),
-                        "OAuth token refreshed but could not be persisted"
-                    );
-                }
-                creds = new_creds;
-            }
-            Err(e) => {
-                if let Some(adopted) = read_external_credentials(auth_key)
-                    && (adopted.cred_type != "oauth" || !adopted.is_expired())
-                {
-                    tracing::warn!(
-                        provider = auth_key,
-                        "Token refresh failed: {e} — adopting fresh external credential"
-                    );
-                    let persist_result = if auth_key == "openai-codex" {
-                        let account_id = read_external_credential_extra(auth_key, "accountId");
-                        write_credentials_with_extra(auth_key, &adopted, account_id.as_deref())
-                    } else {
-                        write_credentials(auth_key, &adopted)
-                    };
-                    if let Err(write_error) = persist_result {
-                        tracing::warn!(
-                            provider = auth_key,
-                            error = %auth_write_failure_operator_message(&write_error),
-                            "adopted provider credential could not be persisted"
-                        );
-                    }
-                    creds = adopted;
-                } else if oauth_refresh_failure_is_fatal(auth_key) {
-                    tracing::warn!(
-                        "Token refresh failed: {e} — refusing to use expired {auth_key} credential"
-                    );
-                    return None;
-                } else {
-                    tracing::warn!("Token refresh failed: {e} — using expired token");
-                }
-            }
-        }
-    }
-
-    tracing::info!(
-        provider = auth_key,
-        decision = "use_oauth",
-        expires = creds.expires,
-        "provider credential resolved"
-    );
-    Some((creds.access, true))
+/// An OAuth environment token cannot resurrect a known expired credential.
+/// Opaque explicit tokens remain supported; JWT expiry is checked when present.
+pub(crate) fn oauth_env_token_usable(token: &str, expired_accesses: &[&str]) -> bool {
+    !token.trim().is_empty()
+        && !expired_accesses.contains(&token)
+        && extract_jwt_claim(token, "", "exp")
+            .and_then(|exp| exp.parse::<u64>().ok())
+            .is_none_or(|exp| {
+                exp > std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+            })
 }
 
-fn oauth_refresh_failure_is_fatal(provider: &str) -> bool {
-    matches!(provider, "openai-codex" | "google-antigravity")
+pub(crate) fn cached_refreshed_credentials(
+    provider: &str,
+    creds: &OAuthCredentials,
+) -> Option<OAuthCredentials> {
+    refresh::cached_success(provider, creds)
+}
+
+/// Resolve without ever returning an expired OAuth access token. Callers needing
+/// terminal/transient distinctions use the typed variant below.
+pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
+    match resolve_with_refresh_result(provider).await {
+        Ok(result) => result,
+        Err(error) => {
+            tracing::warn!(provider, error = %error, "OAuth credential is not usable");
+            None
+        }
+    }
+}
+
+pub(crate) async fn resolve_with_refresh_result(
+    provider: &str,
+) -> Result<Option<(String, bool)>, RefreshFailure> {
+    trace_auth_store_probe(provider, "resolve_with_refresh:start");
+    // One shared, read-only precedence implementation chooses API keys, usable
+    // stored grants, fresh external grants, and independent environment tokens.
+    if let Some(resolved) = crate::providers::resolve_api_key_sync(provider) {
+        persist_external_if_selected(provider, &resolved);
+        return Ok(Some(resolved));
+    }
+    let auth_key = auth_json_key(provider);
+    let expected_stored = read_credentials(auth_key);
+    let expected_external = read_external_credentials(auth_key);
+    let expired = expected_stored
+        .clone()
+        .or_else(|| expected_external.clone());
+    let Some(expired) = expired.filter(|c| c.cred_type == "oauth" && c.is_expired()) else {
+        return Ok(None);
+    };
+    let result = refresh::refresh_expired(auth_key, &expired).await;
+    // Compare absence too: logout/delete must not recreate the old grant. Fresh
+    // external rotations also supersede refresh results from an older snapshot.
+    if !same_optional_credentials(
+        read_credentials(auth_key).as_ref(),
+        expected_stored.as_ref(),
+    ) || !same_optional_credentials(
+        read_external_credentials(auth_key).as_ref(),
+        expected_external.as_ref(),
+    ) {
+        retry_provider_refresh(auth_key);
+        let resolved = crate::providers::resolve_api_key_sync(provider);
+        if let Some(resolved) = &resolved {
+            persist_external_if_selected(provider, resolved);
+        }
+        return Ok(resolved);
+    }
+    match result {
+        Ok(fresh) => {
+            match write_refreshed_credentials_if_unchanged(
+                auth_key,
+                &fresh,
+                expected_stored.as_ref(),
+            ) {
+                Ok(true) => {}
+                Ok(false) => {
+                    retry_provider_refresh(auth_key);
+                    return Ok(crate::providers::resolve_api_key_sync(provider));
+                }
+                Err(error) => {
+                    tracing::warn!(provider = auth_key, error = %auth_write_failure_operator_message(&error), "OAuth refresh write-back failed");
+                }
+            }
+            Ok(Some((fresh.access, true)))
+        }
+        Err(error) => {
+            // External tools can rotate credentials during an unsuccessful HTTP
+            // refresh too. A fresh independent source still wins immediately.
+            if let Some(resolved) = crate::providers::resolve_api_key_sync(provider) {
+                persist_external_if_selected(provider, &resolved);
+                return Ok(Some(resolved));
+            }
+            Err(error)
+        }
+    }
+}
+
+fn same_optional_credentials(
+    left: Option<&OAuthCredentials>,
+    right: Option<&OAuthCredentials>,
+) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => same_credential_generation(left, right),
+        (None, None) => true,
+        _ => false,
+    }
+}
+fn same_credential_generation(left: &OAuthCredentials, right: &OAuthCredentials) -> bool {
+    left.cred_type == right.cred_type
+        && left.access == right.access
+        && left.refresh == right.refresh
+        && left.expires == right.expires
+}
+fn persist_external_if_selected(provider: &str, resolved: &(String, bool)) {
+    let auth_key = auth_json_key(provider);
+    let stored = read_credentials(auth_key);
+    if stored
+        .as_ref()
+        .is_some_and(|c| c.cred_type != "oauth" || !c.is_expired())
+    {
+        return;
+    }
+    if read_external_credentials(auth_key)
+        .is_some_and(|c| c.access == resolved.0 && (c.cred_type == "oauth") == resolved.1)
+    {
+        let _ = adopt_external_credentials(auth_key);
+    }
 }
 
 fn auth_write_failure_operator_message(error: &anyhow::Error) -> &'static str {
@@ -1375,46 +1330,7 @@ fn auth_write_failure_operator_message(error: &anyhow::Error) -> &'static str {
 
 /// Refresh an OAuth token.
 pub async fn refresh_token(provider: &str, refresh: &str) -> anyhow::Result<OAuthCredentials> {
-    if provider == "openai-codex" {
-        return refresh_openai_token(refresh).await;
-    }
-    if provider == "google-antigravity" {
-        return refresh_antigravity_token(refresh).await;
-    }
-    let url = match provider {
-        "anthropic" => TOKEN_URL,
-        _ => anyhow::bail!("OAuth refresh not supported for provider: {provider}"),
-    };
-
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(url)
-        .json(&json!({
-            "grant_type": "refresh_token",
-            "client_id": CLIENT_ID,
-            "refresh_token": refresh,
-        }))
-        .send()
-        .await?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!("Token refresh failed ({status}): {body}");
-    }
-
-    let data: Value = resp.json().await?;
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_millis() as u64;
-    let expires_in = data["expires_in"].as_u64().unwrap_or(3600);
-
-    Ok(OAuthCredentials {
-        cred_type: "oauth".into(),
-        access: data["access_token"].as_str().unwrap_or("").into(),
-        refresh: data["refresh_token"].as_str().unwrap_or(refresh).into(),
-        expires: now_ms + expires_in.saturating_sub(300) * 1000, // 5 min safety margin
-    })
+    Ok(self::refresh::refresh_token(provider, refresh).await?)
 }
 
 fn base64url_encode(bytes: &[u8]) -> String {
@@ -1628,6 +1544,7 @@ pub async fn login_anthropic_with_callbacks(
     progress: LoginProgress,
     prompt: LoginPrompt,
 ) -> anyhow::Result<OAuthCredentials> {
+    retry_provider_refresh("anthropic");
     let (verifier, challenge) = generate_pkce();
 
     // Build authorization URL
@@ -1903,6 +1820,7 @@ pub async fn login_openai_with_callbacks(
     progress: LoginProgress,
     prompt: LoginPrompt,
 ) -> anyhow::Result<OAuthCredentials> {
+    retry_provider_refresh("openai-codex");
     let (verifier, challenge) = generate_pkce();
 
     // Random state parameter
@@ -2041,34 +1959,7 @@ pub async fn login_openai_with_callbacks(
 
 /// Refresh an OpenAI Codex OAuth token.
 pub async fn refresh_openai_token(refresh: &str) -> anyhow::Result<OAuthCredentials> {
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(OPENAI_TOKEN_URL)
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(format!(
-            "grant_type=refresh_token&refresh_token={refresh}&client_id={OPENAI_CLIENT_ID}"
-        ))
-        .send()
-        .await?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!("OpenAI token refresh failed ({status}): {body}");
-    }
-
-    let data: Value = resp.json().await?;
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_millis() as u64;
-    let expires_in = data["expires_in"].as_u64().unwrap_or(3600);
-
-    Ok(OAuthCredentials {
-        cred_type: "oauth".into(),
-        access: data["access_token"].as_str().unwrap_or("").into(),
-        refresh: data["refresh_token"].as_str().unwrap_or(refresh).into(),
-        expires: now_ms + expires_in.saturating_sub(300) * 1000,
-    })
+    refresh_token("openai-codex", refresh).await
 }
 
 //
@@ -2099,6 +1990,7 @@ pub async fn login_antigravity_with_callbacks(
     progress: LoginProgress,
     prompt: LoginPrompt,
 ) -> anyhow::Result<OAuthCredentials> {
+    retry_provider_refresh("google-antigravity");
     let (verifier, challenge) = generate_pkce();
 
     let mut state_bytes = [0u8; 16];
@@ -2203,35 +2095,7 @@ pub async fn login_antigravity_with_callbacks(
 
 /// Refresh a Google Antigravity OAuth token.
 pub async fn refresh_antigravity_token(refresh: &str) -> anyhow::Result<OAuthCredentials> {
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(ANTIGRAVITY_TOKEN_URL)
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(format!(
-            "grant_type=refresh_token&refresh_token={refresh}\
-             &client_id={ANTIGRAVITY_CLIENT_ID}&client_secret={ANTIGRAVITY_CLIENT_SECRET}"
-        ))
-        .send()
-        .await?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!("Google Antigravity token refresh failed ({status}): {body}");
-    }
-
-    let data: Value = resp.json().await?;
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_millis() as u64;
-    let expires_in = data["expires_in"].as_u64().unwrap_or(3600);
-
-    Ok(OAuthCredentials {
-        cred_type: "oauth".into(),
-        access: data["access_token"].as_str().unwrap_or("").into(),
-        refresh: data["refresh_token"].as_str().unwrap_or(refresh).into(),
-        expires: now_ms + expires_in * 1000,
-    })
+    refresh_token("google-antigravity", refresh).await
 }
 
 /// Extract a claim from a JWT payload (simple base64 decode, no verification).
@@ -2356,7 +2220,18 @@ fn refreshed_credential_entry(
     Ok(entry)
 }
 
+#[cfg(test)]
 fn write_refreshed_credentials(provider: &str, creds: &OAuthCredentials) -> anyhow::Result<()> {
+    let expected = read_credentials(provider);
+    write_refreshed_credentials_if_unchanged(provider, creds, expected.as_ref())?;
+    Ok(())
+}
+
+fn write_refreshed_credentials_if_unchanged(
+    provider: &str,
+    creds: &OAuthCredentials,
+    expected: Option<&OAuthCredentials>,
+) -> anyhow::Result<bool> {
     let path =
         auth_json_path().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
     assert_test_auth_json_override_for_write(&path)?;
@@ -2364,6 +2239,13 @@ fn write_refreshed_credentials(provider: &str, creds: &OAuthCredentials) -> anyh
     with_auth_json_lock(&path, || {
         let mut auth = read_auth_json_for_update(&path, "write_refreshed_credentials", provider)?;
         let existing_entry = auth.get(provider);
+        let current = existing_entry
+            .cloned()
+            .map(serde_json::from_value::<OAuthCredentials>)
+            .transpose()?;
+        if !same_optional_credentials(current.as_ref(), expected) {
+            return Ok(false);
+        }
         let refreshed_entry = refreshed_credential_entry(provider, creds, existing_entry)?;
         let before_keys = auth_json_provider_keys(&auth);
         auth[provider] = refreshed_entry;
@@ -2378,7 +2260,7 @@ fn write_refreshed_credentials(provider: &str, creds: &OAuthCredentials) -> anyh
         set_auth_file_permissions(&path)?;
         let (auth_path, auth_path_source) = auth_path_trace_fields();
         tracing::info!(provider, auth_path = %auth_path, auth_path_source, expires = creds.expires, "persisted refreshed provider credentials to auth.json");
-        Ok(())
+        Ok(true)
     })
 }
 
@@ -2626,7 +2508,12 @@ pub struct ModelLimits {
 /// Query the Anthropic /v1/models endpoint for the selected model's limits.
 /// Returns None if the API is unreachable or the model isn't found.
 pub async fn probe_anthropic_model_limits(model_id: &str) -> Option<ModelLimits> {
-    let (api_key, is_oauth) = resolve_with_refresh("anthropic").await?;
+    if model_id.trim().is_empty() {
+        return None;
+    }
+    // Model inventory is observational: an expired grant is unavailable here.
+    // Explicit connection or selected-route execution owns refresh authority.
+    let (api_key, is_oauth) = crate::providers::resolve_api_key_sync("anthropic")?;
     let client = reqwest::Client::new();
     let base_url =
         std::env::var("ANTHROPIC_BASE_URL").unwrap_or_else(|_| "https://api.anthropic.com".into());
@@ -3175,9 +3062,209 @@ mod tests {
     }
 
     #[test]
-    fn codex_refresh_failure_is_fatal() {
-        assert!(oauth_refresh_failure_is_fatal("openai-codex"));
-        assert!(!oauth_refresh_failure_is_fatal("anthropic"));
+    fn recovery_auth_writeback_compares_generation_under_auth_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("auth.json");
+        with_auth_json_path_env(Some(&path), || {
+            let expired = OAuthCredentials {
+                cred_type: "oauth".into(),
+                access: "old".into(),
+                refresh: "old-refresh".into(),
+                expires: 0,
+            };
+            let replacement = OAuthCredentials {
+                cred_type: "api_key".into(),
+                access: "new-key".into(),
+                refresh: String::new(),
+                expires: u64::MAX,
+            };
+            let refreshed = OAuthCredentials {
+                cred_type: "oauth".into(),
+                access: "stale-inflight".into(),
+                refresh: "new-refresh".into(),
+                expires: u64::MAX,
+            };
+            write_credentials("anthropic", &replacement).unwrap();
+            assert!(
+                !write_refreshed_credentials_if_unchanged("anthropic", &refreshed, Some(&expired))
+                    .unwrap()
+            );
+            assert!(
+                !write_refreshed_credentials_if_unchanged("anthropic", &refreshed, None).unwrap()
+            );
+            assert_eq!(read_credentials("anthropic").unwrap().access, "new-key");
+            logout_provider("anthropic").unwrap();
+            assert!(
+                !write_refreshed_credentials_if_unchanged("anthropic", &refreshed, Some(&expired))
+                    .unwrap()
+            );
+            assert!(read_credentials("anthropic").is_none());
+        });
+    }
+
+    async fn assert_refresh_fixture_request(socket: &mut tokio::net::TcpStream) {
+        use tokio::io::AsyncReadExt;
+        let mut request = Vec::new();
+        loop {
+            let mut chunk = [0; 1024];
+            let count = socket.read(&mut chunk).await.unwrap();
+            assert!(
+                count > 0,
+                "refresh request ended before its body was complete"
+            );
+            request.extend_from_slice(&chunk[..count]);
+            assert!(request.len() <= 8192, "fixture request exceeded its bound");
+            let Some(header_end) = request.windows(4).position(|part| part == b"\r\n\r\n") else {
+                continue;
+            };
+            let headers = std::str::from_utf8(&request[..header_end]).unwrap();
+            assert!(headers.starts_with("POST "));
+            let length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().unwrap())
+                })
+                .expect("refresh requests must declare their body length");
+            assert!(length <= 8192);
+            let body_start = header_end + 4;
+            if request.len() < body_start + length {
+                continue;
+            }
+            let body: Value =
+                serde_json::from_slice(&request[body_start..body_start + length]).unwrap();
+            assert_eq!(body["grant_type"], "refresh_token");
+            assert!(
+                body["refresh_token"]
+                    .as_str()
+                    .is_some_and(|value| !value.is_empty())
+            );
+            break;
+        }
+    }
+
+    #[test]
+    fn recovery_auth_invalid_grant_blocks_resolver_and_stream_without_inventory_refresh() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("auth.json");
+        with_auth_json_path_and_home_env(Some(&path), dir.path(), || {
+            struct Restore(Vec<(&'static str, Option<String>)>);
+            impl Drop for Restore {
+                fn drop(&mut self) {
+                    for (key, value) in &self.0 {
+                        unsafe {
+                            match value {
+                                Some(value) => std::env::set_var(key, value),
+                                None => std::env::remove_var(key),
+                            }
+                        }
+                    }
+                    *refresh::TEST_REFRESH_URL.lock().unwrap() = None;
+                    retry_provider_refresh("anthropic");
+                }
+            }
+            let _restore = Restore(
+                ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"]
+                    .into_iter()
+                    .map(|key| (key, std::env::var(key).ok()))
+                    .collect(),
+            );
+            unsafe {
+                std::env::remove_var("ANTHROPIC_API_KEY");
+                std::env::set_var("ANTHROPIC_OAUTH_TOKEN", "expired-copy");
+            }
+            retry_provider_refresh("anthropic");
+            let expired = OAuthCredentials {
+                cred_type: "oauth".into(),
+                access: "expired-copy".into(),
+                refresh: "invalid-grant-fixture".into(),
+                expires: 0,
+            };
+            write_credentials("anthropic", &expired).unwrap();
+            tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+                use tokio::io::AsyncWriteExt;
+                use crate::bridge::LlmBridge;
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                *refresh::TEST_REFRESH_URL.lock().unwrap() = Some(format!("http://{}", listener.local_addr().unwrap()));
+                assert_eq!(probe_provider("anthropic").await.status, ProviderAuthStatus::Expired);
+                for model in ["", "claude-model-fixture"] {
+                    let limits = tokio::time::timeout(Duration::from_millis(40), probe_anthropic_model_limits(model)).await;
+                    assert!(limits.is_ok_and(|limits| limits.is_none()), "model inventory must not refresh expired OAuth, including an empty startup selection");
+                }
+                assert!(!refresh_terminally_rejected("anthropic", &expired));
+                assert!(tokio::time::timeout(Duration::from_millis(20), listener.accept()).await.is_err(), "inventory must not refresh");
+                let server = tokio::spawn(async move {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    assert_refresh_fixture_request(&mut socket).await;
+                    let body = r#"{"error":"invalid_grant","error_description":"SECRET-CANARY"}"#;
+                    socket.write_all(format!("HTTP/1.1 400 Bad Request\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+                });
+                assert_eq!(resolve_with_refresh_result("anthropic").await.unwrap_err(), RefreshFailure::Rejected);
+                server.await.unwrap();
+                assert!(refresh_terminally_rejected("anthropic", &expired));
+                assert!(matches!(crate::route::CredentialLedger.probe("anthropic"), crate::route::CredentialState::Expired { refreshable: false, .. }));
+                assert!(resolve_with_refresh("anthropic").await.is_none());
+                assert!(crate::providers::resolve_api_key_sync("anthropic").is_none());
+                let client = crate::providers::AnthropicClient::new("expired-copy".into(), true);
+                let options = crate::bridge::StreamOptions { model: Some("anthropic:test-fixture".into()), ..Default::default() };
+                let error = client.stream("", &[], &[], &options).await.unwrap_err();
+                assert!(error.downcast_ref::<crate::bridge::ProviderRouteUnavailable>().is_some());
+                assert!(!error.to_string().contains("SECRET-CANARY"));
+                // A replacement API key recovers immediately, without reconnect.
+                unsafe { std::env::set_var("ANTHROPIC_API_KEY", "fresh-independent-key"); }
+                assert_eq!(resolve_with_refresh("anthropic").await, Some(("fresh-independent-key".into(), false)));
+                unsafe { std::env::remove_var("ANTHROPIC_API_KEY"); }
+                // An explicit retry can obtain a new grant even if write-back is
+                // unavailable. The cached grant must agree with the route ledger.
+                retry_provider_refresh("anthropic");
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                *refresh::TEST_REFRESH_URL.lock().unwrap() = Some(format!("http://{}", listener.local_addr().unwrap()));
+                let server = tokio::spawn(async move {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    assert_refresh_fixture_request(&mut socket).await;
+                    let body = r#"{"access_token":"fresh-memory-grant","expires_in":3600}"#;
+                    socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+                });
+                std::fs::create_dir(path.with_extension("json.tmp")).unwrap();
+                assert_eq!(resolve_with_refresh("anthropic").await, Some(("fresh-memory-grant".into(), true)));
+                server.await.unwrap();
+                assert_eq!(read_credentials("anthropic").unwrap().access, "expired-copy", "write-back fixture must fail");
+                assert_eq!(crate::providers::resolve_api_key_sync("anthropic"), Some(("fresh-memory-grant".into(), true)));
+                assert!(matches!(crate::route::CredentialLedger.probe("anthropic"), crate::route::CredentialState::Valid { oauth: true, .. }));
+                std::fs::remove_dir(path.with_extension("json.tmp")).unwrap();
+                retry_provider_refresh("anthropic");
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                *refresh::TEST_REFRESH_URL.lock().unwrap() = Some(format!("http://{}", listener.local_addr().unwrap()));
+                let server = tokio::spawn(async move {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    assert_refresh_fixture_request(&mut socket).await;
+                    logout_provider("anthropic").unwrap();
+                    clear_provider_auth_env("anthropic");
+                    let body = r#"{"access_token":"revoked-inflight-grant","expires_in":3600}"#;
+                    socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+                });
+                assert!(resolve_with_refresh("anthropic").await.is_none(), "logout must discard an in-flight refresh");
+                server.await.unwrap();
+                assert!(read_credentials("anthropic").is_none(), "refresh must not recreate logged-out credentials");
+                // Refresh of an external-only grant must not shadow an external
+                // CLI's newer credential that arrives before the HTTP response.
+                let external_path = dir.path().join(".claude.json");
+                std::fs::write(&external_path, json!({"oauthAccount":{"accessToken":"external-old", "refreshToken":"external-refresh", "expiresAt":0}}).to_string()).unwrap();
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                *refresh::TEST_REFRESH_URL.lock().unwrap() = Some(format!("http://{}", listener.local_addr().unwrap()));
+                let server = tokio::spawn(async move {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    assert_refresh_fixture_request(&mut socket).await;
+                    std::fs::write(external_path, json!({"oauthAccount":{"accessToken":"external-new", "refreshToken":"external-new-refresh", "expiresAt":9_999_999_999_999_u64}}).to_string()).unwrap();
+                    let body = r#"{"access_token":"obsolete-external-refresh","expires_in":3600}"#;
+                    socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+                });
+                assert_eq!(resolve_with_refresh("anthropic").await, Some(("external-new".into(), true)));
+                server.await.unwrap();
+                assert_eq!(read_credentials("anthropic").unwrap().access, "external-new");
+            });
+        });
     }
 
     #[test]
@@ -3883,6 +3970,25 @@ mod tests {
             ));
             assert!(provider_oauth_for_model("anthropic:github-copilot:gpt-5.5"));
         });
+    }
+
+    #[test]
+    fn connect_api_key_methods_exclude_oauth_tokens_and_endpoint_configuration() {
+        for (provider, expected) in [
+            ("anthropic", Some("ANTHROPIC_API_KEY")),
+            ("openai", Some("OPENAI_API_KEY")),
+            ("openai-codex", None),
+            ("github-copilot", None),
+            ("google-antigravity", None),
+            ("ollama", None),
+            ("dwarfstar", None),
+        ] {
+            assert_eq!(
+                operator_api_key_name(provider_by_id(provider).unwrap()),
+                expected,
+                "{provider}"
+            );
+        }
     }
 
     #[test]

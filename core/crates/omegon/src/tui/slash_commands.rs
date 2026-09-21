@@ -1528,8 +1528,8 @@ Scroll transcript:
                 let mut parts = args.split_whitespace();
                 let provider = parts.next().unwrap_or("");
                 let option = parts.next();
-                if parts.next().is_some() || option.is_some_and(|value| value != "--console") {
-                    return SlashResult::Display("Usage: /connect [provider] [--console]".into());
+                if parts.next().is_some() || option.is_some_and(|value| !matches!(value, "--console" | "--api-key")) {
+                    return SlashResult::Display("Usage: /connect [provider] [--console | --api-key]".into());
                 }
                 if provider.is_empty() {
                     self.open_auth_menu();
@@ -1546,6 +1546,19 @@ Scroll transcript:
                         } else {
                             SlashResult::Display("This provider has no API-key console. Use /connect to choose a connection method.".into())
                         }
+                    } else if option == Some("--api-key") {
+                        if let Some(key_name) = key_name {
+                            self.editor.start_secret_input(key_name);
+                            SlashResult::Display(format!("Paste {key_name} — input hidden"))
+                        } else {
+                            SlashResult::Display("This provider does not support API-key entry. Use /connect to choose a connection method.".into())
+                        }
+                    } else if cmd == "connect"
+                        && crate::auth::operator_oauth_setup_supported(provider)
+                        && let Some(key_name) = key_name
+                    {
+                        self.open_menu_projection(auth_menu_projection::build_connection_method_menu(provider, key_name));
+                        SlashResult::Handled
                     } else if provider.auth_method == crate::auth::AuthMethod::ApiKey
                         && let Some(key_name) = key_name
                     {

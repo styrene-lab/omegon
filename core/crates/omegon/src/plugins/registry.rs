@@ -95,6 +95,7 @@ struct PromptSkillLoadResult {
     skills: Vec<String>,
     snapshots: Vec<LoadedSkillSnapshot>,
     events: Vec<omegon_traits::SkillActivationEvent>,
+    health: Vec<crate::contribution_health::ScopeHealth>,
 }
 
 #[derive(Debug, Clone)]
@@ -138,6 +139,7 @@ pub struct DeactivateResult {
 /// Invariant: `lex_imperialis` is always injected first in the system prompt.
 /// No operation can remove or reorder it.
 pub struct AugmentRegistry {
+    pub(crate) loading_health: crate::contribution_health::ContributionHealth,
     lex_imperialis: String,
     active_persona: Option<LoadedPersona>,
     active_tone: Option<LoadedTone>,
@@ -221,6 +223,7 @@ impl AugmentRegistry {
     /// Create a new registry. The Lex Imperialis content is required and immutable.
     pub fn new(lex_imperialis: String) -> Self {
         Self {
+            loading_health: Default::default(),
             lex_imperialis,
             active_persona: None,
             active_tone: None,
@@ -247,6 +250,15 @@ impl AugmentRegistry {
         match crate::paths::omegon_home() {
             Ok(home) => self.load_skills_subset_with_home(cwd, &home, allowed),
             Err(error) => {
+                self.loading_health.replace_kind(
+                    crate::contribution_health::ContributionKind::Skills,
+                    vec![crate::contribution_health::ScopeHealth::blocked(
+                        crate::contribution_health::ContributionKind::Skills,
+                        "home",
+                        std::path::Path::new("~/.omegon/skills"),
+                        &error,
+                    )],
+                );
                 tracing::warn!(error = %error, "skill loading failed closed");
                 self.loaded_skills.clear();
                 self.loaded_skill_snapshots.clear();
@@ -265,6 +277,10 @@ impl AugmentRegistry {
         let explicit_skill_subset = !allowed.is_empty();
         let policy = self.skill_conflict_resolution;
         Self::with_guarded_skills(cwd, home, allowed, policy, |result| {
+            self.loading_health.replace_kind(
+                crate::contribution_health::ContributionKind::Skills,
+                result.health,
+            );
             self.loaded_skills = result.skills;
             self.loaded_skill_snapshots = result.snapshots;
             self.explicit_skill_subset = explicit_skill_subset;
@@ -279,6 +295,8 @@ impl AugmentRegistry {
         policy: SkillConflictResolution,
         publish: impl FnOnce(PromptSkillLoadResult) -> R,
     ) -> R {
+        use crate::contribution_health::{ContributionKind::Skills, LoadingState, ScopeHealth};
+        let mut health = Vec::new();
         let mut scopes = Vec::new();
         for (root, components, scope, display_root) in [
             (
@@ -307,8 +325,14 @@ impl AugmentRegistry {
                 scope,
             ) {
                 Ok(Some(directory)) => scopes.push((scope, display_root, directory)),
-                Ok(None) => {}
+                Ok(None) => health.push(ScopeHealth::new(
+                    Skills,
+                    scope,
+                    &display_root,
+                    LoadingState::Absent,
+                )),
                 Err(error) => {
+                    health.push(ScopeHealth::blocked(Skills, scope, &display_root, &error));
                     tracing::warn!(scope, error = %error, "skill contribution scope failed closed");
                 }
             }
@@ -362,8 +386,19 @@ impl AugmentRegistry {
                 &mut scoped,
                 &mut order,
             ) {
-                Ok(()) => skills.extend(scoped),
+                Ok(()) => {
+                    health.push(ScopeHealth::new(
+                        Skills,
+                        scope,
+                        display_root,
+                        LoadingState::Loaded {
+                            count: scoped.len(),
+                        },
+                    ));
+                    skills.extend(scoped);
+                }
                 Err(error) => {
+                    health.push(ScopeHealth::blocked(Skills, scope, display_root, &error));
                     order = starting_order;
                     tracing::warn!(scope, error = %error, "skill contribution scope failed closed");
                 }
@@ -381,6 +416,7 @@ impl AugmentRegistry {
             })
             .collect();
         publish(PromptSkillLoadResult {
+            health,
             skills: candidates
                 .into_iter()
                 .map(|candidate| candidate.content)
@@ -516,6 +552,7 @@ impl AugmentRegistry {
             })
             .collect();
         PromptSkillLoadResult {
+            health: Vec::new(),
             skills: candidates
                 .into_iter()
                 .map(|candidate| candidate.content)
@@ -1294,7 +1331,21 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn guarded_skill_loading_isolates_malformed_scope() {
+    fn contribution_health_missing_skill_directories_are_absent() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let registry = load_guarded_registry(project.path(), home.path());
+        let health = registry.loading_health.snapshot();
+        assert_eq!(health.len(), 2);
+        assert!(health.iter().all(|scope| matches!(
+            scope.outcome,
+            crate::contribution_health::LoadingState::Absent
+        )));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn contribution_health_skill_loading_isolates_malformed_scope() {
         use std::io::Write;
 
         let home = tempfile::tempdir().unwrap();
@@ -1316,18 +1367,49 @@ mod tests {
             .join("maintain/v1/deny")
             .join(authority.to_hex())
             .join("state.json");
+        let original = std::fs::read(&state_path).unwrap();
         let mut state = std::fs::OpenOptions::new()
             .write(true)
             .truncate(true)
-            .open(state_path)
+            .open(&state_path)
             .unwrap();
-        state.write_all(b"{not-json").unwrap();
+        state.write_all(b"{not-json\n").unwrap();
         state.sync_all().unwrap();
 
-        let registry = load_guarded_registry(project.path(), home.path());
+        let mut registry = load_guarded_registry(project.path(), home.path());
         let prompt = registry.build_system_prompt();
         assert!(prompt.contains("USER_SCOPE_MARKER"));
         assert!(!prompt.contains("PROJECT_SCOPE_MARKER"));
+        let health = registry.loading_health.snapshot();
+        let project_health = health
+            .iter()
+            .find(|scope| scope.scope == "project")
+            .unwrap();
+        assert!(project_health.is_blocked());
+        assert!(
+            project_health
+                .summary()
+                .contains("invalid_maintenance_record")
+        );
+        assert!(
+            health
+                .iter()
+                .any(|scope| scope.scope == "user" && !scope.is_blocked())
+        );
+        std::fs::write(&state_path, original).unwrap();
+        registry.load_skills_subset_with_home(project.path(), home.path(), &[]);
+        assert!(
+            registry
+                .loading_health
+                .snapshot()
+                .iter()
+                .all(|scope| !scope.is_blocked())
+        );
+        assert!(
+            registry
+                .build_system_prompt()
+                .contains("PROJECT_SCOPE_MARKER")
+        );
     }
 
     #[cfg(unix)]
@@ -1431,17 +1513,7 @@ mod tests {
     #[cfg(unix)]
     fn load_guarded_registry(project: &std::path::Path, home: &std::path::Path) -> AugmentRegistry {
         let mut registry = AugmentRegistry::new(LEX.into());
-        AugmentRegistry::with_guarded_skills(
-            project,
-            home,
-            &[],
-            registry.skill_conflict_resolution,
-            |result| {
-                registry.loaded_skills = result.skills;
-                registry.loaded_skill_snapshots = result.snapshots;
-                registry.skill_activation_events = result.events;
-            },
-        );
+        registry.load_skills_subset_with_home(project, home, &[]);
         registry
     }
 

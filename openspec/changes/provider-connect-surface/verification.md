@@ -141,3 +141,56 @@ addon remain deferred. No merge is performed by this task.
 
 PR handoff: [#233](https://github.com/styrene-lab/omegon/pull/233) is open against
 `main` from `feature/provider-connect-surface`. It has not been merged.
+
+
+## Connection-first operator correction (2026-09-07)
+
+The operator's WezTerm capture exposed primary provider actions opening model
+selection. Regression tests reproduced that behavior and the replacement method
+menu being closed by generic command completion. Connection rows now carry explicit
+ConnectionSetup purpose; /model uses ModelSelection purpose. Anthropic offers OAuth
+or hidden API-key entry. Single-method setup and /login compatibility remain intact.
+Commands preserve a newly opened method menu instead of closing it with its origin.
+Shared route problems no longer contain Rust Debug output or duplicate headings;
+action failures omit model intent while explicit status retains it.
+
+Final `just test-crate omegon` passed 5,264 tests with 11 ignored, serialized with
+NO_COLOR and OMEGON_ASCII_GLYPHS unset. `just clippy-changed --base b2ff10ba`, formatting,
+diff checks, and both updated OpenSpec validations passed. Focused evidence includes
+three diagnostic regressions, 57 connection tests, and seven menu-projection tests;
+the final full gate also covers the subsequent explicit-purpose plumbing.
+
+External evidence: `../omegon-connect-feedback-evidence-01`. Accepted directories
+are `inline-unconfigured`, `fullscreen-unconfigured`, `inline-configured-corrected`,
+and `fullscreen-configured`. The unconfigured runs each captured 36 actions and
+15 views, including disconnected draft submission, Add provider, Anthropic Enter,
+method choice, masked synthetic key, cancellation, and exact draft restoration.
+Configured runs each captured 27 actions and 11 views, including existing provider
+Enter and native Codex Astra selection with a serving badge. /model retained model
+selection. The explicit free selector opened and was canceled during availability
+checking; no current free-model availability is claimed.
+
+All four runs used debug SHA-256
+`1a2f95202eac85ccf0095ab26aae2c8abd2b45b1bc38ea0b4daa28ca7d8cda0e`, built from
+`b2ff10ba` plus the frozen source diff whose SHA-256 is
+`dbd87378400e7a728cc818de7bde2ba77497735f1a1dba4d4e6069a9c95720b6`.
+Manifests record process/driver/capture identities, unchanged fixture auth, only
+session.created authority events, no browser attempts, and owned-process cleanup.
+Local Anthropic/Codex HTTP catchers saw no requests; this is not global packet capture.
+No inference was submitted. These tests used isolated homes and opened no GUI windows.
+
+The original `inline-configured` attempt is retained as failed driver evidence:
+its expected label omitted the slash in OpenAI/Codex. The actual route was serving;
+the corrected driver completed the full scenario in a new directory. Driver versions
+and their capture mapping are recorded in `driver-provenance.json`.
+
+The first crate run exposed the missing Fable tools declaration addressed by the
+fresh-provider follow-up. The final gate briefly stalled in synchronous macOS
+FSEvents registration before the existing test timeout; it resumed and passed.
+The sampled stack and a passing isolated watcher run are retained. No watcher code
+or assertion was changed.
+
+Final handoff requires `logs/just-link-final.log`, `release-artifact.json`, and the
+`operator-wezterm/` capture in the external directory after this source is committed.
+This ties the operator window and installed launchers to the final commit without
+changing source after the final build.

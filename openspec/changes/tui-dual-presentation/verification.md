@@ -168,3 +168,193 @@ again stopped at the existing catalog home-identity mismatch. Thus binary/launch
 installation passed; the whole link recipe did not. Catalog and subsequent
 extension-install steps remain with the separate recovery change. Decorative
 telemetry retirement also remains planned. This TUI change is left unarchived.
+
+## Persistent notification follow-up
+
+The installation-recovery pass reproduced hidden startup and `/status` output
+caused by merging new system text into already-published records. Persistent
+notifications now append centrally. A separate red regression reproduced output
+loss after notification retention rolled over; typed pruning now preserves cursor
+meaning, partial output and stale-batch rejection with bounded bookkeeping.
+Adversarial review checked interleaved removals, boundary changes between events,
+synthetic notice offsets and generation changes after the cursor.
+
+Focused red/green logs are `omegon-recovery-status-*`,
+`omegon-recovery-rollover-*` and `omegon-recovery-prune-metadata-green.log` in the
+external installation-recovery evidence directory. The final Omegon crate gate
+passed 5,252 tests (11 ignored); affected-target Clippy passed.
+
+Real debug PTY acceptance delivered all 66 additional `/status` responses across
+retention rollover, plus the initial status response. Startup and status then
+passed again after supported home recovery using the identical binary hash.
+Both sessions had zero inference requests, unchanged auth/profile hashes and
+verified process cleanup. The recovered session exposes existing trust blocks for
+two contributions rather than silently hiding them. See the contribution-loading
+verification document for exact artifact identity and capture paths.
+
+The historical catalog/home-identity blocker above is now resolved by
+maintenance-home-identity-recovery; catalog and extension installation recipes
+completed. Final release handoff evidence is recorded externally after these
+verification notes are committed.
+
+## Live streaming correction
+
+The operator's live reply exposed an incorrect publication policy: the inline
+viewport replaced its three-line preview while withholding the answer from
+primary scrollback until turn completion. Completed text was retained, but the
+operator could not read earlier lines during the response.
+
+The deterministic baseline reproduced the defect against release commit
+`bc2f08796c195177e3b85fb516e46ca1dce71465`, SHA-256
+`03d1a3131387d41ea4d800d2c24473d335384fe4a630777bf483b9f77d1ee712`.
+The fixture delivered 32 numbered long Unicode lines, then held the stream before
+completion. Only markers 30 and 31 appeared in the live preview; marker 1 was
+absent from primary history. The authority journal had no closed turn. The failed
+assertion and owned-process cleanup are retained in
+`../omegon-streaming-feedback-evidence-01/before/`, with a summary in
+`before-observation.json` and the operator capture in `operator-before/`.
+
+The revised contract requires stable streamed rows in primary scrollback before
+completion. The acceptance driver checks five held checkpoints, resizing during
+streaming, a completed read tool, and a second turn. It verifies all 160 numbered
+lines exactly once and in order. These fixtures use local HTTP requests and a
+private tmux server; they create no desktop windows or paid inference requests.
+
+Adversarial source review identified and corrected split terminal-control parsing,
+Unicode joins across stripped controls, oversized-cluster stalls, duplicate tool
+summaries after detail changes, and restart behind a live publication cursor.
+The implementation also omits mutable plan snapshots from automatic history so
+they cannot block following answers. Their canonical Workbench/fullscreen state
+remains intact. Regression fixtures cover these cases, including explicit recovery
+from text-limit and unmapped-rewrite pauses.
+
+The final focused suite passed 29 publication tests, 10 inline integration tests,
+and two composer tests. The Python acceptance driver tests also passed. An earlier
+run exposed a fixture using a 16-byte budget for the production 64 KiB cluster
+limit; the corrected fixture checks the production limit. Another compile caught
+a missing type qualification in the restored running-tool preview. Both failed
+attempts are retained separately from the final passing logs.
+
+The earlier test executable also waited in macOS `_dyld_start` before any tests
+ran, then proceeded without intervention. Its on-disk signature check passed.
+That focused run finished naturally; no machine security settings changed. The optional
+developer-script sweep was stopped separately during unrelated Cargo filters;
+it is not counted as a passed complete gate.
+
+The first Active and Full streaming runs passed marker progress and ordering, but
+inspection of their raw captures found lost characters in 159 of 160 Unicode
+payloads. Those manifests are insufficient evidence of text fidelity; the finding
+is retained in `payload-fidelity-review.json`. A plain tmux probe preserved the
+same Unicode under both tested UTF-8 locales. Local Ratatui source identified
+extra continuation-cell spaces in `insert_before` output as the cause. The
+acceptance driver now checks every complete payload as well as markers. The
+interim crate run was stopped while waiting in the existing filesystem-watcher
+test because this renderer correction required a new validation run.
+
+Earlier fixture-only failures are also retained: joined soft-wrap captures were
+needed to read markers after resize, the new streaming fixture inherited a legacy
+permission barrier, and saved alternate-screen captures could not include primary
+scrollback. Each correction retains raw geometry captures and scoped cleanup.
+
+The corrected insertion adapter passed 11 inline tests and 29 publication tests,
+including an actual Crossterm byte regression that was red before the correction.
+Final debug SHA-256:
+`520a033255ef3e57ca3810d710a24c1334a251900dfca15dc99b32e1c59e41b2`.
+`debug-width-artifact.json` identifies the frozen executable and build source.
+The final `width-fixed-active` and `width-fixed-full` captures each preserve all
+160 complete Unicode payloads after whitespace normalization, exactly once and in
+order. Both pass five checkpoints before completion, resize from 120×40 to 72×24,
+and complete two turns with a read-tool continuation through three local requests.
+
+`width-fixed-stress` passes browsing with a preserved draft and published prefix,
+explicit export, denied write, cancellation, new-session recovery, and clean shell
+return through six local requests. The authority journals confirm every started
+turn closed. All three sessions restored terminal modes and cleaned up their owned
+processes. No GUI test windows or paid inference were used. See
+`acceptance-summary.json` for capture hashes and per-scenario evidence. All 14
+Python fixture tests passed. Changed-target Clippy, including the workspace
+selected by the lockfile change, passed.
+
+The final serialized `just test-crate omegon` gate passed 5,275 tests with 11
+ignored, including authoritative lifecycle recovery and all integration targets.
+`just clippy-changed --base bc2f0879`, formatting, and diff checks passed. The final
+crate run completed the filesystem-watcher test without intervention. Release
+installation and operator-window identity are recorded externally after this
+tested source is committed, preserving an exact artifact-to-commit handoff.
+
+## Markdown and word-wrapping follow-up
+
+The next operator capture exposed a presentation gap in that retention-only
+verification: assistant Markdown was published as raw strings and ordinary words
+were split at cell capacity. The original WezTerm capture and installed artifact
+identity are retained in `../omegon-markdown-feedback-evidence-01/`. That window
+had grown from 117 to 203 columns after the earlier rows were printed; its existing
+hard line breaks also illustrate why new-width checks must examine new output.
+
+The added `--markdown` local-provider scenario failed against installed release
+`39094ec59b8a5cc3ec399829100186639083fdbf392d8bddf50e6c60db8c56a3`
+with `literal Markdown leaked into rendered output: **` before completion.
+`before-markdown/` retains the physical rows, SGR capture, process/build identity,
+and failed manifest. A stricter `before-markdown-live/` run also fails while a
+long paragraph remains unterminated: completed bold text still appears as raw
+syntax in primary history. Both runs cleaned up their owned terminals. This is a
+separate regression gate from the 160-line payload test.
+
+The corrected frozen debug artifact is
+`ec9a294358aa7c42dcb2114615596f9bace7f0357e53161b6683ff9948675f75`.
+`debug-artifact.json` identifies its source diff and `acceptance-summary.json`
+indexes the passing Markdown Active, Markdown Full, and streaming Active runs.
+Each Markdown run passes four held checkpoints: an unfinished long paragraph
+followed by formatted blocks at 120, 72, and 160 columns. Physical rows establish
+packed whole-word wrapping and table alignment; SGR captures establish bold
+headings/emphasis and underlined inline code. Fenced indentation and source order
+remain intact. Streaming Active again preserves 160 Unicode payloads through a
+read-tool continuation and two turns. `debug-stress/` passes cancellation,
+browsing, draft restoration, denial, export, and session reset through six local
+requests. All four passing runs verified cleanup without GUI windows or paid
+inference. All 16 Python fixture tests pass.
+
+Nine Rust streaming/projector regressions and the terminal inline-code style
+regression pass. The combined TUI run initially passed 1,324 tests and failed 12
+glyph/snapshot tests under inherited color/glyph environment overrides. That
+failed log remains in `logs/tui-focused.log`; the landing crate run explicitly
+unsets those overrides and serializes tests. Read-only adversarial review found
+no remaining blockers after corrections to stable row tails, table backpressure,
+pending previews, width changes, and shared inline-code styling.
+
+The final `just test-crate omegon` run passed 5,285 tests with 11 ignored across
+nine targets. The filesystem watcher and daemon integration completed naturally;
+no test process was interrupted to obtain a pass. The first full run failed only
+because the oversized-text regression still expected the previous limit message;
+`logs/crate-first.log` preserves it. The corrected assertion passed in the final
+run. `just clippy-changed --base 4ce9c731` passed after removing a redundant local
+binding; `logs/clippy-first.log` preserves that initial diagnostic. This cleanup
+does not change rendering behavior; all six native Markdown projector tests also
+pass after that cleanup. Formatting and diff checks pass. Installed
+release evidence and the operator handoff are recorded externally after commit.
+
+## Uninterrupted response flow follow-up
+
+The operator's next capture showed the transient working/cancellation line between
+already published text and the live response tail. The unit regression failed on
+that ordering, and the captured local-provider scenario failed against installed
+release `2f7f89217c5521f3fd8e035d9abbd22d731bb191990645d6ab4f240d7b41071c`
+with `working status interrupts the answer above the composer`. Evidence is kept
+in `../omegon-status-feedback-evidence-01/`, including both failures.
+
+Working/cancellation and completed-output publication status now occupy the
+composer's bottom border. The regression checks Active and Full at 40 and 80
+columns, including publication backlog and completion. Frozen debug artifact
+`973027d8df305917699aeba2a3adc888ab44d800351fbaba4deaf7fb7f23bd92`
+passes captured Active and Full scenarios at four held checkpoints across 120,
+72, and 160 columns. The status stays inside the composer and disappears after
+completion. Markdown styling, table alignment, code indentation, and whole-word
+wrapping checks remain green. Both runs verify cleanup, with no GUI test windows
+or paid inference. All 17 Python fixture tests pass. Read-only adversarial review
+found no blockers; fullscreen behavior and existing command-hint precedence are
+preserved.
+
+The final serialized `just test-crate omegon` passed 5,286 tests with 11 ignored
+across nine targets. `just clippy-changed --base ec730c1d`, formatting, and diff
+checks passed. Installed release acceptance and the in-place operator handoff
+are recorded externally after committing this tested source.

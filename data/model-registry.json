@@ -744,7 +744,8 @@
       "capabilities": [
         "reasoning",
         "coding",
-        "vision"
+        "vision",
+        "tools"
       ],
       "description": "Generally available Mythos-class model for demanding reasoning, coding, and long-horizon agentic work; requires 30-day data retention and always uses adaptive thinking",
       "supportsReasoning": true,
@@ -760,7 +761,8 @@
       "capabilities": [
         "reasoning",
         "coding",
-        "vision"
+        "vision",
+        "tools"
       ],
       "description": "Project Glasswing restricted-access counterpart to Fable 5.1 with the same model capabilities and 30-day data-retention requirement",
       "supportsReasoning": true,

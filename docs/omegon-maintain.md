@@ -136,6 +136,10 @@ omegon-maintain
   identity
   doctor
 
+  home
+    inspect
+    recover
+
   composition
     inspect
 
@@ -403,6 +407,57 @@ aggregate diagnostic without emitting unbounded bytes.
 explicit exclusions; it does not claim to represent the future live contribution
 graph. `doctor` aggregates bounded read-only checks while retaining partial
 findings.
+
+### Installation home recovery
+
+An installation stores the identity of its Omegon home directory. A mismatch
+blocks guarded contribution loading. The core interface can still start and
+reports affected scopes through `/status`.
+
+Inspect the stored and observed identities:
+
+```sh
+omegon-maintain home inspect --json
+```
+
+Inspection does not modify authority records. It reports whether the directory
+matches, whether recovery is pending, and whether recovery is eligible.
+
+For a legacy device-number change, recovery requires the same canonical path and
+inode. A conflicting stored volume identity prevents recovery. Recovery also
+refuses active admission locks, unresolved transactions, and maintenance fences.
+Close sessions that use the affected installation before applying recovery.
+
+Recovery reserves descriptors for its bounded lock inventory by temporarily
+raising the companion's soft file limit within the inherited hard limit. It
+retains every lock and restores the limit afterward. If the hard limit cannot
+support recovery, `home_recovery_descriptor_limit` reports a refusal before
+recovery records change.
+
+Preview the recovery without changing records:
+
+```sh
+omegon-maintain home recover --dry-run --deadline 30s --json
+```
+
+Apply recovery with a request UUID. Retain the result and request ID:
+
+```sh
+omegon-maintain home recover --deadline 30s --request-id <request-id> --json
+```
+
+If recovery is interrupted, repeat the command with the same request ID. Recovery
+preserves installation identity, contribution restrictions, session restrictions,
+and audit history. It records one recovery audit event. It does not delete
+maintenance state or enable denied contributions.
+
+On macOS filesystems that expose a volume UUID, recovery records volume and
+directory continuity for subsequent device renumbering. Unsupported filesystems
+retain strict identity checks and explicit recovery.
+
+After recovery, restart the harness or reload the affected contributions. A
+successful scan clears its loading failure from `/status`. Recovery does not
+refresh provider credentials; authentication failures remain separate.
 
 ### Contributions
 

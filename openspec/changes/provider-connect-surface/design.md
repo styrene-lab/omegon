@@ -1,5 +1,18 @@
 # Connection UX design
 
+## Operator feedback: connection-first actions
+
+The fresh-provider pass changed provider rows to primary model selection and left
+connection setup on a secondary key. This violates the /connect entry's purpose.
+Provider rows must enter setup or an explicit supported-method menu. Free hosted
+model selection remains an explicitly labeled exception; /model retains ordinary
+route selection. Existing single-method direct setup remains available. Menus use
+shared semantic actions and preserve the hidden credential editor and cancel state.
+
+The same live feedback exposed route failures rendered with Rust Debug output.
+The shared route summary owns plain-language problem descriptions so every caller
+gets usable diagnostics without a TUI-specific error-string parser.
+
 ## Findings and implementation owners
 
 `bootstrap_projection::render_bootstrap` loops over all provider statuses and renders

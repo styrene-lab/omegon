@@ -1958,7 +1958,7 @@ async fn handle_control_request(
             let providers = ["anthropic", "openai", "ollama"];
             let mut lines = Vec::new();
             for p in &providers {
-                let info = crate::auth::resolve_with_refresh(p).await;
+                let info = crate::providers::resolve_api_key_sync(p);
                 let (status, detail) = match info {
                     Some((_, is_oauth)) => {
                         let src = if is_oauth { "oauth" } else { "api_key" };

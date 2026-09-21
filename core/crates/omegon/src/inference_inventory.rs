@@ -833,10 +833,18 @@ fn apply_offering_patch(
     source: InventorySource,
     evidence: EvidenceKind,
 ) {
-    if let Some(value) = patch.endpoint {
+    // Discovery owns observations, not a previously declared route's identity.
+    // A new offering still receives its identity when it is first materialized.
+    if let Some(value) = patch.endpoint
+        && (source != InventorySource::Discovery
+            || offering.endpoint.source == InventorySource::Discovery)
+    {
         offering.endpoint = Evidenced::new(value, source, evidence);
     }
-    if let Some(value) = patch.native_model_id {
+    if let Some(value) = patch.native_model_id
+        && (source != InventorySource::Discovery
+            || offering.native_model_id.source == InventorySource::Discovery)
+    {
         offering.native_model_id = Evidenced::new(value, source, evidence);
     }
     if let Some(value) = patch.display_name {
@@ -1078,6 +1086,54 @@ mod tests {
             },
         );
         layer
+    }
+
+    #[test]
+    fn native_admission_discovery_preserves_declared_routing_identity() {
+        for source in [
+            InventorySource::Embedded,
+            InventorySource::User,
+            InventorySource::Project,
+        ] {
+            let declared = layer_with_offering(source, Modality::TEXT, false);
+            let mut discovery =
+                InventoryLayer::new(InventorySource::Discovery, EvidenceKind::Discovered);
+            discovery.offerings.insert(
+                OfferingId("lab:model".into()),
+                OfferingPatch {
+                    endpoint: Some(EndpointId("untrusted-redirect".into())),
+                    native_model_id: Some("untrusted-model".into()),
+                    display_name: Some("Fresh display name".into()),
+                    context_input: Some(Some(12345)),
+                    enabled: Some(false),
+                    ..Default::default()
+                },
+            );
+            let snapshot = InventorySnapshot::build(1, vec![declared, discovery])
+                .expect("discovery must not redirect a declared offering");
+            let offering = &snapshot.offerings[&OfferingId("lab:model".into())];
+            assert_eq!(offering.endpoint.value.0, "lab-chat");
+            assert_eq!(offering.native_model_id.value, "model");
+            assert_eq!(offering.endpoint.source, source);
+            assert_eq!(offering.native_model_id.source, source);
+            assert_eq!(offering.context_input.as_ref().unwrap().value, 12345);
+            assert_eq!(offering.display_name.value, "Fresh display name");
+            assert!(!offering.enabled.value);
+        }
+    }
+
+    #[test]
+    fn native_admission_discovery_can_define_new_offering_identity() {
+        let mut base = layer_with_offering(InventorySource::Embedded, Modality::TEXT, false);
+        base.offerings.clear();
+        let mut discovery = layer_with_offering(InventorySource::Discovery, Modality::TEXT, false);
+        discovery.endpoints.clear();
+        discovery.evidence = EvidenceKind::Discovered;
+        let snapshot = InventorySnapshot::build(1, vec![base, discovery]).unwrap();
+        let offering = &snapshot.offerings[&OfferingId("lab:model".into())];
+        assert_eq!(offering.native_model_id.source, InventorySource::Discovery);
+        assert_eq!(offering.endpoint.value.0, "lab-chat");
+        assert_eq!(offering.native_model_id.value, "model");
     }
 
     fn admission_fixture(source: InventorySource, evidence: EvidenceKind) -> InventorySnapshot {

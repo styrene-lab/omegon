@@ -32,7 +32,7 @@ terminal history, and pixel image publication into scrollback are deferred.
 - All four combinations of terminal presentation and Active/Full detail work.
 - Inline → Project → permission → Project → inline preserves the draft,
   selection, session, and ongoing turn. The same runtime accepts a second turn.
-- Completed output reaches native history in ordered, bounded batches. Resize,
+- Stable streamed output reaches native history before response completion in ordered, bounded batches. Resize,
   detail changes, and temporary fullscreen visits do not replay committed output.
 - The agent drives terminal launch and input, checks fixture outcomes, and
   captures attributable evidence without paid inference or operator actions.

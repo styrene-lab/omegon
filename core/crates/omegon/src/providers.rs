@@ -152,30 +152,49 @@ fn resolve_api_key_from_sources_with_external(
         }
     }
 
-    if let Some(creds) = persisted {
+    let expired_accesses: Vec<&str> = persisted
+        .as_ref()
+        .into_iter()
+        .chain(external.as_ref())
+        .filter(|c| c.cred_type == "oauth" && c.is_expired())
+        .map(|c| c.access.as_str())
+        .collect();
+    if let Some(creds) = persisted.as_ref().filter(|c| !c.access.trim().is_empty()) {
         if creds.cred_type != "oauth" {
-            return Some((creds.access, false));
+            return Some((creds.access.clone(), false));
         }
         if !creds.is_expired() {
-            return Some((creds.access, true));
+            return Some((creds.access.clone(), true));
         }
     }
 
-    match external {
+    match external.as_ref().filter(|c| !c.access.trim().is_empty()) {
         Some(creds) if creds.cred_type == "oauth" && !creds.is_expired() => {
-            return Some((creds.access, true));
+            return Some((creds.access.clone(), true));
         }
         Some(creds) if creds.cred_type == "oauth" => {}
-        Some(creds) => return Some((creds.access, false)),
+        Some(creds) => return Some((creds.access.clone(), false)),
         None => {}
     }
 
+    if let Some(fresh) = persisted
+        .as_ref()
+        .and_then(|c| crate::auth::cached_refreshed_credentials(provider_id, c))
+    {
+        return Some((fresh.access, true));
+    }
+    if let Some(fresh) = external
+        .as_ref()
+        .and_then(|c| crate::auth::cached_refreshed_credentials(provider_id, c))
+    {
+        return Some((fresh.access, true));
+    }
     for (key, value) in env_values
         .iter()
         .filter(|(key, _)| crate::auth::provider_env_var_is_oauth(provider_id, key))
     {
         if let Some(val) = value
-            && !val.is_empty()
+            && crate::auth::oauth_env_token_usable(val, &expired_accesses)
         {
             tracing::debug!(
                 source = *key,
@@ -186,6 +205,27 @@ fn resolve_api_key_from_sources_with_external(
     }
 
     None
+}
+
+fn missing_oauth_route(provider: &str, options: &StreamOptions) -> anyhow::Error {
+    crate::bridge::ProviderRouteUnavailable {
+        model: options.model.clone().unwrap_or_default(),
+        message: format!(
+            "{provider} credentials are unavailable. Use /connect to renew this connection."
+        ),
+    }
+    .into()
+}
+
+async fn resolve_request_credentials(
+    provider: &str,
+    options: &StreamOptions,
+) -> anyhow::Result<Option<(String, bool)>> {
+    match crate::auth::resolve_with_refresh_result(provider).await {
+        Ok(credentials) => Ok(credentials),
+        Err(error) if error.is_terminal() => Err(missing_oauth_route(provider, options)),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// Resolve API key synchronously — env vars and unexpired auth.json tokens.
@@ -1431,15 +1471,10 @@ impl LlmBridge for AnthropicClient {
         // - /login mid-session writing new tokens to auth.json
         // - Token expiry + automatic refresh
         // - Env var changes
-        let (api_key, is_oauth) = match crate::auth::resolve_with_refresh("anthropic").await {
+        let (api_key, is_oauth) = match resolve_request_credentials("anthropic", options).await? {
             Some(resolved) => resolved,
-            None => {
-                tracing::warn!(
-                    "credential re-resolution failed — using startup credentials \
-                     (may be stale if /login was used mid-session)"
-                );
-                (self.api_key.clone(), self.is_oauth)
-            }
+            None if !self.is_oauth => (self.api_key.clone(), false),
+            None => return Err(missing_oauth_route("anthropic", options)),
         };
 
         let model = options
@@ -3384,7 +3419,8 @@ impl LlmBridge for CodexClient {
     ) -> anyhow::Result<mpsc::Receiver<LlmEvent>> {
         let (tx, rx) = mpsc::channel(256);
 
-        let (jwt_token, account_id) = match crate::auth::resolve_with_refresh("openai-codex").await
+        let (jwt_token, account_id) = match resolve_request_credentials("openai-codex", options)
+            .await?
         {
             Some((token, true)) if token.starts_with("eyJ") => {
                 let aid = crate::auth::extract_jwt_claim(
@@ -3405,7 +3441,7 @@ impl LlmBridge for CodexClient {
                     }
                 }
             }
-            _ => (self.jwt_token.clone(), self.account_id.clone()),
+            _ => return Err(missing_oauth_route("openai-codex", options)),
         };
 
         let model = options
@@ -4732,9 +4768,9 @@ impl LlmBridge for AntigravityClient {
         let (tx, rx) = mpsc::channel(256);
 
         // Re-resolve token each call (handles refresh)
-        let access_token = match crate::auth::resolve_with_refresh("google-antigravity").await {
+        let access_token = match resolve_request_credentials("google-antigravity", options).await? {
             Some((token, _)) => token,
-            None => self.access_token.clone(),
+            None => return Err(missing_oauth_route("google-antigravity", options)),
         };
 
         let model = options
@@ -6615,6 +6651,25 @@ mod tests {
         );
 
         assert_eq!(resolved, Some(("fresh-external-oauth".into(), true)));
+    }
+
+    #[test]
+    fn recovery_auth_copied_expired_oauth_env_is_not_usable() {
+        let expired = crate::auth::OAuthCredentials {
+            cred_type: "oauth".into(),
+            access: "expired-copy".into(),
+            refresh: "grant".into(),
+            expires: 0,
+        };
+        assert_eq!(
+            resolve_api_key_from_sources_with_external(
+                "anthropic",
+                &[("ANTHROPIC_OAUTH_TOKEN", Some("expired-copy".into()))],
+                Some(expired),
+                None
+            ),
+            None
+        );
     }
 
     #[test]

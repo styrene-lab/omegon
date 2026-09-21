@@ -512,27 +512,39 @@ impl ProviderRouteServiceContract for ProviderRouteService {
             }
         };
         let endpoint = inventory.endpoints.get(&offering.endpoint.value)?;
-        // Embedded OpenAI endpoint metadata also drives model discovery. Its
-        // HTTP URL is not a user-defined manifest transport. Keep native model
-        // protocol selection only while every routing-critical field retains
-        // embedded ownership; an override must pass the manifest boundary.
-        let embedded_openai = endpoint.id.0 == "openai"
-            && offering.id.0.starts_with("openai:")
+        // Embedded endpoint URLs also serve discovery. They do not turn a
+        // compiled provider's OAuth/API-key factory into a custom manifest.
+        // Only canonical identities with untouched routing declarations may use
+        // that factory; user-owned routes retain manifest secret binding.
+        let canonical_identity = offering
+            .id
+            .0
+            .split_once(':')
+            .is_some_and(|(provider, model)| {
+                endpoint.id.0 == provider
+                    && offering.native_model_id.value == model
+                    && crate::provider_contributions::registry()
+                        .get(provider)
+                        .is_some_and(|entry| entry.executable)
+            });
+        let embedded_native = canonical_identity
             && [
                 endpoint.transport.source,
                 endpoint.adapter.source,
                 endpoint.secret_refs.source,
-                offering.endpoint.source,
-                offering.native_model_id.source,
             ]
             .into_iter()
-            .all(|source| source == crate::inference_inventory::InventorySource::Embedded);
-        if !embedded_openai
-            && !matches!(
-                endpoint.transport.value,
-                crate::inference_inventory::TransportSpec::Managed
-            )
-        {
+            .all(|source| source == crate::inference_inventory::InventorySource::Embedded)
+            && [offering.endpoint.source, offering.native_model_id.source]
+                .into_iter()
+                .all(|source| {
+                    matches!(
+                        source,
+                        crate::inference_inventory::InventorySource::Embedded
+                            | crate::inference_inventory::InventorySource::Discovery
+                    )
+                });
+        if !embedded_native {
             let plan =
                 match admit_manifest_endpoint_route(inventory, model_spec, required_capabilities) {
                     Ok(plan) => plan,
@@ -2628,6 +2640,253 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn native_admission_fable_family_accepts_ordinary_tool_requests() {
+        use crate::inference_inventory::{EvidenceKind, InventoryLayer, InventorySnapshot};
+        let inventory = InventorySnapshot::build(
+            1,
+            vec![InventoryLayer::embedded_registry(
+                crate::model_registry::ModelRegistry::global(),
+            )],
+        )
+        .unwrap();
+        let tools = [omegon_traits::ToolDefinition {
+            name: "read".into(),
+            label: "Read".into(),
+            description: "Read a file".into(),
+            parameters: serde_json::json!({"type":"object"}),
+            capabilities: Vec::new(),
+        }];
+        for model in ["anthropic:claude-fable-5-1", "anthropic:claude-mythos-5-1"] {
+            let offering = admit_exact_route(&inventory, model, &["tools".into()])
+                .expect("Fable5.1 and Mythos5.1 support ordinary tools");
+            let capabilities = AdmittedModelCapabilities {
+                tools: offering_capability_admission(offering, "tools", EvidenceKind::Declared),
+                reasoning: offering_capability_admission(
+                    offering,
+                    "reasoning",
+                    EvidenceKind::Declared,
+                ),
+                provider_supports_tools: true,
+            };
+            validate_admitted_request(Some(&capabilities), &tools, &StreamOptions::default())
+                .expect("admitted Fable-family tools must reach the native request boundary");
+        }
+    }
+
+    #[tokio::test]
+    #[allow(
+        clippy::await_holding_lock,
+        reason = "serialize synthetic credential fixtures through native bridge resolution"
+    )]
+    async fn native_admission_credentials_construct_bridges_after_discovery() {
+        use crate::inference_inventory::{InventoryLayer, InventorySnapshot};
+        use base64::Engine as _;
+        struct Restore(Vec<(&'static str, Option<std::ffi::OsString>)>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                for (key, value) in &self.0 {
+                    unsafe {
+                        match value {
+                            Some(value) => std::env::set_var(key, value),
+                            None => std::env::remove_var(key),
+                        }
+                    }
+                }
+            }
+        }
+        let _guard = crate::auth::TEST_AUTH_ENV_LOCK.lock().unwrap();
+        let fixture = tempfile::tempdir().unwrap();
+        let _restore = Restore(
+            [
+                "OMEGON_AUTH_JSON_PATH",
+                "OPENAI_API_KEY",
+                "ANTHROPIC_API_KEY",
+            ]
+            .into_iter()
+            .map(|key| (key, std::env::var_os(key)))
+            .collect(),
+        );
+        unsafe {
+            std::env::set_var("OMEGON_AUTH_JSON_PATH", fixture.path().join("auth.json"));
+            std::env::set_var("OPENAI_API_KEY", "native-openai-fixture");
+            std::env::set_var("ANTHROPIC_API_KEY", "native-anthropic-fixture");
+        }
+        let claims = serde_json::json!({"https://api.openai.com/auth":{"chatgpt_account_id":"fixture-account"}});
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(claims.to_string());
+        crate::auth::write_credentials(
+            "openai-codex",
+            &crate::auth::OAuthCredentials {
+                cred_type: "oauth".into(),
+                access: format!("eyJhbGciOiJub25lIn0.{payload}.fixture"),
+                refresh: "unused-fixture-refresh".into(),
+                expires: u64::MAX,
+            },
+        )
+        .unwrap();
+        let embedded =
+            InventoryLayer::embedded_registry(crate::model_registry::ModelRegistry::global());
+        for (provider, model) in [
+            ("openai-codex", "gpt-6-astra"),
+            ("anthropic", "claude-fable-5-1"),
+            ("openai", "gpt-6-astra"),
+        ] {
+            let selected = format!("{provider}:{model}");
+            assert!(crate::route::CredentialLedger.probe(provider).is_valid());
+            let discovered = crate::inference_discovery::DiscoveredModels {
+                endpoint_id: provider.into(),
+                models: vec![crate::inference_discovery::DiscoveredModel {
+                    id: model.into(),
+                    ..Default::default()
+                }],
+                fetched_at: 1,
+                ttl_secs: 60,
+                cached: false,
+            };
+            let known =
+                BTreeMap::from([(provider.to_string(), BTreeSet::from([model.to_string()]))]);
+            let discovery =
+                crate::inference_discovery::build_discovery_layer(&[discovered], &known);
+            for layers in [
+                vec![embedded.clone()],
+                vec![embedded.clone(), discovery.clone()],
+            ] {
+                let inventory = InventorySnapshot::build(1, layers).unwrap();
+                let resolved = ProviderRouteService
+                    .resolve_exact_admitted(&selected, None, &inventory, &[])
+                    .await
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "valid {provider} credentials must construct the admitted native bridge"
+                        )
+                    });
+                assert_eq!(resolved.serving_model, selected);
+                assert!(resolved.endpoint_provenance.is_none());
+                if provider == "openai-codex" {
+                    assert_eq!(resolved.credential_source_class, "stored_oauth");
+                }
+                let controller = crate::route::RouteController::default();
+                let snapshot = controller
+                    .switch_model(
+                        selected.clone(),
+                        &crate::route::CredentialLedger,
+                        Some(resolved.into_unleased_bridge()),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(snapshot.serving_model(), Some(selected.as_str()));
+            }
+            use crate::inference_inventory::{
+                AdapterId, EndpointId, EndpointPatch, EvidenceKind, InventorySource, OfferingId,
+                OfferingPatch, TransportSpec,
+            };
+            for field in [
+                "transport",
+                "managed_transport",
+                "adapter",
+                "secret_refs",
+                "native_model_id",
+                "endpoint",
+            ] {
+                let mut layer =
+                    InventoryLayer::new(InventorySource::Project, EvidenceKind::Declared);
+                match field {
+                    "transport" | "managed_transport" => {
+                        layer.endpoints.insert(
+                            EndpointId(provider.into()),
+                            EndpointPatch {
+                                transport: Some(if field == "transport" {
+                                    TransportSpec::Http {
+                                        base_url: "https://example.invalid/v1".into(),
+                                    }
+                                } else {
+                                    TransportSpec::Managed
+                                }),
+                                ..Default::default()
+                            },
+                        );
+                    }
+                    "adapter" => {
+                        layer.endpoints.insert(
+                            EndpointId(provider.into()),
+                            EndpointPatch {
+                                adapter: Some(AdapterId(AdapterId::CHAT_COMPLETIONS.into())),
+                                ..Default::default()
+                            },
+                        );
+                    }
+                    "secret_refs" => {
+                        layer.endpoints.insert(
+                            EndpointId(provider.into()),
+                            EndpointPatch {
+                                secret_refs: Some(vec!["OPENAI_API_KEY".into()]),
+                                ..Default::default()
+                            },
+                        );
+                    }
+                    "native_model_id" => {
+                        layer.offerings.insert(
+                            OfferingId(selected.clone()),
+                            OfferingPatch {
+                                native_model_id: Some(model.into()),
+                                ..Default::default()
+                            },
+                        );
+                    }
+                    "endpoint" => {
+                        layer.offerings.insert(
+                            OfferingId(selected.clone()),
+                            OfferingPatch {
+                                endpoint: Some(EndpointId(provider.into())),
+                                ..Default::default()
+                            },
+                        );
+                    }
+                    _ => unreachable!(),
+                }
+                for layers in [
+                    vec![embedded.clone(), layer.clone()],
+                    vec![embedded.clone(), layer, discovery.clone()],
+                ] {
+                    let inventory = InventorySnapshot::build(2, layers);
+                    if field == "managed_transport" {
+                        assert!(
+                            inventory.is_err(),
+                            "custom Managed transports must be rejected before route construction"
+                        );
+                        continue;
+                    }
+                    let inventory = inventory.unwrap();
+                    assert!(
+                        ProviderRouteService
+                            .resolve_exact_admitted(&selected, None, &inventory, &[])
+                            .await
+                            .is_none(),
+                        "{provider} {field} override must retain manifest validation even after discovery"
+                    );
+                }
+            }
+            let mut remapped =
+                InventoryLayer::new(InventorySource::Discovery, EvidenceKind::Discovered);
+            remapped.offerings.insert(
+                OfferingId(selected.clone()),
+                OfferingPatch {
+                    native_model_id: Some("different-model".into()),
+                    ..Default::default()
+                },
+            );
+            let inventory = InventorySnapshot::build(2, vec![embedded.clone(), remapped]).unwrap();
+            let retained = ProviderRouteService
+                .resolve_exact_admitted(&selected, None, &inventory, &[])
+                .await
+                .expect("declared identity survives discovery");
+            assert_eq!(
+                retained.native_model, selected,
+                "discovery cannot silently remap native model identity"
+            );
+        }
+    }
 
     #[tokio::test]
     #[allow(

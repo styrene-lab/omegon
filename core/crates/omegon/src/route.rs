@@ -576,12 +576,18 @@ impl RouteSnapshot {
         }
     }
 
-    pub fn operator_status(&self) -> String {
-        let mut lines = vec![format!("Provider route: {}", route_summary(self))];
-        lines.push(format!("Model intent: {}", self.intent.summary()));
+    /// Action failures need the route problem, not the full diagnostic inventory.
+    pub fn operator_problem(&self) -> String {
+        let mut lines = vec![route_summary(self)];
         if let Some(warning) = &self.warning {
             lines.push(format!("Route warning: {warning}"));
         }
+        lines.join("\n")
+    }
+
+    pub fn operator_status(&self) -> String {
+        let mut lines = vec![self.operator_problem()];
+        lines.push(format!("Model intent: {}", self.intent.summary()));
         if let Some(outcome) = &self.last_login_outcome {
             lines.push(format!(
                 "Last login outcome: {}",
@@ -1089,7 +1095,19 @@ fn route_summary(snapshot: &RouteSnapshot) -> String {
             format!("Provider login pending for {provider} ({elapsed}s)")
         }
         ProviderRoute::Disconnected { selected, reason } => {
-            format!("Provider route disconnected for {selected}: {reason:?}")
+            if selected.trim().is_empty() {
+                return "No provider connected. Use /connect to choose a connection.".into();
+            }
+            let problem = match reason {
+                DisconnectedReason::MissingCredentials { .. } => "Credentials missing",
+                DisconnectedReason::ExpiredCredentials { .. } => "Credentials expired",
+                DisconnectedReason::FallbackExhausted { .. } => "Configured fallbacks unavailable",
+                DisconnectedReason::ProviderUnavailable { .. } => "Provider unavailable",
+            };
+            let provider = crate::providers::infer_provider_id(selected);
+            format!(
+                "{problem} for {selected}. Use /connect {provider} or /model to choose a route."
+            )
         }
     }
 }
@@ -1177,6 +1195,9 @@ fn probe_provider_credentials(provider: &str) -> CredentialState {
     }
 
     let mut expired = None;
+    let mut unusable = None;
+    let mut cached = None;
+    let mut expired_accesses = Vec::new();
     crate::auth::trace_auth_store_probe(auth_key, "route_credential_ledger");
 
     if let Some(path) = crate::auth::auth_json_path()
@@ -1187,11 +1208,29 @@ fn probe_provider_credentials(provider: &str) -> CredentialState {
                 if let Some(entry) = auth.get(auth_key) {
                     match serde_json::from_value::<crate::auth::OAuthCredentials>(entry.clone()) {
                         Ok(creds) => {
-                            if creds.cred_type == "oauth" && creds.is_expired() {
+                            if creds.access.trim().is_empty() {
+                                unusable = Some(CredentialState::Unreadable {
+                                    source: CredentialSource::AuthJson,
+                                    detail: "credential access token is empty".into(),
+                                    entry_present: true,
+                                });
+                            } else if creds.cred_type == "oauth" && creds.is_expired() {
+                                if crate::auth::cached_refreshed_credentials(auth_key, &creds)
+                                    .is_some()
+                                {
+                                    cached = Some(CredentialState::Valid {
+                                        source: CredentialSource::AuthJson,
+                                        oauth: true,
+                                    });
+                                }
                                 expired = Some(CredentialState::Expired {
                                     source: CredentialSource::AuthJson,
-                                    refreshable: !creds.refresh.is_empty(),
+                                    refreshable: !creds.refresh.is_empty()
+                                        && !crate::auth::refresh_terminally_rejected(
+                                            auth_key, &creds,
+                                        ),
                                 });
+                                expired_accesses.push(creds.access);
                             } else {
                                 return CredentialState::Valid {
                                     source: CredentialSource::AuthJson,
@@ -1224,11 +1263,25 @@ fn probe_provider_credentials(provider: &str) -> CredentialState {
 
     probed_sources.push("external".to_string());
     if let Some(creds) = crate::auth::read_external_credentials(auth_key) {
-        if creds.cred_type == "oauth" && creds.is_expired() {
+        if creds.access.trim().is_empty() {
+            unusable.get_or_insert(CredentialState::Unreadable {
+                source: CredentialSource::External,
+                detail: "credential access token is empty".into(),
+                entry_present: true,
+            });
+        } else if creds.cred_type == "oauth" && creds.is_expired() {
+            if crate::auth::cached_refreshed_credentials(auth_key, &creds).is_some() {
+                cached.get_or_insert(CredentialState::Valid {
+                    source: CredentialSource::External,
+                    oauth: true,
+                });
+            }
             expired.get_or_insert(CredentialState::Expired {
                 source: CredentialSource::External,
-                refreshable: !creds.refresh.is_empty(),
+                refreshable: !creds.refresh.is_empty()
+                    && !crate::auth::refresh_terminally_rejected(auth_key, &creds),
             });
+            expired_accesses.push(creds.access);
         } else {
             return CredentialState::Valid {
                 source: CredentialSource::External,
@@ -1237,20 +1290,40 @@ fn probe_provider_credentials(provider: &str) -> CredentialState {
         }
     }
 
+    // A freshly rotated external credential takes precedence over cached refresh
+    // success from an older stored generation.
+    if let Some(cached) = cached {
+        return cached;
+    }
+
     for key in crate::auth::provider_env_vars(provider)
         .iter()
         .copied()
         .filter(|key| crate::auth::provider_env_var_is_oauth(provider, key))
     {
-        if std::env::var(key).ok().is_some_and(|v| !v.is_empty()) {
-            return CredentialState::Valid {
+        if let Ok(value) = std::env::var(key)
+            && !value.is_empty()
+        {
+            let expired_refs = expired_accesses
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            if crate::auth::oauth_env_token_usable(&value, &expired_refs) {
+                return CredentialState::Valid {
+                    source: CredentialSource::Environment,
+                    oauth: true,
+                };
+            }
+            expired.get_or_insert(CredentialState::Expired {
                 source: CredentialSource::Environment,
-                oauth: true,
-            };
+                refreshable: false,
+            });
         }
     }
 
-    expired.unwrap_or(CredentialState::Missing { probed_sources })
+    expired
+        .or(unusable)
+        .unwrap_or(CredentialState::Missing { probed_sources })
 }
 
 impl Default for RouteController {
@@ -1444,6 +1517,80 @@ mod tests {
         assert!(matches!(route, ProviderRoute::Disconnected {
             selected, reason: DisconnectedReason::ProviderUnavailable { provider, .. }
         } if selected.as_str().is_empty() && provider.is_empty()));
+    }
+
+    #[test]
+    fn route_credential_probe_rejects_expired_oauth_environment_copy() {
+        const CHILD: &str = "OMEGON_TEST_EXPIRED_ROUTE_ENV";
+        if std::env::var_os(CHILD).is_none() {
+            let home = tempfile::tempdir().unwrap();
+            let auth = home.path().join("auth.json");
+            fs::write(&auth, serde_json::json!({
+                "openai-codex": {"type": "oauth", "access": "expired-copy", "refresh": "fixture-refresh", "expires": 1}
+            }).to_string()).unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "route::tests::route_credential_probe_rejects_expired_oauth_environment_copy",
+                    "--exact",
+                    "--nocapture",
+                ])
+                .env_clear()
+                .env("HOME", home.path())
+                .env("OMEGON_AUTH_JSON_PATH", auth)
+                .env("CHATGPT_OAUTH_TOKEN", "expired-copy")
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        assert!(matches!(
+            probe_provider_credentials("openai-codex"),
+            CredentialState::Expired { .. }
+        ));
+    }
+
+    #[test]
+    fn route_credential_probe_rejects_blank_stored_access() {
+        const CHILD: &str = "OMEGON_TEST_BLANK_ROUTE_ACCESS";
+        if std::env::var_os(CHILD).is_none() {
+            let home = tempfile::tempdir().unwrap();
+            let auth = home.path().join("auth.json");
+            for kind in ["oauth", "api_key"] {
+                fs::write(&auth, serde_json::json!({
+                    "openai-codex": {"type": kind, "access": "  ", "refresh": "", "expires": u64::MAX}
+                }).to_string()).unwrap();
+                let output = std::process::Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "route::tests::route_credential_probe_rejects_blank_stored_access",
+                        "--exact",
+                        "--nocapture",
+                    ])
+                    .env_clear()
+                    .env("HOME", home.path())
+                    .env("OMEGON_AUTH_JSON_PATH", &auth)
+                    .env(CHILD, "1")
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{kind}: {}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            return;
+        }
+        assert!(crate::providers::resolve_api_key_sync("openai-codex").is_none());
+        assert!(!matches!(
+            probe_provider_credentials("openai-codex"),
+            CredentialState::Valid { .. }
+        ));
     }
 
     #[test]
@@ -1954,6 +2101,99 @@ mod tests {
         let warning = failed.warning.unwrap();
         assert!(warning.contains("stale callback tabs"), "{warning}");
         assert!(warning.contains("Close old login tabs"), "{warning}");
+    }
+
+    #[test]
+    fn connection_diagnostic_unselected_is_actionable_without_internal_state() {
+        let snapshot = RouteSnapshot {
+            route: ProviderRoute::Disconnected {
+                selected: "".into(),
+                reason: DisconnectedReason::ProviderUnavailable {
+                    provider: "".into(),
+                    detail: "Choose a connection with /connect".into(),
+                },
+            },
+            intent: ModelIntent::default(),
+            last_login_outcome: None,
+            warning: None,
+        };
+        assert_eq!(
+            route_summary(&snapshot),
+            "No provider connected. Use /connect to choose a connection."
+        );
+        let status = snapshot.operator_status();
+        assert!(!status.contains("ProviderUnavailable"), "{status}");
+        assert!(!status.contains("provider: \"\""), "{status}");
+        assert!(!snapshot.operator_problem().contains("Model intent:"));
+        assert!(status.contains("Model intent:"), "{status}");
+    }
+
+    #[test]
+    fn connection_diagnostic_selected_retains_problem_and_scoped_action() {
+        for (reason, problem) in [
+            (
+                DisconnectedReason::MissingCredentials {
+                    provider: "openai".into(),
+                    probed_sources: vec![],
+                },
+                "Credentials missing",
+            ),
+            (
+                DisconnectedReason::ExpiredCredentials {
+                    provider: "openai".into(),
+                    refreshable: true,
+                },
+                "Credentials expired",
+            ),
+            (
+                DisconnectedReason::ProviderUnavailable {
+                    provider: "openai".into(),
+                    detail: "internal transport detail".into(),
+                },
+                "Provider unavailable",
+            ),
+            (
+                DisconnectedReason::FallbackExhausted {
+                    selected: "openai:gpt-6-astra".into(),
+                    attempts: vec![],
+                },
+                "Configured fallbacks unavailable",
+            ),
+        ] {
+            let snapshot = RouteSnapshot {
+                route: ProviderRoute::Disconnected {
+                    selected: "openai:gpt-6-astra".into(),
+                    reason,
+                },
+                intent: ModelIntent::default(),
+                last_login_outcome: None,
+                warning: None,
+            };
+            let status = snapshot.operator_status();
+            assert!(status.contains("openai:gpt-6-astra"), "{status}");
+            assert!(status.contains(problem), "{status}");
+            assert!(status.contains("/connect openai"), "{status}");
+            assert!(!status.contains('{'), "{status}");
+        }
+    }
+
+    #[test]
+    fn connection_diagnostic_serving_has_one_heading() {
+        let snapshot = RouteSnapshot {
+            route: ProviderRoute::Serving {
+                model: "openai:gpt-6-astra".into(),
+            },
+            intent: ModelIntent::default(),
+            last_login_outcome: None,
+            warning: None,
+        };
+        assert_eq!(
+            snapshot
+                .operator_status()
+                .matches("Provider route:")
+                .count(),
+            1
+        );
     }
 
     #[test]

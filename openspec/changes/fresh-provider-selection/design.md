@@ -36,6 +36,24 @@ https://opencode.ai/docs/zen . Live availability changes independently of releas
 
 ## Validation
 
+Operator feedback exposed an admission mismatch: embedded catalog HTTP metadata
+was treated as a custom manifest for native Codex and Anthropic transports, and
+discovery could replace the identity provenance used by the OpenAI exception.
+Native admission must require a registered native implementation and embedded
+ownership of endpoint transport, adapter, and secret references, plus matching
+offering namespace and native model identity. Operator overrides retain manifest
+admission. Discovery can add new offering identities and refresh discovery evidence,
+but cannot overwrite an already-declared endpoint/model identity. The merge rule
+protects operator declarations as well as embedded providers.
+
+The admitted request boundary also exposed missing `tools` metadata for Fable 5.1.
+Declare ordinary tool capability for Fable 5.1 and its same-capability Mythos 5.1
+counterpart. Preserve explicit capability checks and avoid a blanket provider
+exception. Anthropic's [overview](https://platform.claude.com/docs/en/models/fable-5-1/overview)
+and [migration guide](https://platform.claude.com/docs/en/models/fable-5-1/migration-guide),
+checked 2026-09-07, distinguish supported ordinary tool use from unsupported
+forced `tool_choice` values `any` and `tool`.
+
 Write failing tests before each behavior change. Use deterministic HTTP fixtures for catalog,
 streaming, tool calls, throttling, and withdrawal; no paid inference. Run serialized focused
 Rust tests, the omegon crate gate and changed Clippy. Extend private tmux acceptance to exercise

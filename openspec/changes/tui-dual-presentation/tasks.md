@@ -50,3 +50,36 @@ items include their focused validation; final landing work is tracked separately
 - [x] Finish serialized crate/Clippy/script/schema checks, copy final evidence and inspect the complete diff.
 - [x] Reconcile this change and parent pending items, create logical commits, and rebuild/install the current launcher pair without launching GUI windows; record the catalog/home-identity blocker separately.
 - [x] Verify scenarios against the recorded evidence and mark completion truthfully. Leave archival and the separately planned telemetry retirement open.
+
+## 6. Persistent notification follow-up
+<!-- specs: tui-inline-publication -->
+
+- [x] Reproduce hidden startup, control-response and local notifications after an already-published system segment; make persistent notices append centrally while preserving explicit mutable plan snapshots.
+- [x] Verify notification retention rollover, partially published retained records and stale-batch rejection; preserve bounded memory and no replay.
+- [x] Repeat crate/lint checks and private PTY startup, status and clean-exit acceptance against the identified build.
+
+## 7. Readable live inline output
+<!-- specs: tui-inline-publication -->
+
+- [x] Reproduce long streamed replies disappearing from the small live viewport while primary history has no answer prefix; retain failing private PTY evidence.
+- [x] Publish stable grapheme-safe assistant prefixes during streaming, keep only the unfinished tail live, and drain eligible backlog within existing input/publication budgets.
+- [x] Preserve ordered completed tool-run summaries and Full thinking evidence, completion/cancel deduplication, generation/pruning behavior, resize/detail changes, and fullscreen round trips.
+- [x] Verify numbered long responses in primary history before completion, continued output, tool interleaving, Unicode wrapping, cancellation and a second turn with the identified build; run Rust/script gates and record captured acceptance evidence.
+
+Record the installed operator handoff in the external evidence directory after
+committing the tested source, so the release artifact and launcher identify the
+same revision. That record includes window/process identity and owned-session cleanup.
+
+## 8. Readable Markdown and prose wrapping
+<!-- specs: tui-inline-publication -->
+
+- [x] Reproduce raw Markdown and mid-word wrapping in unit tests and a captured local-provider run; retain the failing artifact and observations.
+- [x] Preserve shared Markdown styles and context through bounded native publication and its live tail; wrap prose at word boundaries with code/list/table structure intact.
+- [x] Verify chunk-boundary, Unicode, budget, resize, completion, cancellation, and second-turn regressions; inspect styled terminal captures before completion.
+- [x] Complete crate and Clippy gates, adversarial review, and specification reconciliation; record the installed operator handoff externally after committing the tested source as described above.
+
+## 9. Uninterrupted response flow
+<!-- specs: tui-inline-publication -->
+
+- [x] Reproduce status appearing between published text and the live tail, then move transient status into the composer frame with completion/backlog coverage.
+- [x] Verify held terminal captures, run crate/Clippy gates, and record the installed in-place operator handoff externally after commit.

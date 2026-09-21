@@ -5105,6 +5105,7 @@ dependencies = [
  "tui-popup",
  "tui-syntax-highlight",
  "tui-tree-widget",
+ "unicode-segmentation",
  "unicode-truncate",
  "unicode-width",
  "url",

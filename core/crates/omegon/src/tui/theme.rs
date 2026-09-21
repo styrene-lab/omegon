@@ -92,6 +92,11 @@ pub trait Theme: Send + Sync {
             .fg(self.accent_bright())
             .add_modifier(Modifier::BOLD)
     }
+    fn style_inline_code(&self) -> Style {
+        Style::default()
+            .fg(self.accent_muted())
+            .bg(self.surface_bg())
+    }
     fn style_user_input(&self) -> Style {
         Style::default().fg(self.fg()).add_modifier(Modifier::BOLD)
     }
@@ -441,6 +446,12 @@ impl Theme for TerminalTheme {
     }
     fn style_muted(&self) -> Style {
         self.style_dim()
+    }
+    fn style_inline_code(&self) -> Style {
+        Style::default()
+            .fg(Color::Reset)
+            .bg(Color::Reset)
+            .add_modifier(Modifier::UNDERLINED)
     }
 }
 

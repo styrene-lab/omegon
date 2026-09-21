@@ -2,6 +2,37 @@
 
 ## ADDED Requirements
 
+### Requirement: Embedded native providers retain executable admission
+
+Embedded providers with native authentication and transport implementations must
+use those implementations even when catalog metadata also declares an HTTP endpoint.
+Custom manifests retain their configured endpoint and secret-binding admission.
+
+#### Scenario: Codex OAuth route selected
+Given usable Codex OAuth credentials and an embedded Codex model route
+When the operator selects that route
+Then native OAuth bridge admission succeeds without requiring a manifest API-key binding
+And selecting the route does not submit an inference request
+
+#### Scenario: Custom endpoint resembles a native provider
+Given a custom provider manifest with an HTTP endpoint
+When its route is admitted
+Then the configured manifest endpoint and secret binding remain authoritative
+And native-provider routing does not bypass manifest admission
+
+#### Scenario: Discovery refresh preserves declared route identity
+Given an embedded or operator-declared offering with an endpoint and native model identifier
+When provider discovery refreshes that offering
+Then its declared endpoint and native model identifier remain unchanged
+And discovery can still update availability and capability evidence
+And newly discovered offerings may introduce their own identity
+
+#### Scenario: Fable 5.1 supports ordinary tool requests
+Given the embedded Fable 5.1 or same-capability Mythos 5.1 offering with usable credentials
+When an admitted native request includes ordinary tools
+Then its declared tool capability permits request validation
+And no forced-tool selection is introduced
+
 ### Requirement: Fresh startup has no implicit provider
 Omegon shall represent an absent model selection without choosing Anthropic or another hosted provider.
 

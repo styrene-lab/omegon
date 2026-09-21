@@ -52,6 +52,7 @@ pub(crate) struct DiscoveredContributionEvidence {
 /// may execute only after `admit` returns a digest-bound permit.
 #[derive(Clone, Default)]
 pub(crate) struct DynamicContributionInventory {
+    pub(crate) loading_health: crate::contribution_health::ContributionHealth,
     entries: std::sync::Arc<
         std::sync::Mutex<BTreeMap<RuntimeContributionId, DiscoveredContributionEvidence>>,
     >,
@@ -87,6 +88,14 @@ impl Drop for DynamicGenerationCallGuard {
 }
 
 impl DynamicContributionInventory {
+    pub(crate) fn with_loading_health(
+        loading_health: crate::contribution_health::ContributionHealth,
+    ) -> Self {
+        Self {
+            loading_health,
+            ..Default::default()
+        }
+    }
     fn shares_authority(&self, other: &Self) -> bool {
         std::sync::Arc::ptr_eq(&self.active, &other.active)
     }

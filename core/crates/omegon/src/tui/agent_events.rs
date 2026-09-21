@@ -10,6 +10,7 @@ impl App {
     /// This is deliberately idempotent because TurnEnd, AgentEnd, lifecycle,
     /// and queue snapshots can all report the same completion.
     fn terminalize_runtime_turn(&mut self) {
+        self.reconcile_native_publication();
         let was_active = self.agent_active || self.conversation.is_streaming();
         self.expire_running_activity_tools(Duration::from_millis(2200));
         self.agent_active = false;
@@ -991,6 +992,15 @@ impl App {
                 if let Ok(status) =
                     serde_json::from_value::<crate::status::HarnessStatus>(status_json)
                 {
+                    if let Some(notice) = crate::contribution_health::change_notice(
+                        self.previous_harness_status
+                            .as_ref()
+                            .map(|status| status.contribution_loading.as_slice())
+                            .unwrap_or_default(),
+                        &status.contribution_loading,
+                    ) {
+                        self.conversation.push_system(&notice);
+                    }
                     // Compare with previous status and show toasts for changes
                     if let Some(prev) = self.previous_harness_status.take() {
                         self.show_status_change_toasts(&prev, &status);

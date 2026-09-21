@@ -13,9 +13,10 @@ state or replacing the stored device field in place.
 
 ## Scope
 
-Investigate the identity change, define sufficient evidence for rebinding, and
-implement a locked, recoverable maintenance transaction. This change is planned;
-no live authority migration has been performed.
+Provide explicit same-path/inode legacy rebinding, a locked resumable recovery
+transaction, and descriptor-based stable volume continuity on macOS. The
+historical cause remains unknown; tests use isolated homes and do not migrate
+operator authority.
 
 ## Success criteria
 

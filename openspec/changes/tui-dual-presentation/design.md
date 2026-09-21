@@ -58,14 +58,16 @@ draw. Runtime completion must remain independent of whether text was displayed.
 
 Inline initially reserves eight rows, clipped to actual terminal height. Give the
 shared editor up to four rows including its borders and primary hint, and allocate
-the remaining rows to status and bounded live preview. Long drafts scroll inside
+the remaining rows to status and the unfinished response tail. Stable answer text
+is published above this region while it streams; the viewport is never the answer
+container. Long drafts scroll inside
 the same editor. Decisions use the existing fullscreen composition with scrolling
 context. The first implementation always borrows fullscreen for a decision: the
 complete shared widget needs more than the remaining live rows. This avoids a
 second permission layout or input policy. At unusably tiny geometry,
 show a resize indication and never render misleading partial action labels.
 
-Inline Full increases evidence/detail in live preview, newly published completed
+Inline Full increases evidence/detail in newly published completed
 output, and inspectors. It does not mount persistent dashboard/instrument panels.
 Fullscreen Active retains the workspace layout while reducing detail. Requested
 surface visibility remains stored independently of layout eligibility; returning
@@ -122,11 +124,22 @@ Extend the existing publication owner and settlement vocabulary rather than add 
 second pending transcript. Do not serialize or hash the full conversation on each
 frame. Initial discovery and generation replacement must also yield under budgets.
 
-Publish accepted user input once. During a running turn, display a bounded live
-preview and activity in the live area. Publish assistant/tool outcome groups after
-authoritative turn finalization, including cancellation/failure, so later tool
-metadata cannot rewrite an already published Active summary. Keep shared projection
-rules for outcomes versus evidence; add a bounded range entry point where needed.
+Publish accepted user input once. During a running turn, publish stable append-only
+assistant prefixes, retaining only an unfinished tail in the live area. Complete
+logical lines and stable wrapped display rows must reach scrollback without waiting
+for MessageEnd or TurnEnd. Retain grapheme-safe boundaries when a delta may extend
+the final grapheme. Full streams the same answer first and appends completed thinking
+as labeled evidence afterwards; this avoids freezing a thinking field that could
+receive late deltas. Canonical content and provenance are unchanged.
+
+Publish completed contiguous tool runs using shared outcome/evidence rules before
+subsequent assistant text, rather than waiting for the entire turn to aggregate
+all tools. In-progress metadata remains mutable and unpublished. Completion,
+cancellation and failure flush only remaining text and truthful final outcomes.
+The existing cursor owns progress through streamed and completed records; do not
+add another transcript or replay earlier prefixes at completion. Remaining eligible
+text drains within existing budgets even when a provider pauses, without spinning
+on an unfinished tail.
 Standalone informational records can publish once stable. Active deferred operations
 remain inspectable; later terminal outcomes publish as new observations.
 
@@ -163,9 +176,11 @@ the attachment to retry uncertain content. Successful repeated draws and retries
 known non-writes cannot duplicate output; physical exactly-once is not promised.
 
 Session replacement and canonical-history replacement invalidate prepared chunks
-through an explicit generation change at the mutation owner. On compaction/rewrite,
-preserve printed history, publish a bounded boundary notice, and resume from the new
-finalized boundary rather than replaying the replacement prefix. Do not use source
+through an explicit generation change at the mutation owner. Explicit attachment
+establishes a new boundary without replaying replacement history. If an in-place
+rewrite invalidates an already streamed cursor without a precise mapping, pause
+automatic publication and show a conversation-changed notice. The old finalized
+boundary may now precede printed text and cannot serve as a safe restart. Do not use source
 indices across generations. Late settlement from an old generation is rejected.
 
 Explicit `/session-export scrollback` remains an operator-requested snapshot action.
@@ -195,8 +210,8 @@ and a bounded operation-summary accumulator. The shared semantic outcome reducer
 consumes at most 512 bytes from each tool name/result. Active aggregation scans
 incrementally, preserving its scan position between budgets; no committed prefix
 is exported or hashed. Source rewrites after the unpublished frontier invalidate
-only unfinished scanning. Rewrites touching committed content establish a new
-boundary and show a notice without replaying previous history.
+only unfinished scanning. Rewrites touching committed content pause automatic
+publication until an explicit new attachment, without replaying previous history.
 
 Explicit primary output clears the owned live rows first. It increments the
 existing presentation revision, causing the coordinator to acquire a new inline
@@ -210,9 +225,91 @@ block shutdown until an arbitrary transcript has drained.
 
 ## Subsequent operator direction
 
+Live operator feedback rejected the original finalized-turn-only publication
+policy: a three-line moving preview inside eight reserved rows made responses
+unreadable while they streamed. The incremental-prefix policy above supersedes
+that behavior. Validation must pause a long response and inspect primary terminal
+history before completion; a final-response capture alone does not establish this
+contract. The already-locked unicode-segmentation dependency provides grapheme
+boundaries under the TUI feature, avoiding a custom Unicode segmentation algorithm.
+
 Decorative footer inference/tool telemetry is now OBE. The current shared-layout
 slice preserves existing Full widgets only as a migration baseline. Their core
 retirement, including exclusive code and animation scheduling, is planned in
 [tui-telemetry-addon-retirement](../tui-telemetry-addon-retirement/proposal.md).
 Active/Full remain evidence preferences; future telemetry is an optional addon
 capability rather than a reason to retain core instrument panels.
+
+## Markdown and wrapping follow-up
+
+Operator captures after the live-publication fix exposed a separate presentation
+failure: the automatic adapter passed plain strings to native insertion and split
+them at cell capacity. Consequently it printed Markdown delimiters and split
+ordinary words. Text-retention checks did not establish readable presentation.
+
+Keep the canonical cursor and delivery-settlement boundary. Carry styled lines
+through native insertion, reuse shared Markdown presentation, and retain bounded
+unfinished syntax/context across preparation cycles. Prose should prefer word
+boundaries; code and table structure need their own existing rendering semantics.
+No whole-response wait or replay-at-completion is acceptable. Capture styled
+terminal output as well as plain payloads, including a held response, normal words
+near a wrap boundary, split Markdown delimiters, and a width change. New output
+uses the current width; immutable physical history is not retroactively reflowed.
+
+Reuse the shared heading and inline-style helpers, but do not reuse a preview
+table's cell truncation for permanent history. A table must retain its values
+through wrapping or a narrow-width stacked presentation. Bound retained table
+source and rendered scratch before expansion. The header and separator establish
+column widths; completed body rows publish without waiting for the table to end.
+A width change or a row that cannot fit the pinned layout uses labeled cells
+without dropping values. Keep each paragraph's final wrapped
+row pending until further text or a logical boundary makes it stable; publishing
+that short row at every transport boundary would fragment otherwise intact prose.
+
+Source consumption and styled output have separate byte limits: a small source
+slice can expand into a wider physical row through indentation or table padding.
+Stop source admission behind publishable output that cannot drain within the
+current cycle. A single Unicode cluster or unfinished syntax construct exceeding
+the retained-text limit uses the existing explicit text-limit degradation path.
+
+## Activity status placement
+
+Keep transient working, cancellation, and publication guidance in the inline
+composer's bottom border. A standalone status row between native history and the
+live response tail interrupts the reader even when that row is never committed
+to history. The response area therefore contains only pending response/tool
+content. Active status takes precedence over context telemetry in the composer;
+idle restores context telemetry. Fullscreen composition keeps its existing policy.
+
+## Physical insertion fidelity
+
+The Ratatui insertion adapter also needs physical cell fidelity. In the pinned
+version, `insert_before` can send every temporary buffer cell to the backend,
+including blank cells covered by a wide glyph. Those blanks consume additional
+terminal columns and truncate text at row boundaries. Normalize only covered
+cells in the temporary insertion buffer to empty symbols before emission. Keep
+ordinary blank cells, the canonical source, and the shared fullscreen renderer
+unchanged. Enabling scrolling regions alone is insufficient: its full-height
+viewport path still uses the same complete-cell draw for the first inserted row.
+Verify emitted bytes with the real Crossterm backend and compare captured payloads,
+not merely line markers.
+
+## Persistent notification retention
+
+Persistent system notifications append centrally so later control responses and
+local notices cannot modify an already-published record. Explicit mutable plan
+snapshots retain their existing replacement behavior. Automatic native history
+omits these mutable snapshots and advances past them; Workbench, fullscreen history,
+and explicit export retain the current plan. Immutable notices and lifecycle
+records remain eligible during a turn so they cannot block subsequent answer text.
+
+Notification pruning records at most 64 chronological removal coordinates and
+advances source generation. Native publication consumes this typed change to
+rebase the cursor and finalized boundary while preserving surviving partial
+field/byte/detail and scan state. An evicted current record resets its content
+offsets; a partially emitted synthetic attachment notice retains its own offsets.
+Generation changes reject stale prepared batches even when deletion occurs after
+the cursor. Reconciliation runs before terminal event boundary assignments and
+per frame, including fullscreen. Clear, replacement and arbitrary removals
+invalidate pruning coordinates and retain conservative rewrite handling. No
+second transcript or unbounded pruning queue is introduced.

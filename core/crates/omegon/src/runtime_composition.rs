@@ -334,6 +334,26 @@ pub(crate) struct InteractiveStartupModelDecision {
     pub(crate) use_null_bridge: bool,
 }
 
+/// Only an actual selected route may request startup credential recovery.
+/// Empty preview surfaces must not infer a provider from their placeholder.
+pub(crate) fn startup_credential_refresh_provider<'a>(
+    requested_model: &str,
+    route: &'a crate::route::ProviderRoute,
+) -> Option<&'a str> {
+    if requested_model.trim().is_empty() {
+        return None;
+    }
+    match route {
+        crate::route::ProviderRoute::Disconnected {
+            reason:
+                crate::route::DisconnectedReason::MissingCredentials { provider, .. }
+                | crate::route::DisconnectedReason::ExpiredCredentials { provider, .. },
+            ..
+        } if !provider.is_empty() => Some(provider.as_str()),
+        _ => None,
+    }
+}
+
 pub(crate) fn decide_interactive_startup_model(
     selected_model: &str,
     resolved_model: &str,
@@ -410,6 +430,23 @@ mod tests {
                 "new-session",
             ),
             vec!["omegon", "--model", "test-model", "--resume", "new-session"]
+        );
+    }
+
+    #[test]
+    fn recovery_auth_startup_refresh_requires_requested_route() {
+        let route = crate::route::ProviderRoute::Disconnected {
+            selected: crate::route::ModelRouteSpec::parse("anthropic:fixture"),
+            reason: crate::route::DisconnectedReason::ExpiredCredentials {
+                provider: "anthropic".into(),
+                refreshable: true,
+            },
+        };
+        assert_eq!(startup_credential_refresh_provider("", &route), None);
+        assert_eq!(startup_credential_refresh_provider("   ", &route), None);
+        assert_eq!(
+            startup_credential_refresh_provider("anthropic:fixture", &route),
+            Some("anthropic")
         );
     }
 

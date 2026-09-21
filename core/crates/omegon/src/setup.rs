@@ -987,6 +987,7 @@ impl AgentSetup {
         // ─── Persona system ────────────────────────────────────────────
         let mut persona_registry =
             crate::plugins::registry::AugmentRegistry::new(crate::prompt::load_lex_imperialis());
+        persona_registry.loading_health = bus.contribution_health();
         let child_skills = crate::parse_csv_env("OMEGON_CHILD_SKILLS");
         if child_skills.is_empty() {
             persona_registry.load_skills(&cwd);
@@ -1071,7 +1072,9 @@ impl AgentSetup {
         // ─── Operator-installed extensions (RPC + OCI) ────────────────
         // All extensions, including bundled ones (scribe-rpc), are discovered here
         let dynamic_inventory =
-            crate::contribution_lifecycle::DynamicContributionInventory::default();
+            crate::contribution_lifecycle::DynamicContributionInventory::with_loading_health(
+                bus.contribution_health(),
+            );
         let DiscoveredExtensions {
             extension_supervisors,
             extension_widgets,
@@ -2258,7 +2261,10 @@ pub(crate) async fn setup_kernel_composition(cwd: &Path) -> anyhow::Result<Kerne
     )));
     bus.register_internal_tool(crate::tool_registry::core::TRUST_DIRECTORY, "core-tools");
 
-    let inventory = crate::contribution_lifecycle::DynamicContributionInventory::default();
+    let inventory =
+        crate::contribution_lifecycle::DynamicContributionInventory::with_loading_health(
+            bus.contribution_health(),
+        );
     let secrets = std::sync::Arc::new(omegon_secrets::SecretsManager::new(&home.join("secrets"))?);
     let DiscoveredExtensions {
         extension_supervisors,
@@ -2359,6 +2365,52 @@ async fn discover_and_register_extensions_with_policy(
     inventory: crate::contribution_lifecycle::DynamicContributionInventory,
     component_policy: &crate::component_policy::ResolvedComponentPolicy,
 ) -> anyhow::Result<DiscoveredExtensions> {
+    use crate::contribution_health::{ContributionKind::Extensions, LoadingState, ScopeHealth};
+    let health = inventory.loading_health.clone();
+    let root = crate::paths::omegon_home()
+        .map(|home| home.join("extensions"))
+        .unwrap_or_else(|_| PathBuf::from("~/.omegon/extensions"));
+    let mut outcomes = Vec::new();
+    let result = discover_and_register_extensions_with_policy_inner(
+        cwd,
+        project_root,
+        bus,
+        secrets,
+        inventory,
+        component_policy,
+        &mut outcomes,
+    )
+    .await;
+    let outcome = match &result {
+        Ok(discovered) => ScopeHealth::new(
+            Extensions,
+            "user",
+            &root,
+            if discovered.admission.is_none() {
+                LoadingState::Absent
+            } else {
+                LoadingState::Loaded {
+                    count: discovered.extension_metadata.len(),
+                }
+            },
+        ),
+        Err(error) => ScopeHealth::blocked(Extensions, "user", &root, error),
+    };
+    outcomes.push(outcome);
+    health.replace_kind(Extensions, outcomes);
+    result
+}
+
+async fn discover_and_register_extensions_with_policy_inner(
+    cwd: &Path,
+    project_root: &Path,
+    bus: &mut crate::bus::EventBus,
+    secrets: std::sync::Arc<omegon_secrets::SecretsManager>,
+    inventory: crate::contribution_lifecycle::DynamicContributionInventory,
+    component_policy: &crate::component_policy::ResolvedComponentPolicy,
+    outcomes: &mut Vec<crate::contribution_health::ScopeHealth>,
+) -> anyhow::Result<DiscoveredExtensions> {
+    use crate::contribution_health::{ContributionKind::Extensions, ScopeHealth};
     let home = crate::paths::omegon_home()?;
     let ext_dir = home.join("extensions");
     let admission = crate::contribution_loading::GuardedContributionDirectory::open(
@@ -2460,6 +2512,12 @@ async fn discover_and_register_extensions_with_policy(
             Ok(manifest) => manifest,
             Err(error) => {
                 tracing::warn!(extension = ext_name, %error, "invalid extension manifest skipped");
+                outcomes.push(ScopeHealth::blocked(
+                    Extensions,
+                    &format!("user/{ext_name}"),
+                    &ext_dir.join(ext_name),
+                    &error,
+                ));
                 continue;
             }
         };
@@ -2469,12 +2527,24 @@ async fn discover_and_register_extensions_with_policy(
                 manifest_name = %manifest.extension.name,
                 "extension directory and manifest identities differ"
             );
+            outcomes.push(ScopeHealth::blocked(
+                Extensions,
+                &format!("user/{ext_name}"),
+                &ext_dir.join(ext_name),
+                &anyhow::anyhow!("extension directory and manifest identities differ"),
+            ));
             continue;
         }
         let preflight = match crate::extensions::dynamic_preflight(&manifest, snapshot.path()) {
             Ok(preflight) => preflight,
             Err(error) => {
                 tracing::warn!(extension = ext_name, %error, "extension static preflight failed");
+                outcomes.push(ScopeHealth::blocked(
+                    Extensions,
+                    &format!("user/{ext_name}"),
+                    &ext_dir.join(ext_name),
+                    &error,
+                ));
                 continue;
             }
         };
@@ -2482,6 +2552,12 @@ async fn discover_and_register_extensions_with_policy(
             Ok(candidate) => candidate,
             Err(error) => {
                 tracing::warn!(extension = ext_name, %error, "extension static inventory rejected candidate");
+                outcomes.push(ScopeHealth::blocked(
+                    Extensions,
+                    &format!("user/{ext_name}"),
+                    &ext_dir.join(ext_name),
+                    &error,
+                ));
                 continue;
             }
         };
@@ -2492,6 +2568,12 @@ async fn discover_and_register_extensions_with_policy(
                     inventory.forget_rejected(&candidate.preflight.id);
                 }
                 tracing::warn!(extension = ext_name, %error, "extension trust admission denied before execution");
+                outcomes.push(ScopeHealth::blocked(
+                    Extensions,
+                    &format!("user/{ext_name}"),
+                    &ext_dir.join(ext_name),
+                    &error,
+                ));
                 continue;
             }
         };
@@ -2515,6 +2597,7 @@ async fn discover_and_register_extensions_with_policy(
         )
         && let Some(release_dir) = release_codescan_dir
     {
+        let bundled_root = release_dir.clone();
         let bundled = (|| -> anyhow::Result<_> {
             let source = std::fs::File::open(&release_dir)?;
             let snapshot = std::sync::Arc::new(
@@ -2540,7 +2623,15 @@ async fn discover_and_register_extensions_with_policy(
         })();
         match bundled {
             Ok(candidate) => candidates.push(candidate),
-            Err(error) => tracing::warn!(%error, "release-coupled codescan extension skipped"),
+            Err(error) => {
+                tracing::warn!(%error, "release-coupled codescan extension skipped");
+                outcomes.push(ScopeHealth::blocked(
+                    Extensions,
+                    "release/omegon-codescan",
+                    &bundled_root,
+                    &error,
+                ));
+            }
         }
     }
 
@@ -2619,6 +2710,15 @@ async fn discover_and_register_extensions_with_policy(
                     error = %e,
                     "failed to spawn extension"
                 );
+                outcomes.push(ScopeHealth::blocked(
+                    Extensions,
+                    &format!(
+                        "{}/{ext_name}",
+                        if release_coupled { "release" } else { "user" }
+                    ),
+                    &state_dir,
+                    &e,
+                ));
             }
         }
     }
@@ -2663,6 +2763,27 @@ pub(crate) async fn stage_installed_extension_replacement(
 }
 
 pub(crate) async fn stage_installed_extension_replacement_from_home(
+    cwd: &Path,
+    home: &Path,
+    name: &str,
+    secrets: std::sync::Arc<omegon_secrets::SecretsManager>,
+    inventory: crate::contribution_lifecycle::DynamicContributionInventory,
+) -> anyhow::Result<InstalledExtensionReplacement> {
+    use crate::contribution_health::{ContributionKind::Extensions, LoadingState, ScopeHealth};
+    let health = inventory.loading_health.clone();
+    let scope = format!("user/{name}");
+    let root = home.join("extensions").join(name);
+    let result =
+        stage_installed_extension_replacement_from_home_inner(cwd, home, name, secrets, inventory)
+            .await;
+    health.replace_scope(match &result {
+        Ok(_) => ScopeHealth::new(Extensions, &scope, &root, LoadingState::Loaded { count: 1 }),
+        Err(error) => ScopeHealth::blocked(Extensions, &scope, &root, error),
+    });
+    result
+}
+
+async fn stage_installed_extension_replacement_from_home_inner(
     cwd: &Path,
     home: &Path,
     name: &str,
@@ -3834,6 +3955,120 @@ required = ["OMADA_TEST_SECRET"]
             resolved,
             vec![("OMADA_TEST_SECRET".to_string(), "omada-secret".to_string())]
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn contribution_health_extension_identity_mismatch_and_recovery() {
+        use crate::contribution_health::{ContributionKind::Extensions, LoadingState};
+        let _lock = crate::test_support::env::lock_async().await;
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let _env = ExtensionEnvGuard::isolate(home.path());
+        std::fs::create_dir_all(home.path().join("extensions")).unwrap();
+        std::fs::create_dir_all(project.path().join(".omegon")).unwrap();
+        std::fs::write(
+            project.path().join(".omegon/profile.json"),
+            r#"{"components":{"core:codescan":{"enabled":false}}}"#,
+        )
+        .unwrap();
+        drop(
+            crate::contribution_loading::GuardedContributionDirectory::open(
+                home.path(),
+                &[b"extensions"],
+                home.path(),
+                omegon_maintenance_contracts::ContributionKind::Extension,
+                "user",
+            )
+            .unwrap(),
+        );
+        let state_path = home.path().join("maintain/v1/state.json");
+        let original = std::fs::read(&state_path).unwrap();
+        let mut state: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        state["home"]["device"] = serde_json::json!(state["home"]["device"].as_u64().unwrap() + 1);
+        std::fs::write(
+            &state_path,
+            omegon_maintenance_contracts::canonical_json(&state).unwrap(),
+        )
+        .unwrap();
+        let continuity = home.path().join("maintain/v1/home-continuity.json");
+        if continuity.exists() {
+            std::fs::remove_file(continuity).unwrap();
+        }
+        let mut bus = crate::bus::EventBus::new();
+        let inventory =
+            crate::contribution_lifecycle::DynamicContributionInventory::with_loading_health(
+                bus.contribution_health(),
+            );
+        let secrets =
+            std::sync::Arc::new(omegon_secrets::SecretsManager::new(home.path()).unwrap());
+        let failed = discover_and_register_extensions(
+            project.path(),
+            project.path(),
+            &mut bus,
+            secrets.clone(),
+            inventory.clone(),
+        )
+        .await;
+        assert!(failed.is_err());
+        let blocked = inventory.loading_health.snapshot();
+        assert_eq!(blocked.len(), 1);
+        assert_eq!(blocked[0].kind, Extensions);
+        assert!(
+            matches!(&blocked[0].outcome, LoadingState::Blocked { code, .. } if code == "home_identity_mismatch")
+        );
+        // Restore only the deliberately modified fixture; production guards are unchanged.
+        std::fs::write(&state_path, original).unwrap();
+        let recovered = discover_and_register_extensions(
+            project.path(),
+            project.path(),
+            &mut bus,
+            secrets.clone(),
+            inventory.clone(),
+        )
+        .await
+        .unwrap();
+        drop(recovered);
+        assert!(matches!(
+            inventory.loading_health.snapshot()[0].outcome,
+            LoadingState::Loaded { count: 0 }
+        ));
+        let malformed = home.path().join("extensions/malformed");
+        std::fs::create_dir_all(&malformed).unwrap();
+        std::fs::write(malformed.join("manifest.toml"), "not valid toml").unwrap();
+        drop(
+            discover_and_register_extensions(
+                project.path(),
+                project.path(),
+                &mut bus,
+                secrets.clone(),
+                inventory.clone(),
+            )
+            .await
+            .unwrap(),
+        );
+        assert!(
+            inventory
+                .loading_health
+                .snapshot()
+                .iter()
+                .any(|scope| scope.scope == "user/malformed" && scope.is_blocked())
+        );
+        std::fs::remove_dir_all(home.path().join("extensions")).unwrap();
+        drop(
+            discover_and_register_extensions(
+                project.path(),
+                project.path(),
+                &mut bus,
+                secrets,
+                inventory.clone(),
+            )
+            .await
+            .unwrap(),
+        );
+        let health = inventory.loading_health.snapshot();
+        assert_eq!(health.len(), 1);
+        assert!(matches!(health[0].outcome, LoadingState::Absent));
     }
 
     #[cfg(unix)]

@@ -4102,9 +4102,22 @@ impl App {
         command: String,
         tx: &OperatorCommandTx,
     ) -> MenuCommandOutcome {
+        let previous_menu = self
+            .active_menu
+            .as_ref()
+            .map(|menu| menu.projection.id.clone());
         let slash_result = self.handle_slash_command(&command, tx);
         let secret_input = matches!(self.editor.mode(), editor::EditorMode::SecretInput { .. });
-        let outcome = MenuCommandOutcome::from_slash_result(slash_result, secret_input);
+        let mut outcome = MenuCommandOutcome::from_slash_result(slash_result, secret_input);
+        // A command may replace its originating menu with a deeper choice. The
+        // normal completion policy closes only the originating menu.
+        if self
+            .active_menu
+            .as_ref()
+            .is_some_and(|menu| Some(menu.projection.id.as_str()) != previous_menu.as_deref())
+        {
+            outcome.close_menu = false;
+        }
 
         self.apply_menu_command_outcome(&command, &outcome);
 
@@ -4169,6 +4182,7 @@ impl App {
         };
         auth_menu_projection::build_provider_status_rows(
             row_prefix,
+            auth_menu_projection::ProviderRowPurpose::ModelSelection,
             provider_ids
                 .into_iter()
                 .map(crate::auth::provider_status_projection)
@@ -7900,6 +7914,7 @@ pub async fn run_tui(
     app.dashboard.active_changes = config.initial.active_changes;
 
     // ── Splash screen with live capability inspection ─────────────
+    app.conversation.take_publication_prune();
     app.publication_boundary = app.conversation.segments().len();
     app.native_publication.automatic.attach(
         app.conversation.publication_generation(),
@@ -8070,9 +8085,7 @@ pub async fn run_tui(
         terminals.synchronize_primary(&terminal_session)?;
         terminals.select(presentation, app.mouse_capture_enabled, &terminal_session)?;
         app.inline_active = presentation == TerminalPresentation::Inline;
-        if !app.agent_active {
-            app.publication_boundary = app.conversation.segments().len();
-        }
+        app.reconcile_native_publication();
         if app.inline_active && app.publish_inline(terminals.active(), &terminal_session)? {
             scheduler.mark_dirty(TuiDrawReason::BackgroundEvent);
         }

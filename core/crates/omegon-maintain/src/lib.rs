@@ -22,6 +22,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 mod audit;
+mod home_recovery;
 mod mutation;
 mod release;
 
@@ -83,6 +84,10 @@ struct Cli {
 enum Command {
     Identity,
     Doctor,
+    Home {
+        #[command(subcommand)]
+        command: HomeCommand,
+    },
     Composition {
         #[command(subcommand)]
         command: CompositionCommand,
@@ -107,6 +112,14 @@ enum Command {
         #[command(subcommand)]
         command: AuditCommand,
     },
+}
+
+#[derive(Subcommand)]
+enum HomeCommand {
+    /// Inspect installation identity without changing authority records.
+    Inspect,
+    /// Recover a changed home binding while preserving maintenance policy.
+    Recover,
 }
 
 #[derive(Subcommand)]
@@ -469,6 +482,15 @@ fn dispatch(command: &Command, context: &Context, dry_run: bool, result: &mut Ma
     match command {
         Command::Identity => identity_diagnostics(result),
         Command::Doctor => doctor(context, result),
+        Command::Home {
+            command: home_command,
+        } => {
+            if matches!(home_command, HomeCommand::Inspect)
+                || validate_mutation_admission(command, context, result)
+            {
+                home_recovery::execute(home_command, context, dry_run, result);
+            }
+        }
         Command::Composition { .. } => composition_diagnostics(result),
         Command::Contribution {
             command: ContributionCommand::List { scope, cursor },
@@ -2286,6 +2308,12 @@ fn command_name(command: &Command) -> &'static str {
     match command {
         Command::Identity => "identity",
         Command::Doctor => "doctor",
+        Command::Home {
+            command: HomeCommand::Inspect,
+        } => "home.inspect",
+        Command::Home {
+            command: HomeCommand::Recover,
+        } => "home.recover",
         Command::Composition { .. } => "composition.inspect",
         Command::Contribution {
             command: ContributionCommand::List { .. },
@@ -2332,7 +2360,9 @@ fn command_name(command: &Command) -> &'static str {
 fn is_mutation(command: &Command) -> bool {
     matches!(
         command,
-        Command::Contribution {
+        Command::Home {
+            command: HomeCommand::Recover
+        } | Command::Contribution {
             command: ContributionCommand::Disable { .. } | ContributionCommand::Quarantine { .. }
         } | Command::Session {
             command: SessionCommand::Quarantine { .. }
@@ -2346,6 +2376,7 @@ fn is_mutation_command_name(command: &str) -> bool {
     matches!(
         command,
         "contribution.disable"
+            | "home.recover"
             | "contribution.quarantine"
             | "session.quarantine"
             | "resource.prune_stale"

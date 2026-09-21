@@ -782,6 +782,7 @@ fn validate_code(code: &str) -> Result<()> {
         "lock_",
         "record_",
         "deny_",
+        "home_",
         "session_",
         "resource_",
         "release_",

@@ -1542,3 +1542,112 @@ fn maintenance_state_bootstrap_rejects_unauthenticated_rotated_boundary() {
 
     assert!(MaintenanceStateV1::bootstrap(&home, identity, candidate, false).is_err());
 }
+
+#[test]
+fn home_recovery_pending_blocks_bootstrap_and_cached_admission() {
+    use std::os::unix::fs::PermissionsExt;
+    let temporary = tempfile::tempdir().unwrap();
+    let home = open_secure_root(temporary.path()).unwrap();
+    let identity = path_identity(&home).unwrap();
+    let state = MaintenanceStateV1::bootstrap(
+        &home,
+        identity.clone(),
+        "11111111-1111-1111-1111-111111111111",
+        true,
+    )
+    .unwrap();
+    // Even malformed recovery evidence must fail closed, not be ignored.
+    let journal = temporary.path().join("maintain/v1/home-recovery.json");
+    std::fs::write(&journal, b"{\"phase\":\"prepared\"}\n").unwrap();
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(
+        MaintenanceStateV1::bootstrap(
+            &home,
+            identity.clone(),
+            "22222222-2222-2222-2222-222222222222",
+            true,
+        )
+        .is_err(),
+        "pending recovery must block new bootstrap"
+    );
+    assert!(
+        state
+            .admit_contribution_scope(
+                ContributionKind::Skill,
+                "user",
+                &identity,
+                "pending-test",
+                true,
+            )
+            .is_err(),
+        "cached state must not admit contributions through pending recovery"
+    );
+    assert!(
+        state
+            .admit_session_resume("fixture", identity.key, true)
+            .is_err(),
+        "cached state must not admit a session through pending recovery"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn home_recovery_stable_volume_accepts_device_renumbering_not_directory_replacement() {
+    use omegon_maintenance_contracts::{HomeContinuityV1, stable_home_volume_uuid};
+    let temporary = tempfile::tempdir().unwrap();
+    let home = open_secure_root(temporary.path()).unwrap();
+    let identity = path_identity(&home).unwrap();
+    let state = MaintenanceStateV1::bootstrap(
+        &home,
+        identity.clone(),
+        "11111111-1111-1111-1111-111111111111",
+        true,
+    )
+    .unwrap();
+    let binding: HomeContinuityV1 = read_record_at(&state.root, b"home-continuity.json")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        Some(binding.volume_uuid.clone()),
+        stable_home_volume_uuid(&home).unwrap()
+    );
+    let mut renumbered = identity.clone();
+    renumbered.device ^= 2;
+    assert!(
+        MaintenanceStateV1::bootstrap(
+            &home,
+            renumbered.clone(),
+            "11111111-1111-1111-1111-111111111111",
+            true
+        )
+        .is_ok()
+    );
+    renumbered.inode += 1;
+    assert!(
+        MaintenanceStateV1::bootstrap(
+            &home,
+            renumbered,
+            "11111111-1111-1111-1111-111111111111",
+            true
+        )
+        .is_err()
+    );
+    let mut changed_volume = binding;
+    changed_volume.volume_uuid = "11111111111111111111111111111111".into();
+    replace_record_at(
+        &state.root,
+        b"home-continuity.json",
+        &changed_volume,
+        "test",
+    )
+    .unwrap();
+    assert!(
+        MaintenanceStateV1::bootstrap(
+            &home,
+            identity,
+            "11111111-1111-1111-1111-111111111111",
+            true
+        )
+        .is_err()
+    );
+}

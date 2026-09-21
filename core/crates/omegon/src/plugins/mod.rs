@@ -149,6 +149,15 @@ pub(crate) struct GuardedPluginScope {
 }
 
 pub(crate) fn open_guarded_plugin_scopes(cwd: &Path, home: &Path) -> Vec<GuardedPluginScope> {
+    open_guarded_plugin_scopes_with_health(cwd, home, &mut Vec::new())
+}
+
+fn open_guarded_plugin_scopes_with_health(
+    cwd: &Path,
+    home: &Path,
+    health: &mut Vec<crate::contribution_health::ScopeHealth>,
+) -> Vec<GuardedPluginScope> {
+    use crate::contribution_health::{ContributionKind::Plugins, LoadingState, ScopeHealth};
     let mut scopes = Vec::new();
     let project_root = crate::setup::find_project_root(cwd);
     for (root, components, scope) in [
@@ -159,6 +168,11 @@ pub(crate) fn open_guarded_plugin_scopes(cwd: &Path, home: &Path) -> Vec<Guarded
             "project",
         ),
     ] {
+        let display_root = if scope == "user" {
+            home.join("plugins")
+        } else {
+            project_root.join(".omegon/plugins")
+        };
         match GuardedContributionDirectory::open(
             root,
             components,
@@ -186,8 +200,14 @@ pub(crate) fn open_guarded_plugin_scopes(cwd: &Path, home: &Path) -> Vec<Guarded
                     admission,
                 });
             }
-            Ok(None) => {}
+            Ok(None) => health.push(ScopeHealth::new(
+                Plugins,
+                scope,
+                &display_root,
+                LoadingState::Absent,
+            )),
             Err(error) => {
+                health.push(ScopeHealth::blocked(Plugins, scope, &display_root, &error));
                 tracing::warn!(scope, error = %error, "plugin discovery scope failed closed");
             }
         }
@@ -276,6 +296,8 @@ pub(crate) async fn discover_plugins_filtered_with_inventory(
     filter: &PluginSelectionFilter,
     inventory: crate::contribution_lifecycle::DynamicContributionInventory,
 ) -> AdmittedPlugins {
+    use crate::contribution_health::{ContributionKind::Plugins, LoadingState, ScopeHealth};
+    let mut health = Vec::new();
     let mut features: Vec<Box<dyn omegon_traits::Feature>> = Vec::new();
     let mut admissions = Vec::new();
     let mut mcp_supervisors = Vec::new();
@@ -285,8 +307,9 @@ pub(crate) async fn discover_plugins_filtered_with_inventory(
 
     match crate::paths::omegon_home() {
         Ok(home) => {
-            for scope in open_guarded_plugin_scopes(cwd, &home) {
+            for scope in open_guarded_plugin_scopes_with_health(cwd, &home, &mut health) {
                 let scope_name = scope.scope;
+                let root = scope.display_root.clone();
                 match discover_guarded_plugins(
                     scope,
                     cwd,
@@ -294,25 +317,48 @@ pub(crate) async fn discover_plugins_filtered_with_inventory(
                     filter,
                     &dynamic_admission,
                     &inventory,
+                    &mut health,
                 )
                 .await
                 {
                     Ok(Some((mut loaded, admission))) => {
+                        health.push(ScopeHealth::new(
+                            Plugins,
+                            scope_name,
+                            &root,
+                            LoadingState::Loaded {
+                                count: loaded.features.len(),
+                            },
+                        ));
                         features.append(&mut loaded.features);
                         mcp_supervisors.append(&mut loaded.mcp_supervisors);
                         admissions.push(admission);
                     }
-                    Ok(None) => {}
+                    Ok(None) => health.push(ScopeHealth::new(
+                        Plugins,
+                        scope_name,
+                        &root,
+                        LoadingState::Loaded { count: 0 },
+                    )),
                     Err(error) => {
+                        health.push(ScopeHealth::blocked(Plugins, scope_name, &root, &error));
                         tracing::warn!(scope = scope_name, error = %error, "plugin discovery scope failed closed");
                     }
                 }
             }
         }
         Err(error) => {
+            health.push(ScopeHealth::blocked(
+                Plugins,
+                "home",
+                Path::new("~/.omegon/plugins"),
+                &error,
+            ));
             tracing::warn!(error = %error, "canonical plugin discovery failed closed");
         }
     }
+
+    inventory.loading_health.replace_kind(Plugins, health);
 
     // Also discover MCP servers from project-level config
     let (project_mcp, mut project_mcp_supervisors) =
@@ -335,8 +381,11 @@ async fn discover_guarded_plugins(
     filter: &PluginSelectionFilter,
     dynamic_admission: &crate::dynamic_admission::DynamicAdmissionPolicy,
     inventory: &crate::contribution_lifecycle::DynamicContributionInventory,
+    health: &mut Vec<crate::contribution_health::ScopeHealth>,
 ) -> anyhow::Result<Option<(LoadedPlugin, GuardedContributionDirectory)>> {
+    use crate::contribution_health::{ContributionKind::Plugins, ScopeHealth};
     use std::os::unix::ffi::OsStrExt;
+    let scope_name = scope.scope;
 
     let GuardedPluginScope {
         display_root,
@@ -391,6 +440,12 @@ async fn discover_guarded_plugins(
             Ok(content) => content,
             Err(error) => {
                 tracing::warn!(path = %manifest_path.display(), error = %error, "failed to load plugin");
+                health.push(ScopeHealth::blocked(
+                    Plugins,
+                    &format!("{scope_name}/{plugin_name}"),
+                    &manifest_path,
+                    &error.into(),
+                ));
                 continue;
             }
         };
@@ -408,6 +463,12 @@ async fn discover_guarded_plugins(
                 Ok(snapshot) => snapshot,
                 Err(error) => {
                     tracing::warn!(path = %manifest_path.display(), error = %error, "failed to snapshot plugin");
+                    health.push(ScopeHealth::blocked(
+                        Plugins,
+                        &format!("{scope_name}/{plugin_name}"),
+                        &manifest_path,
+                        &error,
+                    ));
                     continue;
                 }
             };
@@ -415,6 +476,12 @@ async fn discover_guarded_plugins(
                 && let Err(error) = std::fs::write(snapshot.path().join("plugin.pkl"), &content)
             {
                 tracing::warn!(path = %manifest_path.display(), error = %error, "failed to seal admitted Pkl manifest");
+                health.push(ScopeHealth::blocked(
+                    Plugins,
+                    &format!("{scope_name}/{plugin_name}"),
+                    &manifest_path,
+                    &error.into(),
+                ));
                 continue;
             }
             Some(snapshot)
@@ -426,6 +493,12 @@ async fn discover_guarded_plugins(
                 Ok(preflight) => preflight,
                 Err(error) => {
                     tracing::warn!(plugin = plugin_name, %error, "plugin static preflight failed");
+                    health.push(ScopeHealth::blocked(
+                        Plugins,
+                        &format!("{scope_name}/{plugin_name}"),
+                        &manifest_path,
+                        &error,
+                    ));
                     continue;
                 }
             };
@@ -433,6 +506,12 @@ async fn discover_guarded_plugins(
             Ok(candidate) => candidate,
             Err(error) => {
                 tracing::warn!(plugin = plugin_name, %error, "plugin static inventory rejected candidate");
+                health.push(ScopeHealth::blocked(
+                    Plugins,
+                    &format!("{scope_name}/{plugin_name}"),
+                    &manifest_path,
+                    &error,
+                ));
                 continue;
             }
         };
@@ -441,6 +520,12 @@ async fn discover_guarded_plugins(
             Ok(admission) => admission,
             Err(error) => {
                 tracing::warn!(plugin = plugin_name, %error, "plugin trust admission denied before execution");
+                health.push(ScopeHealth::blocked(
+                    Plugins,
+                    &format!("{scope_name}/{plugin_name}"),
+                    &manifest_path,
+                    &error,
+                ));
                 continue;
             }
         };
@@ -466,6 +551,12 @@ async fn discover_guarded_plugins(
             Err(error) => {
                 inventory.quarantine(&candidate_id, error.to_string());
                 tracing::warn!(path = %manifest_path.display(), error = %error, "failed to load plugin");
+                health.push(ScopeHealth::blocked(
+                    Plugins,
+                    &format!("{scope_name}/{plugin_name}"),
+                    &manifest_path,
+                    &error,
+                ));
             }
         }
     }
@@ -487,6 +578,7 @@ async fn discover_guarded_plugins(
     _filter: &PluginSelectionFilter,
     _dynamic_admission: &crate::dynamic_admission::DynamicAdmissionPolicy,
     _inventory: &crate::contribution_lifecycle::DynamicContributionInventory,
+    _health: &mut Vec<crate::contribution_health::ScopeHealth>,
 ) -> anyhow::Result<Option<(LoadedPlugin, GuardedContributionDirectory)>> {
     anyhow::bail!("guarded plugin discovery requires Unix")
 }
@@ -1009,7 +1101,7 @@ script = "tools/run.sh"
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn malformed_project_plugin_deny_fails_only_project_scope_closed() {
+    async fn contribution_health_plugin_malformed_scope_isolated() {
         use std::io::Write;
 
         let _lock = crate::test_support::env::lock_async().await;
@@ -1038,12 +1130,29 @@ script = "tools/run.sh"
         state.write_all(b"{not-json").unwrap();
         state.sync_all().unwrap();
 
-        discover_plugins(project.path(), None)
-            .await
-            .publish(|features| {
-                assert_eq!(features.len(), 1);
-                assert_eq!(features[0].name(), "user-plugin");
-            });
+        let inventory = crate::contribution_lifecycle::DynamicContributionInventory::default();
+        discover_plugins_filtered_with_inventory(
+            project.path(),
+            None,
+            &PluginSelectionFilter::default(),
+            inventory.clone(),
+        )
+        .await
+        .publish(|features| {
+            assert_eq!(features.len(), 1);
+            assert_eq!(features[0].name(), "user-plugin");
+        });
+        let health = inventory.loading_health.snapshot();
+        assert!(
+            health
+                .iter()
+                .any(|scope| scope.scope == "project" && scope.is_blocked())
+        );
+        assert!(
+            health
+                .iter()
+                .any(|scope| scope.scope == "user" && !scope.is_blocked())
+        );
     }
 
     #[cfg(unix)]

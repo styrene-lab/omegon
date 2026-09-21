@@ -20,6 +20,8 @@ use std::sync::{OnceLock, RwLock};
 /// Clone + Serialize — crosses thread boundaries and goes over WebSocket.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HarnessStatus {
+    #[serde(default)]
+    pub contribution_loading: Vec<crate::contribution_health::ScopeHealth>,
     // ── Repo state ───────────────────────────────────────────
     pub git_branch: Option<String>,
     pub git_detached: bool,
@@ -683,6 +685,7 @@ impl HarnessStatus {
     /// Called in setup.rs after discover_plugins() to populate MCP server
     /// and plugin info that assemble() can't know about.
     pub fn update_from_bus(&mut self, bus: &crate::bus::EventBus) {
+        self.contribution_loading = bus.contribution_health().snapshot();
         // Populate installed plugins from the bus's registered features
         // (Feature trait doesn't expose identity, so we use tool counts as signal)
         let tool_defs = bus.tool_definitions();
@@ -1143,6 +1146,7 @@ fn probe_secret_store() -> Option<SecretBackendStatus> {
 impl Default for HarnessStatus {
     fn default() -> Self {
         Self {
+            contribution_loading: Vec::new(),
             git_branch: None,
             git_detached: false,
             active_persona: None,
@@ -1625,5 +1629,19 @@ mod tests {
             Some(ProviderRuntimeStatus::Degraded)
         );
         assert_eq!(provider.recent_failure_count, Some(3));
+    }
+}
+
+#[cfg(test)]
+mod contribution_health_regressions {
+    #[test]
+    fn contribution_health_is_a_shared_status_contract() {
+        let status = super::HarnessStatus::default();
+        let value = serde_json::to_value(status).unwrap();
+        assert_eq!(
+            value.get("contribution_loading"),
+            Some(&serde_json::json!([])),
+            "healthy empty inventory must have an explicit shared health field"
+        );
     }
 }

@@ -204,6 +204,10 @@ pub fn render_bootstrap(status: &HarnessStatus, color: bool) -> String {
         out.push_str(&format!("  {yellow}⚠{reset} {}\n", expectation.message));
     }
 
+    for scope in &status.contribution_loading {
+        out.push_str(&format!("  {}\n", scope.summary()));
+    }
+
     // Memory — single line
     let mem = &status.memory;
     if status.memory_available {

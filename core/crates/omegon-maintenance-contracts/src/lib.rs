@@ -5,6 +5,7 @@
 //! normal runtime startup, contribution loading, or mutation orchestration.
 
 mod canonical;
+mod home;
 mod key;
 mod lock;
 mod process;
@@ -14,6 +15,11 @@ mod selector;
 mod state;
 
 pub use canonical::{canonical_json, parse_record};
+pub use home::{
+    HomeContinuityV1, HomeRecoveryIntentV1, HomeRecoveryJournalV1, HomeRecoveryPhase,
+    ensure_home_recovery_settled, home_binding_matches, same_home_directory,
+    stable_home_volume_uuid,
+};
 pub use key::{
     AuthorityKey, CommandSemanticsV1, canonical_digest, command_fingerprint,
     contribution_domain_key, derive_key, entry_key, path_key, resource_domain_key, scope_key,
@@ -44,6 +50,17 @@ pub const MAX_RESULT_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ContractError {
+    #[error(
+        "installation state is bound to a different home identity; inspect with omegon-maintain home inspect"
+    )]
+    HomeIdentityMismatch {
+        stored: Box<PathIdentityV1>,
+        observed: Box<PathIdentityV1>,
+    },
+    #[error(
+        "installation home recovery is incomplete; resume the original maintenance recovery request"
+    )]
+    HomeRecoveryPending,
     #[error("record exceeds the {MAX_RECORD_BYTES}-byte limit")]
     RecordTooLarge,
     #[error("record is not valid UTF-8 JSON: {0}")]

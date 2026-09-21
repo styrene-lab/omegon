@@ -687,7 +687,7 @@ pub fn highlight_inline_with_base<'a>(
     if bold_style.fg.is_none() {
         bold_style = bold_style.fg(t.fg());
     }
-    let mut code_style = base_style.bg(t.surface_bg()).fg(t.accent_muted());
+    let mut code_style = base_style.patch(t.style_inline_code());
     if code_style.fg.is_none() {
         code_style = code_style.fg(t.accent_muted());
     }
@@ -994,6 +994,25 @@ mod tests {
             .find(|s| s.content.as_ref() == "cargo test");
         assert!(code_span.is_some());
         assert_eq!(code_span.unwrap().style.bg, Some(t.surface_bg()));
+    }
+
+    #[test]
+    fn terminal_inline_code_is_distinct_without_overriding_terminal_colors() {
+        let line = highlight_line("use `cargo test` here", &super::super::theme::TerminalTheme);
+        let code = line
+            .spans
+            .iter()
+            .find(|span| span.content == "cargo test")
+            .unwrap();
+        assert!(code.style.add_modifier.contains(Modifier::UNDERLINED));
+        assert_eq!(code.style.fg, Some(Color::Reset));
+        assert_eq!(code.style.bg, Some(Color::Reset));
+        let prose = line
+            .spans
+            .iter()
+            .find(|span| span.content == "use ")
+            .unwrap();
+        assert!(!prose.style.add_modifier.contains(Modifier::UNDERLINED));
     }
 
     #[test]

@@ -69,6 +69,7 @@ mod command_registry;
 mod container_runtime;
 mod context;
 mod contribution_graph;
+mod contribution_health;
 mod contribution_lifecycle;
 mod control;
 mod control_actions;
@@ -4952,21 +4953,10 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         &route_ledger,
     )
     .await;
-    let refreshable_startup_provider = match &startup_route {
-        route::ProviderRoute::Disconnected {
-            reason:
-                route::DisconnectedReason::MissingCredentials {
-                    provider,
-                    ..
-                }
-                | route::DisconnectedReason::ExpiredCredentials {
-                    provider,
-                    ..
-                },
-            ..
-        } => Some(provider.as_str()),
-        _ => None,
-    };
+    let refreshable_startup_provider = runtime_composition::startup_credential_refresh_provider(
+        &requested_start_model,
+        &startup_route,
+    );
     if let Some(provider) = refreshable_startup_provider {
         // Startup can begin before a just-completed browser login has been
         // flushed through every auth surface. Do one refresh/adoption pass
@@ -5187,7 +5177,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             .map(|(_, model)| model)
             .unwrap_or(&selected_model);
         let provider = crate::providers::infer_provider_id(&selected_model);
-        if provider == "anthropic"
+        if startup_decision.provider_connected
+            && !selected_model.trim().is_empty()
+            && provider == "anthropic"
             && let Some(limits) = auth::probe_anthropic_model_limits(model_id).await
                 && let Ok(mut s) = shared_settings.lock() {
                     let old = s.context_window;

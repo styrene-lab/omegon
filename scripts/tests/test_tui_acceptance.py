@@ -135,6 +135,174 @@ def test_runtime_idle_requires_matching_terminal_fact_for_each_started_turn():
     assert runner.authority_runtime_idle([started, closed, second, {"event_type": "turn.closed", "payload": {"turn_id": "second"}}])
 
 
+def test_streaming_fixture_stages_hold_before_response_completion():
+    import queue
+    import threading
+    events = queue.Queue()
+    with runner.fixture_provider() as server:
+        server.streaming = True
+        def consume():
+            request = Request(server.url + "/v1/chat/completions", data=b'{"messages": []}', headers={"Content-Type": "application/json"})
+            with urlopen(request, timeout=5) as response:
+                for line in response:
+                    if line.startswith(b"data: "):
+                        events.put(line.decode())
+        reader = threading.Thread(target=consume)
+        reader.start()
+        try:
+            for stage in range(3):
+                assert server.stream_stages[stage].wait(2)
+                event = events.get(timeout=2)
+                assert f"STREAM_A_{stage * 32 + 1:04}" in event
+                assert f"STREAM_A_{(stage + 1) * 32:04}" in event
+                assert "[DONE]" not in event and '"finish_reason": null' in event
+                assert reader.is_alive(), "provider completed before release"
+                server.release_stages[stage].set()
+            assert '"finish_reason": "stop"' in events.get(timeout=2)
+            assert "[DONE]" in events.get(timeout=2)
+            reader.join(2)
+            assert not reader.is_alive()
+        finally:
+            for release in getattr(server, "release_stages", []):
+                release.set()
+            reader.join(5)
+
+
+def test_streaming_fixture_interleaves_read_tool_and_followup_response():
+    with runner.fixture_provider() as server:
+        server.streaming = True
+        server.requests = 1
+        server.stream_read_path = "/fixture/stream-probe.txt"
+        server.tool_path = "/fixture/legacy-denied.txt"
+        server.release_stages[3].set()
+        request = Request(server.url + "/v1/chat/completions", data=b'{"messages": []}', headers={"Content-Type": "application/json"})
+        with urlopen(request, timeout=2) as response:
+            body = response.read().decode()
+        assert "STREAM_B_0001" in body and "STREAM_B_0032" in body
+        assert '"name": "read"' in body and "stream-probe.txt" in body
+        assert '"finish_reason": "tool_calls"' in body
+        server.release_stages[4].set()
+        with urlopen(request, timeout=2) as response:
+            body = response.read().decode()
+        assert "STREAM_C_0001" in body and "STREAM_C_0032" in body
+        assert '"finish_reason": "stop"' in body
+        assert server.requests == 3
+
+
+def test_streaming_payload_preserves_nonwhitespace_across_wraps():
+    marker = "STREAM_A_0001"
+    wrapped = marker + " " + "steady out\nput 界 é " * 12
+    runner.assert_streaming_payload(wrapped, [marker])
+    for corrupted in [wrapped.replace("put 界", "p", 1),
+                      wrapped.replace("界", "X界", 1),
+                      wrapped.replace("é", "e", 1)]:
+        try:
+            runner.assert_streaming_payload(corrupted, [marker])
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("streaming payload accepted dropped or altered nonwhitespace characters")
+
+
+def test_streaming_history_gate_rejects_viewport_only_and_replay():
+    markers = ["STREAM_A_0001", "STREAM_A_0002"]
+    runner.assert_streaming_history("STREAM_A_0001\nSTREAM_A_0002", "STREAM_A_0001\nSTREAM_A_0002", markers)
+    for scrollback, transcript in [("", "STREAM_A_0001\nSTREAM_A_0002"),
+                                  ("STREAM_A_0001", "STREAM_A_0001"),
+                                  ("STREAM_A_0001\nSTREAM_A_0002", "STREAM_A_0001\nSTREAM_A_0002\nSTREAM_A_0001")]:
+        try:
+            runner.assert_streaming_history(scrollback, transcript, markers)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("viewport-only, missing, or replayed streaming text accepted")
+
+
+def test_markdown_capture_gate_rejects_raw_markup_broken_words_and_missing_style():
+    import textwrap
+    prose = textwrap.fill(runner.MARKDOWN_PROSE, width=120)
+    clean = ("MD_WIDE_HEADING\nintentional emphasis inline_code\nPROSE_BEGIN_WIDE\n"
+             + prose + "\nPROSE_END_WIDE\nFirst list item\nSecond list item\n"
+             "System  Purpose\nMemory  Durable knowledge\nTools   Execute work\n    let preserved = 7;\nMD_WIDE_END")
+    styled = "\x1b[1mMD_WIDE_HEADING\x1b[0m\n\x1b[1mintentional emphasis\x1b[0m\n\x1b[4minline_code\x1b[0m\nMD_WIDE_END"
+    runner.assert_markdown_rendering(clean, styled, 0, 120)
+    for invalid, style in ((clean.replace("MD_WIDE_HEADING", "## MD_WIDE_HEADING"), styled),
+                           (clean.replace("intentional emphasis", "**intentional emphasis**"), styled),
+                           (clean.replace("persistent", "persis\ntent", 1), styled),
+                           (clean.replace("persistent structured", "persistent\nstructured", 1), styled),
+                           (clean.replace("    let preserved", "let preserved"), styled),
+                           (clean.replace("Tools   Execute", "Tools Execute"), styled),
+                           (clean, "MD_WIDE_HEADING"),
+                           (clean, styled.replace("\x1b[4m", "")),
+                           (clean.replace(prose, textwrap.fill(runner.MARKDOWN_PROSE, width=72)), styled)):
+        try:
+            runner.assert_markdown_rendering(invalid, style, 0, 120)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("Markdown capture accepted unrendered, corrupted, unstyled, or stale-width output")
+
+
+def test_inline_working_status_rejects_response_interruption_and_missing_status():
+    clean = "Published answer\nLive answer tail\n╭ model ─╮\n│ Ask anything │\n╰ Working · Ctrl+C cancel ─╯"
+    runner.assert_inline_working_status(clean)
+    for invalid in (clean.replace("Live answer tail", "Working · Ctrl+C cancel · F2 Project\nLive answer tail"),
+                    clean.replace("Live answer tail", "Working · Ctrl+C cancel\nLive answer tail"),
+                    clean.replace("Working · Ctrl+C cancel", ""),
+                    clean + "\nF2 Project",
+                    clean.replace("╭", " ")):
+        try:
+            runner.assert_inline_working_status(invalid)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("inline status accepted response interruption or missing composer status")
+
+
+def test_markdown_fixture_holds_all_blocks_before_completion():
+    import queue
+    import threading
+    events = queue.Queue()
+    with runner.fixture_provider() as server:
+        server.markdown = True
+        def consume():
+            request = Request(server.url + "/v1/chat/completions", data=b'{"messages": []}', headers={"Content-Type": "application/json"})
+            with urlopen(request, timeout=5) as response:
+                for line in response:
+                    if line.startswith(b"data: "):
+                        events.put(line.decode())
+        reader = threading.Thread(target=consume)
+        reader.start()
+        try:
+            assert server.markdown_prefix_waiting.wait(2)
+            prefix = ""
+            while len(prefix) < len(runner.MARKDOWN_LIVE_PREFIX):
+                event = json.loads(events.get(timeout=2)[6:])
+                prefix += event["choices"][0]["delta"]["content"]
+                assert event["choices"][0]["finish_reason"] is None
+            assert prefix == runner.MARKDOWN_LIVE_PREFIX
+            assert prefix.endswith("**pending emph") and reader.is_alive()
+            server.release_markdown_prefix.set()
+            for stage, label in enumerate(("WIDE", "NARROW", "GROWN")):
+                assert server.stream_stages[stage].wait(2)
+                content = ""
+                while f"MD_{label}_END\n\n" not in content:
+                    event = json.loads(events.get(timeout=2)[6:])
+                    content += event["choices"][0]["delta"]["content"]
+                    assert event["choices"][0]["finish_reason"] is None
+                assert runner.markdown_fixture(stage) in content
+                assert reader.is_alive(), "Markdown provider completed before release"
+                server.release_stages[stage].set()
+            assert '"finish_reason": "stop"' in events.get(timeout=2)
+            assert "[DONE]" in events.get(timeout=2)
+        finally:
+            server.release_markdown_prefix.set()
+            for release in server.release_stages:
+                release.set()
+            reader.join(5)
+        assert not reader.is_alive()
+
+
 if __name__ == "__main__":
     command = runner.tui_command(Path("/binary with spaces"), Path("/workspace"), Path("/log"), "inline", "full")
     assert "--tui" in command and "--ui" in command, "fixture must select both axes explicitly"
@@ -157,3 +325,15 @@ if __name__ == "__main__":
 
     test_reply_readiness_rejects_active_placeholder_and_publication_overlap()
     test_runtime_idle_requires_matching_terminal_fact_for_each_started_turn()
+
+    test_streaming_fixture_stages_hold_before_response_completion()
+    test_streaming_history_gate_rejects_viewport_only_and_replay()
+
+    test_streaming_fixture_interleaves_read_tool_and_followup_response()
+
+    test_streaming_payload_preserves_nonwhitespace_across_wraps()
+
+    test_markdown_capture_gate_rejects_raw_markup_broken_words_and_missing_style()
+    test_markdown_fixture_holds_all_blocks_before_completion()
+
+    test_inline_working_status_rejects_response_interruption_and_missing_status()

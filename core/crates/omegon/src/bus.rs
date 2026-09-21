@@ -390,6 +390,7 @@ pub(crate) struct InProcessServiceHandle<T: ?Sized> {
 
 /// The event bus — owns all features and dispatches events to them.
 pub struct EventBus {
+    contribution_health: crate::contribution_health::ContributionHealth,
     project_root: std::path::PathBuf,
     features: Vec<Box<dyn Feature>>,
     /// Accumulated requests from the most recent event delivery.
@@ -438,6 +439,7 @@ pub struct EventBus {
 impl EventBus {
     pub fn new() -> Self {
         Self {
+            contribution_health: Default::default(),
             project_root: std::env::current_dir().unwrap_or_default(),
             features: Vec::new(),
             pending_requests: Vec::new(),
@@ -465,6 +467,10 @@ impl EventBus {
                 ("web_fetch".into(), Duration::from_secs(60)),
             ]),
         }
+    }
+
+    pub(crate) fn contribution_health(&self) -> crate::contribution_health::ContributionHealth {
+        self.contribution_health.clone()
     }
 
     pub(crate) fn set_project_root(&mut self, root: std::path::PathBuf) {

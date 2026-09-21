@@ -22,8 +22,15 @@ pub(super) struct AuthenticationMenuInputs {
     pub(super) route_warning: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ProviderRowPurpose {
+    ConnectionSetup,
+    ModelSelection,
+}
+
 pub(super) fn build_provider_status_rows(
     row_prefix: &str,
+    purpose: ProviderRowPurpose,
     providers: Vec<ProviderStatusProjection>,
     route: &ProviderRouteSnapshot,
 ) -> Vec<MenuRowProjection> {
@@ -80,7 +87,9 @@ pub(super) fn build_provider_status_rows(
                 badges,
                 metadata,
                 primary_action: Some(
-                    if status.availability == ProviderAvailabilityProjection::Available {
+                    if purpose == ProviderRowPurpose::ModelSelection
+                        && status.availability == ProviderAvailabilityProjection::Available
+                    {
                         MenuActionProjection::open_selector(
                             format!("{row_prefix}.{provider}.models"),
                             "Choose model",
@@ -135,6 +144,63 @@ pub(super) fn build_provider_status_rows(
             }
         })
         .collect()
+}
+
+/// Method discovery is inert; only the chosen action starts credential acquisition.
+pub(super) fn build_connection_method_menu(
+    provider: &crate::auth::ProviderCredential,
+    key_name: &str,
+) -> MenuProjection {
+    let mut menu = MenuProjection::new(
+        format!("auth.methods.{}", provider.id),
+        format!("Connect {}", provider.display_name),
+    );
+    menu.summary =
+        Some("Choose how to authenticate. Model selection is available with /model.".into());
+    menu.footer = Some("↑/↓ navigate · Enter choose method · Esc cancel".into());
+    menu.tabs = vec![MenuTabProjection {
+        id: "methods".into(),
+        label: "Connection methods".into(),
+        groups: vec![MenuGroupProjection {
+            id: "auth.methods".into(),
+            label: "Connection methods".into(),
+            description: None,
+            rows: [
+                (
+                    "oauth",
+                    "Sign in with OAuth",
+                    provider.description.to_string(),
+                    format!("/auth login {}", provider.id),
+                ),
+                (
+                    "api-key",
+                    "Use an API key",
+                    format!("Paste {key_name} into hidden input."),
+                    format!("/connect {} --api-key", provider.id),
+                ),
+            ]
+            .into_iter()
+            .map(|(id, label, description, command)| MenuRowProjection {
+                id: format!("auth.methods.{}.{id}", provider.id),
+                label: label.into(),
+                description,
+                value: None,
+                kind: MenuRowKind::Action,
+                badges: vec![],
+                metadata: vec![],
+                primary_action: Some(MenuActionProjection::command(
+                    format!("auth.method.{id}"),
+                    label,
+                    command,
+                )),
+                actions: vec![],
+                safety: None,
+                availability: None,
+            })
+            .collect(),
+        }],
+    }];
+    menu
 }
 
 pub(super) fn build_authentication_menu(inputs: AuthenticationMenuInputs) -> MenuProjection {
@@ -199,7 +265,12 @@ fn build_connection_menu(inputs: AuthenticationMenuInputs, available: bool) -> M
             if available { !existing } else { existing }
         })
         .collect();
-    let mut rows = build_provider_status_rows("auth.provider", providers, &inputs.route);
+    let mut rows = build_provider_status_rows(
+        "auth.provider",
+        ProviderRowPurpose::ConnectionSetup,
+        providers,
+        &inputs.route,
+    );
     if !available {
         for (id, label, description) in [
             (
@@ -310,20 +381,40 @@ mod tests {
     }
 
     #[test]
-    fn connected_provider_primary_action_selects_models_while_refresh_remains_available() {
+    fn connected_provider_primary_action_opens_connection_setup() {
         let rows = build_provider_status_rows(
-            "auth.provider",
+            "arbitrary.connection.row",
+            ProviderRowPurpose::ConnectionSetup,
             vec![provider("openai")],
             &Default::default(),
         );
         let row = &rows[0];
         let primary = row.primary_action.as_ref().unwrap();
-        assert_eq!(primary.target_row_id.as_deref(), Some("auth.models.openai"));
-        assert!(primary.command.is_none());
+        assert_eq!(primary.command.as_deref(), Some("/connect openai"));
+        assert!(primary.target_row_id.is_none());
         assert!(
             row.actions
                 .iter()
                 .any(|action| action.command.as_deref() == Some("/connect openai"))
+        );
+    }
+
+    #[test]
+    fn model_provider_rows_keep_explicit_model_selection() {
+        let rows = build_provider_status_rows(
+            "provider",
+            ProviderRowPurpose::ModelSelection,
+            vec![provider("openai")],
+            &Default::default(),
+        );
+        assert_eq!(
+            rows[0]
+                .primary_action
+                .as_ref()
+                .unwrap()
+                .target_row_id
+                .as_deref(),
+            Some("auth.models.openai")
         );
     }
 
@@ -385,6 +476,7 @@ mod tests {
         };
         let rows = build_provider_status_rows(
             "auth.provider",
+            ProviderRowPurpose::ConnectionSetup,
             vec![provider("openai"), provider("anthropic")],
             &route,
         );
