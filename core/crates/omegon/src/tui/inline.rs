@@ -94,18 +94,6 @@ impl App {
         let editor_rows = editor_height_for(&self.editor, area)
             .clamp(2, 4)
             .min(area.height);
-        let editor = Rect::new(
-            area.x,
-            area.bottom().saturating_sub(editor_rows),
-            area.width,
-            editor_rows,
-        );
-        let live = Rect::new(
-            area.x,
-            area.y,
-            area.width,
-            area.height.saturating_sub(editor_rows),
-        );
         let status = if self.native_publication.automatic.is_degraded() {
             "Scrollback delivery uncertain · /session-export or fullscreen for history"
         } else if self.agent_active {
@@ -117,9 +105,12 @@ impl App {
         {
             "Publishing completed output · F2 Project"
         } else {
-            "ready · idle · F2 Project · /ui terminal fullscreen"
+            ""
         };
-        let mut lines = vec![Line::styled(status, self.theme.style_dim())];
+        let mut lines = Vec::new();
+        if !status.is_empty() {
+            lines.push(Line::styled(status, self.theme.style_dim()));
+        }
         // Borrow only a bounded suffix; never format the whole transcript here.
         if self.agent_active
             && let Some(segment) = self.conversation.segments().last()
@@ -143,6 +134,22 @@ impl App {
                     .map(|v| Line::from(v.to_owned())),
             );
         }
+        // Keep idle input beside the transcript. The reserved viewport remains
+        // available below for streaming output and contextual controls.
+        let available = area.height.saturating_sub(editor_rows + 1);
+        let live_rows = if self.editor.render_text().trim_start().starts_with('/') {
+            // Autocomplete opens above the editor, inside the reserved viewport.
+            available
+        } else {
+            (lines.len() as u16).min(available)
+        };
+        let live = Rect::new(area.x, area.y, area.width, live_rows);
+        let editor = Rect::new(
+            area.x,
+            area.y + live_rows + u16::from(area.height > editor_rows),
+            area.width,
+            editor_rows,
+        );
         frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), live);
         self.render_shared_composer(frame, editor);
         self.render_operator_event_toast(frame);

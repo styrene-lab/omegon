@@ -17,6 +17,7 @@ const SCHEMA_VERSION: u16 = 1;
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ProviderAuthenticationClass {
     CredentiallessLocal,
+    AnonymousHosted,
     ApiKey,
     OAuth,
     ApiKeyOrOAuth,
@@ -28,6 +29,7 @@ impl ProviderAuthenticationClass {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::CredentiallessLocal => "credentialless_local",
+            Self::AnonymousHosted => "anonymous_hosted",
             Self::ApiKey => "api_key",
             Self::OAuth => "oauth",
             Self::ApiKeyOrOAuth => "api_key_or_oauth",
@@ -490,7 +492,10 @@ fn factory_accepts_authentication(
         Factory::GithubCopilot => authentication == Auth::OAuthTokenExchange,
         Factory::OpenAiChatCompletions => matches!(
             authentication,
-            Auth::ApiKey | Auth::CredentiallessLocal | Auth::OptionalApiKeyLocal
+            Auth::ApiKey
+                | Auth::CredentiallessLocal
+                | Auth::OptionalApiKeyLocal
+                | Auth::AnonymousHosted
         ),
     }
 }
@@ -680,6 +685,13 @@ fn built_in_candidates() -> Vec<ProviderContributionCandidate> {
                 Factory::GoogleAntigravity,
             )
         },
+        candidate(
+            "opencode-zen",
+            &["zen"],
+            Auth::AnonymousHosted,
+            openai_tools,
+            Factory::OpenAiChatCompletions,
+        ),
         candidate(
             "opencode-go",
             &[],
@@ -885,6 +897,7 @@ mod tests {
             "openai",
             "openai-codex",
             "opencode-go",
+            "opencode-zen",
             "openrouter",
             "perplexity",
             "xai",
@@ -1067,6 +1080,10 @@ mod tests {
                     panic!("missing credential descriptor for {}", provider.provider_id)
                 });
             let compatible = match provider.authentication {
+                ProviderAuthenticationClass::AnonymousHosted => {
+                    credential.auth_method == crate::auth::AuthMethod::Anonymous
+                        && credential.env_vars.is_empty()
+                }
                 ProviderAuthenticationClass::ApiKey => {
                     credential.auth_method == crate::auth::AuthMethod::ApiKey
                         && credential.oauth_env_vars.is_empty()

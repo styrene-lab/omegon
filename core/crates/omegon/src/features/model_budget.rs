@@ -2,7 +2,7 @@
 //!
 //! Provides two orthogonal levers for cost/capability tuning:
 //! 1. Model intent: requested provider-neutral capability grade plus routing reason
-//! 2. Thinking level: off → minimal → low → medium → high
+//! 2. Thinking level: off → minimal → low → medium → high → xhigh → max
 //!
 //! Tools: set_model_intent, set_thinking_level
 
@@ -290,7 +290,7 @@ impl Feature for ModelBudget {
                     "properties": {
                         "level": {
                             "type": "string",
-                            "enum": ["off", "minimal", "low", "medium", "high"],
+                            "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
                             "description": "Thinking level"
                         },
                         "reason": {
@@ -412,13 +412,16 @@ mod tests {
 
     #[test]
     fn grade_resolve_openai() {
-        assert_eq!(ModelGrade::S.resolve_model("openai", ""), "gpt-5.6");
+        assert_eq!(ModelGrade::S.resolve_model("openai", ""), "gpt-6-astra");
         assert!(ModelGrade::B.resolve_model("openai", "").contains("gpt"));
     }
 
     #[test]
     fn grade_resolve_openai_codex() {
-        assert_eq!(ModelGrade::S.resolve_model("openai-codex", ""), "gpt-5.6");
+        assert_eq!(
+            ModelGrade::S.resolve_model("openai-codex", ""),
+            "gpt-6-astra"
+        );
         assert_eq!(
             ModelGrade::B.resolve_model("openai-codex", ""),
             "gpt-5.6-terra"

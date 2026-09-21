@@ -216,6 +216,8 @@ pub(crate) fn thinking_selector_options(
                 crate::settings::ThinkingLevel::Low => "Adept — ~5k token budget".into(),
                 crate::settings::ThinkingLevel::Medium => "Magos — ~10k token budget".into(),
                 crate::settings::ThinkingLevel::High => "Archmagos — ~50k token budget".into(),
+                crate::settings::ThinkingLevel::XHigh => "Extra high — ~75k token reserve".into(),
+                crate::settings::ThinkingLevel::Max => "Maximum — ~100k token reserve".into(),
             },
             active: *level == current,
         })

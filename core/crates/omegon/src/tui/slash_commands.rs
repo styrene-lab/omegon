@@ -1534,6 +1534,9 @@ Scroll transcript:
                 if provider.is_empty() {
                     self.open_auth_menu();
                     SlashResult::Handled
+                } else if (provider.eq_ignore_ascii_case(crate::providers::zen::PROVIDER_ID) || provider.eq_ignore_ascii_case("free")) && option.is_none() {
+                    self.open_free_model_menu();
+                    SlashResult::Handled
                 } else if let Some(provider) = crate::auth::provider_by_id(provider) {
                     let key_name = crate::auth::operator_api_key_name(provider);
                     if option == Some("--console") {

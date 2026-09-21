@@ -7,6 +7,8 @@
 //! The upstream provider APIs are the only external dependency — no npm,
 //! no Node.js, no supply chain risk from package registries.
 
+pub(crate) mod zen;
+
 use async_trait::async_trait;
 use futures_util::FutureExt;
 use serde_json::{Value, json};
@@ -78,19 +80,19 @@ pub fn automation_safe_model() -> Option<String> {
     }
     // 3. Google Gemini (API key)
     if resolve_api_key_sync("google").is_some() {
-        return Some("google:gemini-2.5-flash".to_string());
+        return default_model_for_provider("google");
     }
     // 4. Google Antigravity (OAuth)
     if resolve_api_key_sync("google-antigravity").is_some() {
-        return Some("google-antigravity:gemini-2.5-flash".to_string());
+        return default_model_for_provider("google-antigravity");
     }
     // 5. OpenAI direct API key
     if resolve_api_key_sync("openai").is_some_and(|(_, oauth)| !oauth) {
-        return Some("openai:gpt-4o".to_string());
+        return default_model_for_provider("openai");
     }
     // 6. OpenRouter
     if resolve_api_key_sync("openrouter").is_some() {
-        return Some("openrouter:openai/gpt-4o".to_string());
+        return default_model_for_provider("openrouter");
     }
     // 7. Ollama — local inference, always unrestricted.
     // Probe once per process with a tight 50ms timeout (localhost should respond in <5ms).
@@ -117,7 +119,7 @@ pub fn automation_safe_model() -> Option<String> {
             .is_some()
     });
     if *ollama_up {
-        return Some("ollama:llama3".to_string());
+        return default_model_for_provider("ollama");
     }
     None
 }
@@ -1909,6 +1911,55 @@ impl OpenAIClient {
         resolve_api_key("openai").map(Self::new)
     }
 
+    /// Astra tool use requires Responses. Keep compatibility gateways on their
+    /// own declared protocol rather than rewriting their configured endpoint.
+    async fn stream_responses(
+        &self,
+        model: &str,
+        system_prompt: &str,
+        messages: &[LlmMessage],
+        tools: &[ToolDefinition],
+        options: &StreamOptions,
+    ) -> anyhow::Result<mpsc::Receiver<LlmEvent>> {
+        let (tx, rx) = mpsc::channel(256);
+        let body = build_responses_body("openai", model, system_prompt, messages, tools, options)?;
+        let root = self.base_url.trim_end_matches('/');
+        let url = if root.ends_with("/v1") {
+            format!("{root}/responses")
+        } else {
+            format!("{root}/v1/responses")
+        };
+        let response = self
+            .client
+            .post(url)
+            .bearer_auth(&self.api_key)
+            .header("accept", "text/event-stream")
+            .json(&body)
+            .send()
+            .await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let retry_after_ms = server_retry_delay_ms(response.headers());
+            let body = response.text().await.unwrap_or_default();
+            let message = serde_json::from_str::<Value>(&body)
+                .map(|event| extract_codex_error_detail(&event))
+                .unwrap_or_else(|_| body.chars().take(200).collect());
+            let _ = tx
+                .send(upstream_failure_event(
+                    format!("OpenAI Responses {status}: {message}"),
+                    retry_after_ms,
+                ))
+                .await;
+            return Ok(rx);
+        }
+        let telemetry = parse_rate_limit_snapshot("openai", response.headers());
+        let model = model.to_string();
+        spawn_provider_stream_task("openai", tx.clone(), async move {
+            parse_responses_stream(response, telemetry, &tx, "openai", &model).await
+        });
+        Ok(rx)
+    }
+
     fn build_wire_messages(system_prompt: &str, messages: &[LlmMessage]) -> Vec<Value> {
         let mut wire_msgs = vec![json!({"role": "system", "content": system_prompt})];
         for m in messages {
@@ -1971,6 +2022,12 @@ impl LlmBridge for OpenAIClient {
             .as_deref()
             .map(model_id_from_spec)
             .unwrap_or("gpt-4.1");
+
+        if self.endpoint_id == "openai" && self.request_url.is_none() && model == "gpt-6-astra" {
+            return self
+                .stream_responses(model, system_prompt, messages, tools, options)
+                .await;
+        }
 
         let wire_msgs = Self::build_wire_messages(system_prompt, messages);
 
@@ -2035,6 +2092,11 @@ impl LlmBridge for OpenAIClient {
 
         if !response.status().is_success() {
             let status = response.status();
+            if self.endpoint_id == zen::PROVIDER_ID
+                && let Some(error) = zen::definitive_failure(status, model)
+            {
+                return Err(error.into());
+            }
             let retry_after_ms = server_retry_delay_ms(response.headers());
             let err = response.text().await.unwrap_or_default();
             let user_msg = crate::model_registry::ModelRegistry::global()
@@ -2059,6 +2121,11 @@ impl LlmBridge for OpenAIClient {
                         .unwrap_or_else(|| err.chars().take(200).collect());
                     format!("{} {status}: {fallback}", self.endpoint_id)
                 });
+            let user_msg = if self.endpoint_id == zen::PROVIDER_ID {
+                format!("{} {user_msg}", zen::failure_hint(status))
+            } else {
+                user_msg
+            };
             let _ = tx
                 .send(upstream_failure_event(user_msg, retry_after_ms))
                 .await;
@@ -2904,6 +2971,13 @@ fn codex_wire_model(model: &str) -> &str {
 fn enrich_codex_error_message(model: &str, status: u16, user_msg: &str) -> String {
     let mut message = format!("Codex {status}: {user_msg}");
     let lower = user_msg.to_ascii_lowercase();
+    if model == "gpt-6-astra"
+        && (matches!(status, 403 | 404)
+            || lower.contains("not supported")
+            || lower.contains("access"))
+    {
+        message.push_str("\n\nGPT-6 Astra access depends on ChatGPT account and workspace eligibility. Omegon sends the exact gpt-6-astra model ID through its native Responses client; installing or upgrading Codex CLI does not grant model access. Check eligibility or explicitly select another connected model with /model.");
+    }
     if model.starts_with("gpt-5.6")
         && lower.contains("not supported")
         && lower.contains("chatgpt account")
@@ -3003,7 +3077,15 @@ impl CodexClient {
         Some(Self::new(token, account_id?))
     }
 
+    #[cfg(test)]
     fn build_input(messages: &[LlmMessage]) -> Vec<Value> {
+        Self::build_responses_input(messages, None).expect("reconstructed input cannot fail")
+    }
+
+    fn build_responses_input(
+        messages: &[LlmMessage],
+        provenance: Option<(&str, &str)>,
+    ) -> anyhow::Result<Vec<Value>> {
         let mut input = Vec::new();
         let mut msg_index = 0u32;
         for msg in messages {
@@ -3021,8 +3103,30 @@ impl CodexClient {
                     }
                 }
                 LlmMessage::Assistant {
-                    text, tool_calls, ..
+                    text,
+                    tool_calls,
+                    raw,
+                    ..
                 } => {
+                    if let Some((provider, model)) = provenance
+                        && let Some(replay) = raw.as_ref().and_then(|raw| raw.get("responses"))
+                        && replay["provider"].as_str() == Some(provider)
+                        && replay["model"].as_str() == Some(model)
+                    {
+                        let output = replay["output"].as_array().ok_or_else(|| {
+                            anyhow::anyhow!("Invalid Responses continuation output")
+                        })?;
+                        validate_responses_output(output)?;
+                        if !output.is_empty() {
+                            validate_responses_replay(output, text, tool_calls)?;
+                            input.extend(output.iter().cloned());
+                            msg_index = msg_index.saturating_add(output.len() as u32);
+                            continue;
+                        }
+                        // Some compatible Responses streams send only deltas
+                        // and response.done. Empty raw output must not erase
+                        // the semantic assistant message reconstructed below.
+                    }
                     for t in text {
                         if !t.is_empty() {
                             input.push(json!({
@@ -3065,22 +3169,12 @@ impl CodexClient {
                 }
             }
         }
-        input
+        Ok(input)
     }
 
+    #[cfg(test)]
     fn build_tools(tools: &[ToolDefinition]) -> Vec<Value> {
-        tools
-            .iter()
-            .map(|t| {
-                let params = provider_function_parameters("openai-codex", &t.parameters)
-                    .expect("validated Codex contribution supports tools");
-                json!({
-                    "type": "function", "name": t.name, "description": t.description,
-                    "parameters": params,
-                    "strict": null,
-                })
-            })
-            .collect()
+        build_responses_tools("openai-codex", tools)
     }
 }
 
@@ -3136,6 +3230,149 @@ fn extract_codex_error_detail(event: &Value) -> String {
     }
 }
 
+/// Shared Responses envelope; provider authentication and endpoints remain in
+/// their existing clients. Only explicit Astra routes receive Astra's rules.
+fn build_responses_body(
+    provider: &str,
+    model: &str,
+    system_prompt: &str,
+    messages: &[LlmMessage],
+    tools: &[ToolDefinition],
+    options: &StreamOptions,
+) -> anyhow::Result<Value> {
+    let input = CodexClient::build_responses_input(messages, Some((provider, model)))?;
+    let mut body = json!({
+        "model": model, "store": false, "stream": true,
+        "instructions": system_prompt, "input": input,
+        "text": {"verbosity": "medium"},
+        "include": ["reasoning.encrypted_content"],
+        "tool_choice": "auto", "parallel_tool_calls": true,
+    });
+    // Preserve Codex's existing request contract. Direct API requests may carry
+    // supported extras, but extras cannot replace selected routing or history.
+    if provider == "openai" {
+        for (key, value) in &options.extra_body {
+            if !matches!(
+                key.as_str(),
+                "model"
+                    | "input"
+                    | "instructions"
+                    | "tools"
+                    | "stream"
+                    | "store"
+                    | "reasoning"
+                    | "previous_response_id"
+                    | "conversation"
+            ) {
+                body[key] = value.clone();
+            }
+        }
+    }
+    if !tools.is_empty() {
+        body["tools"] = Value::Array(build_responses_tools(provider, tools));
+    }
+    if let Some(effort) = model_reasoning_effort(model, options.reasoning.as_deref()) {
+        body["reasoning"] = json!({"effort": effort, "summary": "auto"});
+    }
+    if model == "gpt-6-astra" {
+        for key in ["temperature", "top_p", "top_logprobs", "logprobs"] {
+            body.as_object_mut()
+                .expect("Responses envelope is an object")
+                .remove(key);
+        }
+        if let Some(include) = body.get_mut("include").and_then(Value::as_array_mut) {
+            include.retain(|item| item.as_str() != Some("message.output_text.logprobs"));
+        }
+    }
+    Ok(body)
+}
+
+const MAX_RESPONSES_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+const MAX_RESPONSES_OUTPUT_ITEMS: usize = 1024;
+
+fn validate_responses_output(output: &[Value]) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        output.len() <= MAX_RESPONSES_OUTPUT_ITEMS,
+        "Responses continuation exceeds item limit"
+    );
+    let mut bytes = 0usize;
+    for item in output {
+        anyhow::ensure!(
+            matches!(item["type"].as_str(), Some("reasoning" | "function_call"))
+                || (item["type"] == "message" && item["role"] == "assistant"),
+            "Responses continuation contains an unsupported output item"
+        );
+        bytes = bytes.saturating_add(serde_json::to_vec(item)?.len());
+        anyhow::ensure!(
+            bytes <= MAX_RESPONSES_OUTPUT_BYTES,
+            "Responses continuation exceeds byte limit"
+        );
+    }
+    Ok(())
+}
+
+fn validate_responses_replay(
+    output: &[Value],
+    text: &[String],
+    tool_calls: &[crate::bridge::WireToolCall],
+) -> anyhow::Result<()> {
+    let replay_text = output
+        .iter()
+        .filter(|item| item["type"] == "message")
+        .filter_map(|item| item["content"].as_array())
+        .flatten()
+        .filter(|part| part["type"] == "output_text")
+        .filter_map(|part| part["text"].as_str())
+        .collect::<String>();
+    anyhow::ensure!(
+        replay_text == text.concat(),
+        "Responses continuation is incomplete or inconsistent with assistant text"
+    );
+    let replay_calls: Vec<_> = output
+        .iter()
+        .filter(|item| item["type"] == "function_call")
+        .collect();
+    anyhow::ensure!(
+        replay_calls.len() == tool_calls.len()
+            && tool_calls.iter().all(|call| {
+                let id = call.id.split('|').next().unwrap_or(&call.id);
+                replay_calls.iter().any(|item| {
+                    item["call_id"].as_str() == Some(id)
+                        && item["name"].as_str() == Some(call.name.as_str())
+                        && item["arguments"]
+                            .as_str()
+                            .and_then(|args| serde_json::from_str::<Value>(args).ok())
+                            .as_ref()
+                            == Some(&call.arguments)
+                })
+            }),
+        "Responses continuation is incomplete or inconsistent with assistant tool calls"
+    );
+    Ok(())
+}
+
+fn build_responses_tools(provider: &str, tools: &[ToolDefinition]) -> Vec<Value> {
+    tools.iter().map(|tool| {
+        let parameters = provider_function_parameters(provider, &tool.parameters)
+            .expect("validated Responses contribution supports tools");
+        json!({"type":"function", "name":tool.name, "description":tool.description, "parameters":parameters, "strict":null})
+    }).collect()
+}
+
+fn model_reasoning_effort(model: &str, reasoning: Option<&str>) -> Option<&'static str> {
+    if model == "gpt-6-astra" {
+        return Some(match reasoning {
+            None | Some("off" | "none" | "minimal" | "low") => "low",
+            Some("medium") => "medium",
+            Some("high") => "high",
+            Some("xhigh") => "xhigh",
+            Some("max") => "max",
+            _ => "medium",
+        });
+    }
+    openai_reasoning_effort(reasoning)
+}
+
 #[async_trait]
 impl LlmBridge for CodexClient {
     async fn stream(
@@ -3174,29 +3411,22 @@ impl LlmBridge for CodexClient {
         let model = options
             .model
             .as_deref()
-            .and_then(|m| {
-                m.strip_prefix("openai-codex:")
-                    .or_else(|| m.strip_prefix("openai:"))
-            })
-            .unwrap_or("gpt-5.5");
+            .map(model_id_from_spec)
+            .unwrap_or_else(|| {
+                crate::model_registry::ModelRegistry::global()
+                    .default_model("openai-codex")
+                    .expect("embedded Codex default")
+            });
 
         let wire_model = codex_wire_model(model);
-        let input = Self::build_input(messages);
-        let wire_tools = Self::build_tools(tools);
-
-        let mut body = json!({
-            "model": wire_model, "store": false, "stream": true,
-            "instructions": system_prompt, "input": input,
-            "text": {"verbosity": "medium"},
-            "include": ["reasoning.encrypted_content"],
-            "tool_choice": "auto", "parallel_tool_calls": true,
-        });
-        if !wire_tools.is_empty() {
-            body["tools"] = Value::Array(wire_tools);
-        }
-        if let Some(effort) = openai_reasoning_effort(options.reasoning.as_deref()) {
-            body["reasoning"] = json!({"effort": effort, "summary": "auto"});
-        }
+        let body = build_responses_body(
+            "openai-codex",
+            wire_model,
+            system_prompt,
+            messages,
+            tools,
+            options,
+        )?;
 
         let url = format!("{}/codex/responses", self.base_url.trim_end_matches('/'));
         let response = self
@@ -3226,8 +3456,16 @@ impl LlmBridge for CodexClient {
                 let provider_telemetry = parse_rate_limit_snapshot("openai-codex", resp.headers());
                 log_rate_limit_headers("openai-codex", resp.headers());
                 let tx_clone = tx.clone();
+                let wire_model = wire_model.to_string();
                 spawn_provider_stream_task("openai-codex", tx_clone.clone(), async move {
-                    parse_codex_stream(resp, provider_telemetry, &tx_clone).await
+                    parse_responses_stream(
+                        resp,
+                        provider_telemetry,
+                        &tx_clone,
+                        "openai-codex",
+                        &wire_model,
+                    )
+                    .await
                 });
             }
             Ok(resp) => {
@@ -3339,11 +3577,18 @@ fn first_scalar_at(value: &Value, paths: &[&str]) -> Option<String> {
 }
 
 /// Parse Codex Responses API SSE stream (different event structure from Chat Completions).
-async fn parse_codex_stream(
+async fn parse_responses_stream(
     response: reqwest::Response,
     provider_telemetry: Option<omegon_traits::ProviderTelemetrySnapshot>,
     tx: &mpsc::Sender<LlmEvent>,
+    provider: &'static str,
+    model: &str,
 ) -> anyhow::Result<()> {
+    let display = if provider == "openai-codex" {
+        "Codex"
+    } else {
+        "OpenAI"
+    };
     let mut full_text = String::new();
     let mut _current_item_type: Option<String> = None;
     let mut _current_text = String::new();
@@ -3356,6 +3601,7 @@ async fn parse_codex_stream(
     }
     let mut tool_calls: Vec<ToolAcc> = Vec::new();
     let mut completed_tool_calls: Vec<Value> = Vec::new();
+    let mut completed_output: Vec<Value> = Vec::new();
     let provider_telemetry_done = provider_telemetry.clone();
     let _ = tx.try_send(LlmEvent::Start);
 
@@ -3450,6 +3696,11 @@ async fn parse_codex_stream(
             }
             "response.output_item.done" => {
                 let item = &event["item"];
+                completed_output.push(item.clone());
+                if let Err(error) = validate_responses_output(&completed_output) {
+                    terminal = Some(TerminalEvent::Error(error.to_string()));
+                    return false;
+                }
                 match item["type"].as_str().unwrap_or("") {
                     "reasoning" => {
                         let _ = tx.try_send(LlmEvent::ThinkingEnd);
@@ -3485,6 +3736,13 @@ async fn parse_codex_stream(
             // "response.done" is an alias used by some Codex endpoint variants;
             // handle it alongside the documented "response.completed".
             "response.completed" | "response.done" => {
+                if let Some(output) = event.pointer("/response/output").and_then(Value::as_array) {
+                    if let Err(error) = validate_responses_output(output) {
+                        terminal = Some(TerminalEvent::Error(error.to_string()));
+                        return false;
+                    }
+                    completed_output = output.clone();
+                }
                 let mut codex_input: u64 = 0;
                 let mut codex_output: u64 = 0;
                 if let Some(usage) = event.pointer("/response/usage") {
@@ -3505,19 +3763,19 @@ async fn parse_codex_stream(
             }
             "response.failed" => {
                 let msg = extract_codex_error_detail(&event);
-                terminal = Some(TerminalEvent::Error(format!("Codex: {msg}")));
+                terminal = Some(TerminalEvent::Error(format!("{display}: {msg}")));
                 return false;
             }
             "error" => {
                 let msg = extract_codex_error_detail(&event);
                 tracing::warn!(
-                    provider = "openai-codex",
+                    provider,
                     event_type = %etype,
                     error_message = %msg,
                     raw_event = %event,
                     "Codex SSE error event"
                 );
-                terminal = Some(TerminalEvent::Error(format!("Codex error: {msg}")));
+                terminal = Some(TerminalEvent::Error(format!("{display} error: {msg}")));
                 return false;
             }
             // response.incomplete: model hit max_output_tokens or content
@@ -3532,16 +3790,16 @@ async fn parse_codex_stream(
                     .unwrap_or("unknown");
                 tracing::warn!(reason, "Codex response.incomplete — output was truncated");
                 terminal = Some(TerminalEvent::Error(format!(
-                    "Codex: response incomplete ({reason}) — output was truncated"
+                    "{display}: response incomplete ({reason}) — output was truncated"
                 )));
                 return false;
             }
             // response.cancelled: request was cancelled server-side.
             "response.cancelled" => {
                 tracing::warn!("Codex response.cancelled");
-                terminal = Some(TerminalEvent::Error(
-                    "Codex: response cancelled by server".to_string(),
-                ));
+                terminal = Some(TerminalEvent::Error(format!(
+                    "{display}: response cancelled by server"
+                )));
                 return false;
             }
             "response.created" | "response.in_progress" => {
@@ -3559,7 +3817,7 @@ async fn parse_codex_stream(
                 // They must never masquerade as a new stream start or reset the
                 // semantic-progress watchdog.
                 tracing::debug!(
-                    provider = "openai-codex",
+                    provider,
                     event_type = %crate::util::truncate(etype, 160),
                     "unhandled Codex SSE event treated as transport heartbeat"
                 );
@@ -3580,7 +3838,8 @@ async fn parse_codex_stream(
         }) => {
             let _ = tx
                 .send(LlmEvent::Done {
-                    message: json!({"text": full_text, "tool_calls": completed_tool_calls}),
+                    message: json!({"text": full_text, "tool_calls": completed_tool_calls,
+                        "raw": {"responses": {"provider": provider, "model": model, "output": completed_output}}}),
                     input_tokens,
                     output_tokens,
                     cache_read_tokens: 0,
@@ -3610,7 +3869,7 @@ async fn parse_codex_stream(
                 let _ = tx
                     .send(LlmEvent::Error {
                         message: format!(
-                            "Codex: stream closed without completion (had {}b text, {} tool calls)",
+                            "{display}: stream closed without completion (had {}b text, {} tool calls)",
                             full_text.len(),
                             completed_tool_calls.len()
                         ),
@@ -3619,7 +3878,7 @@ async fn parse_codex_stream(
             } else {
                 let _ = tx
                     .send(LlmEvent::Error {
-                        message: "Codex: stream closed without a completion event".into(),
+                        message: format!("{display}: stream closed without a completion event"),
                     })
                     .await;
             }
@@ -3657,6 +3916,7 @@ pub fn compat_base_url(provider_id: &str) -> Option<&'static str> {
         "cerebras" => Some("https://api.cerebras.ai"),
         "moonshot" => Some("https://api.moonshot.ai"),
         "opencode-go" => Some("https://opencode.ai/zen/go"),
+        "opencode-zen" => Some("https://opencode.ai/zen"),
         "perplexity" => Some("https://api.perplexity.ai"),
         "google" => Some("https://generativelanguage.googleapis.com/v1beta/openai"),
         // Antigravity OAuth tokens require the Cloud Code Assist internal API
@@ -3699,7 +3959,7 @@ fn ollama_think_value(model: &str, reasoning: Option<&str>) -> Option<Value> {
         let mapped = match level {
             "minimal" | "low" => "low",
             "medium" => "medium",
-            "high" => "high",
+            "high" | "xhigh" | "max" => "high",
             other => other,
         };
         return Some(Value::String(mapped.to_string()));
@@ -3719,6 +3979,9 @@ fn openai_reasoning_effort(reasoning: Option<&str>) -> Option<&'static str> {
         "medium" => Some("medium"),
         "high" => Some("high"),
         "xhigh" => Some("xhigh"),
+        // Before Max became a distinct setting, its CLI alias selected High.
+        // Astra's model-specific mapping above preserves its native max effort.
+        "max" => Some("high"),
         _ => Some("medium"),
     }
 }
@@ -3802,7 +4065,7 @@ fn anthropic_manual_budget_tokens(reasoning: Option<&str>) -> Option<u32> {
         "low" => Some(5_000),
         "medium" => Some(10_000),
         "high" => Some(50_000),
-        "xhigh" => Some(50_000),
+        "xhigh" | "max" => Some(50_000),
         _ => Some(10_000),
     }
 }
@@ -3871,6 +4134,16 @@ impl OpenAICompatClient {
     /// Resolve from env vars / auth.json using the canonical PROVIDERS map.
     pub fn from_env(provider_id: &str) -> Option<Self> {
         let base_url = compat_base_url(provider_id)?;
+
+        // The gateway treats this documented public token as anonymous. Never
+        // resolve ambient credentials here: that could turn a free route paid.
+        if provider_id == zen::PROVIDER_ID {
+            return Some(Self::new(
+                "public".into(),
+                base_url.into(),
+                provider_id.into(),
+            ));
+        }
 
         // Local Ollama doesn't need an API key — just check reachability.
         if provider_id == "ollama" {
@@ -4050,6 +4323,16 @@ impl LlmBridge for OpenAICompatClient {
         options: &StreamOptions,
     ) -> anyhow::Result<mpsc::Receiver<LlmEvent>> {
         let mut opts = options.clone();
+        if self.provider_id == zen::PROVIDER_ID {
+            let id = zen::validate_model(options)?;
+            let available =
+                zen::refresh_from_url(&format!("{}/v1/models", self.inner.base_url)).await?;
+            if !available.iter().any(|model| model.id == id) {
+                return Err(zen::withdrawn(id).into());
+            }
+            // These models reason internally but publish no effort levels.
+            opts.reasoning = None;
+        }
 
         // Strip provider prefix from model name
         if let Some(ref mut m) = opts.model {
@@ -4764,6 +5047,444 @@ impl LlmBridge for AntigravityClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn astra_openai_uses_responses_and_streams_tools() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            loop {
+                let mut chunk = [0; 4096];
+                let n = stream.read(&mut chunk).await.unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&chunk[..n]);
+                if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&bytes[..end]);
+                    let len = headers
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length: ")
+                                .and_then(|v| v.parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    if bytes.len() >= end + 4 + len {
+                        break;
+                    }
+                }
+            }
+            let tool = json!({"type":"response.output_item.done","item":{"type":"function_call","id":"fc_fixture","call_id":"call_fixture","name":"read","arguments":"{\"path\":\"README.md\"}"}});
+            let done = json!({"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":2}}});
+            let body = format!("data: {tool}\n\ndata: {done}\n\n");
+            stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+            String::from_utf8(bytes).unwrap()
+        });
+        let client = OpenAIClient {
+            client: reqwest::Client::new(),
+            api_key: "fixture-key".into(),
+            base_url,
+            endpoint_id: "openai".into(),
+            request_url: None,
+        };
+        let tools = [ToolDefinition {
+            name: "read".into(),
+            label: "Read".into(),
+            description: "Read a file".into(),
+            parameters: json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}),
+            capabilities: vec![],
+        }];
+        let options = StreamOptions {
+            model: Some("openai:gpt-6-astra".into()),
+            reasoning: Some("max".into()),
+            extra_body: std::collections::HashMap::from([
+                ("temperature".into(), json!(0.7)),
+                ("top_p".into(), json!(1)),
+                ("logprobs".into(), json!(true)),
+                ("top_logprobs".into(), json!(1)),
+                ("include".into(), json!(["message.output_text.logprobs"])),
+            ]),
+            ..Default::default()
+        };
+        let mut events = client
+            .stream("Fixture instructions", &[], &tools, &options)
+            .await
+            .unwrap();
+        let mut saw_tool = false;
+        while let Some(event) = events.recv().await {
+            saw_tool |= matches!(event, LlmEvent::ToolCallEnd { tool_call } if tool_call.name == "read" && tool_call.arguments["path"] == "README.md");
+        }
+        let request = server.await.unwrap();
+        assert!(
+            request.starts_with("POST /v1/responses "),
+            "{}",
+            request.lines().next().unwrap()
+        );
+        let (_, wire) = request.split_once("\r\n\r\n").unwrap();
+        let body: Value = serde_json::from_str(wire).unwrap();
+        assert_eq!(body["model"], "gpt-6-astra");
+        assert_eq!(body["reasoning"]["effort"], "max");
+        assert_eq!(body["tools"][0]["type"], "function");
+        assert_eq!(body["instructions"], "Fixture instructions");
+        for field in ["temperature", "top_p", "top_logprobs", "logprobs"] {
+            assert!(body.get(field).is_none(), "{field}");
+        }
+        assert!(
+            !body["include"]
+                .as_array()
+                .is_some_and(|a| a.contains(&json!("message.output_text.logprobs")))
+        );
+        assert!(
+            saw_tool,
+            "Responses function-call events must reach the harness"
+        );
+    }
+
+    #[tokio::test]
+    async fn astra_stateless_tool_roundtrip_preserves_reasoning_and_phase() {
+        astra_roundtrip_fixture(false).await;
+    }
+
+    #[tokio::test]
+    async fn astra_delta_only_done_roundtrip_preserves_semantic_text() {
+        astra_roundtrip_fixture(true).await;
+    }
+
+    async fn astra_roundtrip_fixture(delta_only: bool) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let output = vec![
+            json!({"type":"reasoning","id":"rs_fixture","summary":[],"encrypted_content":"opaque-fixture"}),
+            json!({"type":"message","id":"msg_fixture","role":"assistant","status":"completed","phase":"commentary","content":[{"type":"output_text","text":"Checking","annotations":[]}]}),
+            json!({"type":"function_call","id":"fc_fixture","call_id":"call_fixture","name":"read","arguments":"{\"path\":\"README.md\"}"}),
+        ];
+        let expected_output = output.clone();
+        let server = tokio::spawn(async move {
+            let mut requests = vec![];
+            for turn in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut bytes = Vec::new();
+                let body_start = loop {
+                    let mut chunk = [0; 4096];
+                    let n = stream.read(&mut chunk).await.unwrap();
+                    assert!(n > 0);
+                    bytes.extend_from_slice(&chunk[..n]);
+                    if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let headers = String::from_utf8_lossy(&bytes[..end]);
+                        let len = headers
+                            .lines()
+                            .find_map(|l| {
+                                l.to_ascii_lowercase()
+                                    .strip_prefix("content-length: ")
+                                    .and_then(|v| v.parse::<usize>().ok())
+                            })
+                            .unwrap_or(0);
+                        if bytes.len() >= end + 4 + len {
+                            break end + 4;
+                        }
+                    }
+                };
+                assert!(bytes.starts_with(b"POST /v1/responses "));
+                requests.push(serde_json::from_slice::<Value>(&bytes[body_start..]).unwrap());
+                let current = if turn == 0 {
+                    output.clone()
+                } else {
+                    vec![
+                        json!({"type":"message","id":"msg_final","role":"assistant","phase":"final_answer","status":"completed","content":[{"type":"output_text","text":"Finished","annotations":[]}]}),
+                    ]
+                };
+                let mut events = vec![];
+                for item in &current {
+                    if item["type"] == "message" {
+                        events.push(json!({"type":"response.output_text.delta","delta":item["content"][0]["text"]}));
+                    }
+                    events.push(json!({"type":"response.output_item.done","item":item}));
+                }
+                events.push(json!({"type":"response.completed","response":{"output":current,"usage":{"input_tokens":3,"output_tokens":2}}}));
+                if delta_only && turn == 0 {
+                    events = vec![
+                        json!({"type":"response.output_text.delta","delta":"Hello"}),
+                        json!({"type":"response.done","response":{"usage":{"input_tokens":3,"output_tokens":2}}}),
+                    ];
+                }
+                let body = events
+                    .iter()
+                    .map(|e| format!("data: {e}\n\n"))
+                    .collect::<String>();
+                stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+            }
+            requests
+        });
+        let client = OpenAIClient {
+            client: reqwest::Client::new(),
+            api_key: "fixture-key".into(),
+            base_url,
+            endpoint_id: "openai".into(),
+            request_url: None,
+        };
+        let options = StreamOptions {
+            model: Some("openai:gpt-6-astra".into()),
+            ..Default::default()
+        };
+        let tools = [ToolDefinition {
+            name: "read".into(),
+            label: "Read".into(),
+            description: "Read file".into(),
+            parameters: json!({"type":"object","properties":{"path":{"type":"string"}}}),
+            capabilities: vec![],
+        }];
+        let mut first = client
+            .stream("Fixture instructions", &[], &tools, &options)
+            .await
+            .unwrap();
+        let mut raw = None;
+        let mut calls = vec![];
+        let mut text = String::new();
+        while let Some(event) = first.recv().await {
+            match event {
+                LlmEvent::TextDelta { delta } => text.push_str(&delta),
+                LlmEvent::ToolCallEnd { tool_call } => calls.push(tool_call),
+                LlmEvent::Done { message, .. } => raw = message.get("raw").cloned(),
+                _ => {}
+            }
+        }
+        let mut messages = vec![
+            LlmMessage::Assistant {
+                text: vec![text],
+                thinking: vec![],
+                tool_calls: calls,
+                raw,
+            },
+            LlmMessage::ToolResult {
+                call_id: "call_fixture|fc_fixture".into(),
+                tool_name: "read".into(),
+                content: "Fixture content".into(),
+                images: vec![],
+                is_error: false,
+                args_summary: None,
+            },
+        ];
+        if delta_only {
+            messages.pop();
+        }
+        let mut second = client
+            .stream("Fixture instructions", &messages, &tools, &options)
+            .await
+            .unwrap();
+        let mut completed = false;
+        while let Some(event) = second.recv().await {
+            completed |= matches!(event, LlmEvent::Done { .. });
+        }
+        let requests = server.await.unwrap();
+        assert!(completed);
+        let input = requests[1]["input"].as_array().unwrap();
+        if delta_only {
+            assert_eq!(input.len(), 1);
+            assert_eq!(input[0]["role"], "assistant");
+            assert_eq!(input[0]["content"][0]["text"], "Hello");
+            return;
+        }
+        assert_eq!(&input[..3], &expected_output);
+        assert_eq!(
+            input.len(),
+            4,
+            "raw replay must not duplicate assistant text or calls"
+        );
+        assert_eq!(input[3]["type"], "function_call_output");
+        assert_eq!(input[3]["call_id"], "call_fixture");
+    }
+
+    #[test]
+    fn astra_reasoning_and_responses_tool_results_preserve_operator_intent() {
+        for provider in ["openai", "openai-codex"] {
+            for (requested, effort) in [
+                (None, "low"),
+                (Some("off"), "low"),
+                (Some("none"), "low"),
+                (Some("minimal"), "low"),
+                (Some("low"), "low"),
+                (Some("medium"), "medium"),
+                (Some("high"), "high"),
+                (Some("xhigh"), "xhigh"),
+                (Some("max"), "max"),
+            ] {
+                let options = StreamOptions {
+                    reasoning: requested.map(str::to_string),
+                    ..Default::default()
+                };
+                let body = build_responses_body(
+                    provider,
+                    "gpt-6-astra",
+                    "instructions",
+                    &[],
+                    &[],
+                    &options,
+                )
+                .unwrap();
+                assert_eq!(
+                    body["reasoning"]["effort"], effort,
+                    "{provider} {requested:?}"
+                );
+                assert_eq!(body["model"], "gpt-6-astra");
+            }
+        }
+        // Astra normalization must not turn off/absent into reasoning on older models.
+        assert_eq!(model_reasoning_effort("gpt-5.5", Some("off")), None);
+        assert_eq!(model_reasoning_effort("gpt-5.5", None), None);
+        let messages = [
+            LlmMessage::Assistant {
+                text: vec![],
+                thinking: vec![],
+                tool_calls: vec![crate::bridge::WireToolCall {
+                    id: "call_fixture|fc_fixture".into(),
+                    name: "read".into(),
+                    arguments: json!({"path":"README.md"}),
+                }],
+                raw: None,
+            },
+            LlmMessage::ToolResult {
+                call_id: "call_fixture|fc_fixture".into(),
+                tool_name: "read".into(),
+                content: "fixture content".into(),
+                images: vec![],
+                is_error: false,
+                args_summary: None,
+            },
+        ];
+        let body = build_responses_body(
+            "openai",
+            "gpt-6-astra",
+            "instructions",
+            &messages,
+            &[],
+            &StreamOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(body["input"][0]["type"], "function_call");
+        assert_eq!(body["input"][0]["call_id"], "call_fixture");
+        assert_eq!(body["input"][1]["type"], "function_call_output");
+        assert_eq!(body["input"][1]["call_id"], "call_fixture");
+        assert_eq!(body["input"][1]["output"], "fixture content");
+    }
+
+    #[test]
+    fn astra_partial_continuation_cannot_shadow_text_or_tools() {
+        let reasoning =
+            json!({"type":"reasoning","id":"rs_fixture","summary":[],"encrypted_content":"opaque"});
+        for (text, tool_calls) in [
+            (vec!["Hello".into()], vec![]),
+            (
+                vec![],
+                vec![crate::bridge::WireToolCall {
+                    id: "call_fixture|fc_fixture".into(),
+                    name: "read".into(),
+                    arguments: json!({"path":"README.md"}),
+                }],
+            ),
+        ] {
+            let messages = [LlmMessage::Assistant {
+                text,
+                thinking: vec![],
+                tool_calls,
+                raw: Some(
+                    json!({"responses":{"provider":"openai","model":"gpt-6-astra","output":[reasoning]}}),
+                ),
+            }];
+            let error = build_responses_body(
+                "openai",
+                "gpt-6-astra",
+                "fixture",
+                &messages,
+                &[],
+                &StreamOptions::default(),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("incomplete or inconsistent"));
+        }
+    }
+
+    #[test]
+    fn astra_continuation_is_bounded_and_scoped_to_provider_and_wire_model() {
+        let output = vec![
+            json!({"type":"reasoning","id":"rs_fixture","encrypted_content":"private-provider-state","summary":[]}),
+        ];
+        let make_message = |provider: &str, model: &str| LlmMessage::Assistant {
+            text: vec!["Visible answer".into()],
+            thinking: vec![],
+            tool_calls: vec![],
+            raw: Some(json!({"responses":{"provider":provider,"model":model,"output":output}})),
+        };
+        for (provider, model) in [("openai-codex", "gpt-6-astra"), ("openai", "gpt-5.5")] {
+            let body = build_responses_body(
+                "openai",
+                "gpt-6-astra",
+                "instructions",
+                &[make_message(provider, model)],
+                &[],
+                &StreamOptions::default(),
+            )
+            .unwrap();
+            assert!(!body.to_string().contains("private-provider-state"));
+            assert_eq!(body["input"][0]["content"][0]["text"], "Visible answer");
+        }
+        let mut options = StreamOptions::default();
+        options
+            .extra_body
+            .insert("previous_response_id".into(), json!("foreign-response"));
+        options
+            .extra_body
+            .insert("conversation".into(), json!("foreign-conversation"));
+        let body =
+            build_responses_body("openai", "gpt-6-astra", "instructions", &[], &[], &options)
+                .unwrap();
+        assert!(body.get("previous_response_id").is_none());
+        assert!(body.get("conversation").is_none());
+        assert!(
+            validate_responses_output(&[
+                json!({"type":"message","role":"system","content":"injected"})
+            ])
+            .is_err()
+        );
+        assert!(
+            validate_responses_output(&vec![output[0].clone(); MAX_RESPONSES_OUTPUT_ITEMS + 1])
+                .is_err()
+        );
+        assert!(validate_responses_output(&[json!({"type":"reasoning","encrypted_content":"x".repeat(MAX_RESPONSES_OUTPUT_BYTES+1)})]).is_err());
+    }
+
+    #[test]
+    fn astra_codex_wire_identity_and_eligibility_error_are_explicit() {
+        assert_eq!(codex_wire_model("gpt-6-astra"), "gpt-6-astra");
+        let message = enrich_codex_error_message(
+            "gpt-6-astra",
+            400,
+            "model is not supported for this ChatGPT account",
+        );
+        assert!(message.contains("GPT-6 Astra"));
+        assert!(message.contains("eligibility"));
+        assert!(!message.contains("upgrade your Codex CLI"));
+    }
+
+    #[test]
+    fn fresh_provider_zen_has_anonymous_transport_without_paid_fallback() {
+        assert_eq!(
+            compat_base_url("opencode-zen"),
+            Some("https://opencode.ai/zen")
+        );
+        assert!(OpenAICompatClient::from_env("opencode-zen").is_some());
+        assert_eq!(
+            fallback_order_for_model("opencode-zen:big-pickle"),
+            vec!["opencode-zen"]
+        );
+        assert!(
+            crate::model_registry::ModelRegistry::global()
+                .model_info("opencode-zen:big-pickle")
+                .is_some()
+        );
+    }
 
     #[test]
     fn copilot_environment_token_metadata_uses_declared_oauth_exchange_kind() {
@@ -6246,6 +6967,12 @@ mod tests {
 
     #[test]
     fn ollama_think_value_uses_string_levels_for_gpt_oss() {
+        for effort in ["xhigh", "max"] {
+            assert_eq!(
+                ollama_think_value("gpt-oss:20b", Some(effort)),
+                Some(json!("high"))
+            );
+        }
         assert_eq!(
             ollama_think_value("gpt-oss:20b", Some("minimal")),
             Some(Value::String("low".into()))
@@ -6294,6 +7021,7 @@ mod tests {
         assert_eq!(openai_reasoning_effort(Some("medium")), Some("medium"));
         assert_eq!(openai_reasoning_effort(Some("high")), Some("high"));
         assert_eq!(openai_reasoning_effort(Some("xhigh")), Some("xhigh"));
+        assert_eq!(openai_reasoning_effort(Some("max")), Some("high"));
         assert_eq!(openai_reasoning_effort(Some("off")), None);
         assert_eq!(openai_reasoning_effort(Some("unknown")), Some("medium"));
     }
@@ -6302,6 +7030,7 @@ mod tests {
     fn anthropic_reasoning_helpers_support_adaptive_and_manual_modes() {
         assert_eq!(anthropic_manual_budget_tokens(Some("minimal")), Some(1_024));
         assert_eq!(anthropic_manual_budget_tokens(Some("high")), Some(50_000));
+        assert_eq!(anthropic_manual_budget_tokens(Some("max")), Some(50_000));
         assert_eq!(anthropic_manual_budget_tokens(Some("off")), None);
         assert!(anthropic_supports_adaptive_thinking("claude-sonnet-4-6"));
         assert!(anthropic_supports_adaptive_thinking(

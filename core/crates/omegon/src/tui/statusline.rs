@@ -341,6 +341,18 @@ impl SessionRow {
     }
 
     fn project_runtime_warning_row(&self) -> crate::surfaces::inline::InlineRow<String> {
+        if !self.provider_connected {
+            return crate::surfaces::inline::InlineRow::new(
+                vec![crate::surfaces::inline::InlineCell::new(
+                    "Not connected".into(),
+                    crate::surfaces::inline::InlineCellRole::Label,
+                )],
+                vec![crate::surfaces::inline::InlineCell::new(
+                    "/connect".into(),
+                    crate::surfaces::inline::InlineCellRole::Value,
+                )],
+            );
+        }
         let connection = if self.provider_connected {
             "online"
         } else {
@@ -782,7 +794,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_warning_row_projection_preserves_left_identity_and_right_metadata() {
+    fn disconnected_runtime_warning_row_omits_model_and_legacy_posture_claims() {
         let sl = SessionRow {
             runtime_brand: "omegon".into(),
             posture: "agent".into(),
@@ -796,14 +808,9 @@ mod tests {
         };
 
         let row = sl.project_runtime_warning_row();
-        assert_eq!(row.left[0].text, "runtime");
-        assert_eq!(row.left[1].text, "omegon");
-        assert!(
-            row.left
-                .iter()
-                .any(|cell| cell.text == "provider anthropic offline")
-        );
-        assert!(row.right.iter().any(|cell| cell.text == "authz local"));
-        assert!(row.right.iter().any(|cell| cell.text == "think minimal"));
+        assert_eq!(row.left.len(), 1);
+        assert_eq!(row.left[0].text, "Not connected");
+        assert_eq!(row.right.len(), 1);
+        assert_eq!(row.right[0].text, "/connect");
     }
 }

@@ -34,6 +34,8 @@ pub enum AuthMethod {
     OAuth,
     /// Direct API key input
     ApiKey,
+    /// Public hosted inference explicitly selected by the operator.
+    Anonymous,
     /// Dynamic CLI tool execution
     Dynamic,
 }
@@ -177,6 +179,15 @@ pub static PROVIDERS: &[ProviderCredential] = &[
         description: "OAuth — Gemini models via Google Antigravity IDE subscription",
     },
     ProviderCredential {
+        id: "opencode-zen",
+        auth_key: "opencode-zen",
+        display_name: "OpenCode Zen Free",
+        env_vars: &[],
+        oauth_env_vars: &[],
+        auth_method: AuthMethod::Anonymous,
+        description: "Free hosted models — no account; model data terms apply",
+    },
+    ProviderCredential {
         id: "opencode-go",
         auth_key: "opencode-go",
         display_name: "OpenCode Go",
@@ -302,6 +313,7 @@ pub fn canonical_provider_id(id: &str) -> &str {
         "github-copilot" | "copilot" => "github-copilot",
         "openrouter" => "openrouter",
         "opencode-go" => "opencode-go",
+        "opencode-zen" | "zen" => "opencode-zen",
         "perplexity" => "perplexity",
         "dwarfstar" => "dwarfstar",
         "ollama-cloud" => "ollama-cloud",
@@ -377,7 +389,11 @@ pub fn endpoint_secret_refs(provider_id: &str) -> Vec<String> {
 pub fn operator_auth_provider_ids() -> Vec<&'static str> {
     PROVIDERS
         .iter()
-        .filter(|provider| provider.id != "ollama" && provider.id != "ollama-cloud")
+        .filter(|provider| {
+            provider.id != "ollama"
+                && provider.id != "ollama-cloud"
+                && provider.auth_method != AuthMethod::Anonymous
+        })
         .map(|provider| provider.id)
         .collect()
 }

@@ -183,6 +183,13 @@ impl FooterData {
         frame.render_widget(bg_block, area);
 
         if area.height < 4 || area.width < 20 {
+            if !self.provider_connected {
+                frame.render_widget(
+                    Paragraph::new("Not connected · /connect").style(t.style_dim()),
+                    area,
+                );
+                return;
+            }
             // Ultra-narrow fallback
             let model_short = short_model(&self.model_id);
             let line = Line::from(vec![

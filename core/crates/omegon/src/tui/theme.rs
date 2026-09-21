@@ -1,16 +1,15 @@
-//! TUI Theme — Alpharius color system for ratatui.
-//!
-//! Loads from `themes/alpharius.json` when available, falls back to
-//! compiled-in defaults. The JSON file is the source of truth — it
-//! defines `vars` (base tokens) and `colors` (semantic mappings).
-//!
-//! To add a new theme, implement the Theme trait with different values.
+//! Semantic TUI styles. The default inherits the terminal's foreground,
+//! background and ANSI palette. Legacy palettes remain available for explicit
+//! theme integration; startup does not discover or load a theme file.
 
 use ratatui::style::{Color, Modifier, Style};
 use std::collections::HashMap;
 
 /// Semantic color slots for the TUI.
 pub trait Theme: Send + Sync {
+    /// Resolve fixed-color legacy widgets after all surfaces and overlays render.
+    fn finish_frame(&self, _buffer: &mut ratatui::buffer::Buffer) {}
+
     // ─── Core palette ───────────────────────────────────────────────
     fn bg(&self) -> Color;
     fn card_bg(&self) -> Color;
@@ -303,7 +302,7 @@ impl Theme for JsonTheme {
     }
 }
 
-/// Hardcoded fallback — used when alpharius.json is not found.
+/// Legacy palette retained for explicit theme integration and reference tests.
 pub struct Alpharius;
 
 impl Theme for Alpharius {
@@ -357,45 +356,142 @@ impl Theme for Alpharius {
     }
 }
 
-/// Load the theme — try alpharius.json first, fall back to hardcoded.
-pub fn default_theme() -> Box<dyn Theme> {
-    // Search for alpharius.json relative to cwd
-    let search_paths = [
-        std::path::PathBuf::from("themes/alpharius.json"),
-        std::path::PathBuf::from("../themes/alpharius.json"),
-    ];
+/// Use SGR default colors for surfaces and the terminal's ANSI palette for signals.
+pub struct TerminalTheme;
 
-    // Also check relative to the project root via .git
-    let mut project_root = std::env::current_dir().unwrap_or_default();
-    for _ in 0..5 {
-        if project_root.join(".git").exists() || project_root.join("themes/alpharius.json").exists()
-        {
-            let theme_path = project_root.join("themes/alpharius.json");
-            if let Some(theme) = JsonTheme::load(&theme_path) {
-                tracing::info!(path = %theme_path.display(), "loaded theme from JSON");
-                return Box::new(theme);
+impl Theme for TerminalTheme {
+    fn finish_frame(&self, buffer: &mut ratatui::buffer::Buffer) {
+        for cell in &mut buffer.content {
+            if matches!(cell.fg, Color::Rgb(..) | Color::Indexed(16..=255)) {
+                cell.set_fg(Color::Reset);
             }
-            break;
-        }
-        if !project_root.pop() {
-            break;
-        }
-    }
-
-    for path in &search_paths {
-        if let Some(theme) = JsonTheme::load(path) {
-            tracing::info!(path = %path.display(), "loaded theme from JSON");
-            return Box::new(theme);
+            if matches!(cell.bg, Color::Rgb(..) | Color::Indexed(16..=255)) {
+                cell.set_bg(Color::Reset);
+            }
         }
     }
 
-    tracing::debug!("using hardcoded Alpharius theme (alpharius.json not found)");
-    Box::new(Alpharius)
+    fn bg(&self) -> Color {
+        Color::Reset
+    }
+    fn card_bg(&self) -> Color {
+        Color::Reset
+    }
+    fn surface_bg(&self) -> Color {
+        Color::Reset
+    }
+    fn border(&self) -> Color {
+        Color::Reset
+    }
+    fn fg(&self) -> Color {
+        Color::Reset
+    }
+    fn accent(&self) -> Color {
+        Color::Reset
+    }
+    fn accent_muted(&self) -> Color {
+        Color::Reset
+    }
+    fn accent_bright(&self) -> Color {
+        Color::Reset
+    }
+    fn footer_bg(&self) -> Color {
+        Color::Reset
+    }
+    fn user_msg_bg(&self) -> Color {
+        Color::Reset
+    }
+    fn tool_success_bg(&self) -> Color {
+        Color::Reset
+    }
+    fn tool_error_bg(&self) -> Color {
+        Color::Reset
+    }
+    fn diff_added_bg(&self) -> Color {
+        Color::Reset
+    }
+    fn diff_removed_bg(&self) -> Color {
+        Color::Reset
+    }
+    fn border_dim(&self) -> Color {
+        Color::DarkGray
+    }
+    fn muted(&self) -> Color {
+        Color::DarkGray
+    }
+    fn dim(&self) -> Color {
+        Color::DarkGray
+    }
+    fn success(&self) -> Color {
+        Color::Green
+    }
+    fn error(&self) -> Color {
+        Color::Red
+    }
+    fn warning(&self) -> Color {
+        Color::Yellow
+    }
+    fn caution(&self) -> Color {
+        Color::Yellow
+    }
+    fn style_dim(&self) -> Style {
+        Style::default()
+            .fg(Color::Reset)
+            .add_modifier(Modifier::DIM)
+    }
+    fn style_muted(&self) -> Style {
+        self.style_dim()
+    }
+}
+
+pub fn default_theme() -> Box<dyn Theme> {
+    Box::new(TerminalTheme)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_default_preserves_terminal_colors() {
+        let theme = default_theme();
+        for color in [
+            theme.bg(),
+            theme.fg(),
+            theme.surface_bg(),
+            theme.card_bg(),
+            theme.footer_bg(),
+            theme.tool_error_bg(),
+            theme.diff_added_bg(),
+            theme.diff_removed_bg(),
+            theme.accent(),
+            theme.accent_muted(),
+            theme.accent_bright(),
+        ] {
+            assert_eq!(color, Color::Reset);
+        }
+        assert!(theme.style_dim().add_modifier.contains(Modifier::DIM));
+        assert!(
+            !theme
+                .intentional_backgrounds()
+                .iter()
+                .any(|c| matches!(c, Color::Rgb(..)))
+        );
+    }
+
+    #[test]
+    fn terminal_default_resolves_fixed_colors_without_erasing_signals() {
+        let theme = default_theme();
+        let mut buffer = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 2, 1));
+        buffer[(0, 0)]
+            .set_fg(Color::Rgb(42, 180, 200))
+            .set_bg(Color::Indexed(232));
+        buffer[(1, 0)].set_fg(Color::Red).set_bg(Color::Reset);
+        theme.finish_frame(&mut buffer);
+        assert_eq!(buffer[(0, 0)].fg, Color::Reset);
+        assert_eq!(buffer[(0, 0)].bg, Color::Reset);
+        assert_eq!(buffer[(1, 0)].fg, Color::Red);
+    }
 
     #[test]
     fn parse_hex_works() {

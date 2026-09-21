@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "lastReviewed": "2026-09-02",
+  "lastReviewed": "2026-09-07",
   "_comment_inference": [
     "Inference defaults for dynamically discovered models (Ollama Cloud, local Ollama).",
     "When a model is not in the 'models' array, these heuristics are used.",
@@ -51,8 +51,8 @@
   },
   "defaults": {
     "anthropic": "claude-fable-5-1",
-    "openai": "gpt-5.6",
-    "openai-codex": "gpt-5.6",
+    "openai": "gpt-6-astra",
+    "openai-codex": "gpt-6-astra",
     "groq": "llama-3.3-70b-versatile",
     "xai": "grok-3",
     "mistral": "mistral-small-latest",
@@ -71,8 +71,8 @@
   "grades": {
     "S": {
       "anthropic": "claude-fable-5-1",
-      "openai": "gpt-5.6",
-      "openai-codex": "gpt-5.6",
+      "openai": "gpt-6-astra",
+      "openai-codex": "gpt-6-astra",
       "google": "gemini-3.1-pro-preview",
       "google-antigravity": "gemini-3.1-pro-preview",
       "openrouter": "anthropic/claude-opus-4-7",
@@ -112,6 +112,26 @@
   },
   "endpoints": [
     {
+      "id": "opencode-zen",
+      "displayName": "OpenCode Zen Free",
+      "class": "upstream",
+      "protocol": "openAiCompatible",
+      "baseUrl": null,
+      "authScheme": {
+        "kind": "none"
+      },
+      "enabled": true,
+      "discoveryProtocol": "static",
+      "openAiCompatibleProfile": {
+        "supportsChatCompletions": true,
+        "supportsResponsesApi": false,
+        "supportsStreaming": true,
+        "supportsTools": true,
+        "docsUrl": "https://opencode.ai/docs/zen",
+        "verifiedAt": "2026-09-07"
+      }
+    },
+    {
       "id": "anthropic",
       "displayName": "Anthropic",
       "class": "upstream",
@@ -137,15 +157,15 @@
       "enabled": true,
       "openAiCompatibleProfile": {
         "supportsChatCompletions": true,
-        "supportsResponsesApi": false,
+        "supportsResponsesApi": true,
         "supportsStreaming": true,
         "supportsTools": true,
         "unsupportedRequestFields": [],
         "requiredHeaders": [],
         "optionalHeaders": [],
         "quirks": [],
-        "docsUrl": "https://platform.openai.com/docs/api-reference/chat/create",
-        "verifiedAt": "2026-06-11"
+        "docsUrl": "https://developers.openai.com/api/docs/guides/latest-model",
+        "verifiedAt": "2026-09-07"
       },
       "discoveryProtocol": "openAiModels"
     },
@@ -418,6 +438,18 @@
   ],
   "routes": [
     {
+      "provider": "openai-codex",
+      "modelIdPattern": "gpt-6-astra",
+      "contextCeiling": 872000,
+      "grade": "S"
+    },
+    {
+      "provider": "openai",
+      "modelIdPattern": "gpt-6-astra",
+      "contextCeiling": 1050000,
+      "grade": "S"
+    },
+    {
       "provider": "anthropic",
       "modelIdPattern": "claude-fable-*",
       "contextCeiling": 1000000,
@@ -648,6 +680,62 @@
   ],
   "models": [
     {
+      "id": "mimo-v2.5-free",
+      "provider": "opencode-zen",
+      "name": "MiMo V2.5 Free",
+      "contextInput": 200000,
+      "contextOutput": 32000,
+      "capabilities": [
+        "instruction",
+        "coding",
+        "tools",
+        "reasoning"
+      ],
+      "inputModalities": [
+        "text"
+      ],
+      "outputModalities": [
+        "text"
+      ],
+      "supportsReasoning": true,
+      "description": "Anonymous free OpenCode Zen route; prompts and completions may be used to improve the model. Availability is temporary.",
+      "executionClass": "broker-cloud",
+      "clientRequirements": {
+        "anonymous": true,
+        "inputCostPerMillion": 0,
+        "outputCostPerMillion": 0,
+        "termsUrl": "https://opencode.ai/docs/zen#privacy"
+      }
+    },
+    {
+      "id": "big-pickle",
+      "provider": "opencode-zen",
+      "name": "Big Pickle",
+      "contextInput": 160000,
+      "contextOutput": 32000,
+      "capabilities": [
+        "instruction",
+        "coding",
+        "tools",
+        "reasoning"
+      ],
+      "inputModalities": [
+        "text"
+      ],
+      "outputModalities": [
+        "text"
+      ],
+      "supportsReasoning": true,
+      "description": "Anonymous free OpenCode Zen route; prompts and completions may be used to improve the model. Availability is temporary.",
+      "executionClass": "broker-cloud",
+      "clientRequirements": {
+        "anonymous": true,
+        "inputCostPerMillion": 0,
+        "outputCostPerMillion": 0,
+        "termsUrl": "https://opencode.ai/docs/zen#privacy"
+      }
+    },
+    {
       "id": "claude-fable-5-1",
       "provider": "anthropic",
       "name": "Claude Fable 5.1",
@@ -845,6 +933,29 @@
       "description": "Fastest, cheapest Claude",
       "producer": "anthropic",
       "executionClass": "api-cloud"
+    },
+    {
+      "id": "gpt-6-astra",
+      "provider": "openai",
+      "name": "GPT-6 Astra",
+      "contextInput": 1050000,
+      "contextOutput": 128000,
+      "capabilities": [
+        "reasoning",
+        "vision",
+        "coding",
+        "tools"
+      ],
+      "supportsReasoning": true,
+      "description": "OpenAI frontier reasoning and coding via Responses; account availability applies",
+      "conceptualModelId": "gpt-6-astra",
+      "producer": "openai",
+      "executionClass": "api-cloud",
+      "contextPricingNotice": {
+        "thresholdTokens": 272000,
+        "inputMultiplier": 2.0,
+        "outputMultiplier": 1.5
+      }
     },
     {
       "id": "gpt-5.6",
@@ -1271,6 +1382,24 @@
       "conceptualModelId": "claude-opus-4.7",
       "producer": "anthropic",
       "executionClass": "broker-cloud"
+    },
+    {
+      "id": "gpt-6-astra",
+      "provider": "openai-codex",
+      "name": "GPT-6 Astra",
+      "contextInput": 872000,
+      "contextOutput": 128000,
+      "capabilities": [
+        "reasoning",
+        "vision",
+        "coding",
+        "tools"
+      ],
+      "supportsReasoning": true,
+      "description": "GPT-6 Astra via native ChatGPT/Codex OAuth; 872k maximum context from the current Codex catalog (272k upstream default). Account and workspace availability apply.",
+      "conceptualModelId": "gpt-6-astra",
+      "producer": "openai",
+      "executionClass": "subscription-cloud"
     },
     {
       "id": "gpt-5.6",

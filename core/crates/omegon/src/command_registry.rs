@@ -392,7 +392,7 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
     BuiltinCommandSpec::cli_acp_state_changing(
         "think",
         "set thinking level",
-        &["off", "minimal", "low", "medium", "high"],
+        &["off", "minimal", "low", "medium", "high", "xhigh", "max"],
     )
     .panel(),
     BuiltinCommandSpec::cli_acp_state_changing(

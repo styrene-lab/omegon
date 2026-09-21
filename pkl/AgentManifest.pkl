@@ -81,8 +81,8 @@ class SettingsConfig {
   /// Default model (e.g., "anthropic:claude-sonnet-4-6").
   model: String?
 
-  /// Thinking level: off, minimal, low, medium, high.
-  thinking_level: ("off"|"minimal"|"low"|"medium"|"high")?
+  /// Thinking level: off, minimal, low, medium, high, xhigh, max.
+  thinking_level: ("off"|"minimal"|"low"|"medium"|"high"|"xhigh"|"max")?
 
   /// Context class: compact, standard, extended, massive. Legacy aliases squad, maniple, clan, legion are accepted by Omegon.
   context_class: ("compact"|"standard"|"extended"|"massive"|"squad"|"maniple"|"clan"|"legion")?
@@ -95,7 +95,7 @@ class SettingsConfig {
 class PhaseConfig {
   model: String?
   max_turns: Int(this > 0)?
-  thinking_level: ("off"|"minimal"|"low"|"medium"|"high")?
+  thinking_level: ("off"|"minimal"|"low"|"medium"|"high"|"xhigh"|"max")?
   context_class: ("compact"|"standard"|"extended"|"massive"|"squad"|"maniple"|"clan"|"legion")?
   persona: String?
 }

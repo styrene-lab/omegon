@@ -25,7 +25,7 @@ displayName: String(length > 0)?
 lastUsedModel: ModelRef?
 
 /// Thinking level for reasoning-capable models.
-thinkingLevel: ("off"|"minimal"|"low"|"medium"|"high")?
+thinkingLevel: ("off"|"minimal"|"low"|"medium"|"high"|"xhigh"|"max")?
 
 /// Maximum agent turns per invocation.
 maxTurns: Int(this > 0)?

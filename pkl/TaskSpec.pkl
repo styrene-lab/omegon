@@ -57,7 +57,7 @@ class AgentConfig {
   posture: ("explorator"|"fabricator"|"architect"|"devastator")?
 
   /// Thinking level.
-  thinking: ("off"|"minimal"|"low"|"medium"|"high")?
+  thinking: ("off"|"minimal"|"low"|"medium"|"high"|"xhigh"|"max")?
 
   /// Persona name.
   persona: String?

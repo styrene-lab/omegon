@@ -245,6 +245,9 @@ pub(crate) struct LoopRoute {
 #[async_trait::async_trait]
 pub(crate) trait LoopRouteSetupContract: Send + Sync {
     async fn serving_model(&self) -> Option<String>;
+    async fn invalidate(&self, _model: &str, _detail: &str) -> bool {
+        false
+    }
     async fn prepare(
         &self,
         route: &LoopRoute,
@@ -268,6 +271,13 @@ impl LoopRouteSetup {
         match self.adapter.as_ref() {
             Some(adapter) => adapter.serving_model().await,
             None => None,
+        }
+    }
+
+    pub(crate) async fn invalidate(&self, model: &str, detail: &str) -> bool {
+        match self.adapter.as_ref() {
+            Some(adapter) => adapter.invalidate(model, detail).await,
+            None => false,
         }
     }
 
@@ -827,7 +837,14 @@ impl LoopRouteContract for LoopRoutePort<'_> {
                     response_facts: request.response_facts,
                 },
             )
-            .await?;
+            .await;
+        let dispatch = match dispatch {
+            Ok(dispatch) => dispatch,
+            Err(error) => {
+                self.reconcile_route_failure(&error).await;
+                return Err(error);
+            }
+        };
         let stop_notice = self
             .service
             .stop_notice(&provider_route, &dispatch.message.raw)
@@ -889,6 +906,23 @@ impl LoopRouteContract for LoopRoutePort<'_> {
 }
 
 impl LoopRoutePort<'_> {
+    async fn reconcile_route_failure(&self, error: &anyhow::Error) {
+        let Some(unavailable) = error.downcast_ref::<crate::bridge::ProviderRouteUnavailable>()
+        else {
+            return;
+        };
+        if self
+            .setup
+            .invalidate(&unavailable.model, &unavailable.message)
+            .await
+            && let Some(settings) = &self.policy.settings
+            && let Ok(mut settings) = settings.lock()
+            && settings.model == unavailable.model
+        {
+            settings.provider_connected = false;
+        }
+    }
+
     fn provider_route(&self, route: &LoopRoute) -> crate::provider_route_service::LoopRoute {
         let options = self
             .active_options
@@ -2588,5 +2622,108 @@ mod tests {
         let error = route.validate().await.unwrap_err();
 
         assert!(error.to_string().contains("no serving identity"));
+    }
+    #[tokio::test]
+    async fn zen_withdrawal_dispatch_disconnects_authority_and_settings() {
+        struct Withdrawn;
+        #[async_trait::async_trait]
+        impl LlmBridge for Withdrawn {
+            async fn stream(
+                &self,
+                _: &str,
+                _: &[crate::bridge::LlmMessage],
+                _: &[omegon_traits::ToolDefinition],
+                _: &crate::bridge::StreamOptions,
+            ) -> anyhow::Result<tokio::sync::mpsc::Receiver<crate::bridge::LlmEvent>> {
+                Err(crate::bridge::ProviderRouteUnavailable {
+                    model: "opencode-zen:big-pickle".into(),
+                    message: "Free route withdrawn".into(),
+                }
+                .into())
+            }
+        }
+        let model = "opencode-zen:big-pickle";
+        let (events, mut rx) = broadcast::channel(16);
+        let controller = std::sync::Arc::new(crate::route::RouteController::new(
+            crate::route::ProviderRoute::Serving {
+                model: model.into(),
+            },
+            Box::new(crate::bridge::NullBridge),
+            Some(events.clone()),
+        ));
+        let settings = crate::settings::shared(model);
+        settings.lock().unwrap().provider_connected = true;
+        let port = LoopRoutePort {
+            leased_bridge: &Withdrawn,
+            service: crate::session_execution::boot_execution_binding().route_service(),
+            setup: crate::provider_route_service::loop_route_setup(Some(controller.clone()), None),
+            policy: crate::provider_route_service::LoopRoutePolicy {
+                selected_model: model.into(),
+                bridge_model: None,
+                extended_context: false,
+                settings: Some(settings.clone()),
+            },
+            baseline_options: std::sync::Mutex::new(None),
+            active_options: std::sync::Mutex::new(None),
+        };
+        // Similar prose or a transient error must not invalidate a route.
+        port.reconcile_route_failure(&anyhow::anyhow!("Free route withdrawn 429"))
+            .await;
+        assert!(settings.lock().unwrap().provider_connected);
+        assert_eq!(controller.snapshot().await.serving_model(), Some(model));
+        let route = port.startup_route().await;
+        let scope = crate::invocation_service::InvocationScope::default();
+        let error = port
+            .dispatch(LoopRouteRequest {
+                route: &route,
+                system_prompt: "fixture",
+                messages: &[],
+                tools: &[],
+                events: &events,
+                max_retries: 3,
+                retry_delay_ms: 1,
+                cancel_keeps_prompt: None,
+                scope: &scope,
+                step_id: uuid::Uuid::new_v4(),
+                semantic_request: None,
+                response_facts: None,
+            })
+            .await
+            .err()
+            .unwrap();
+        assert!(error.is::<crate::bridge::ProviderRouteUnavailable>());
+        assert!(controller.snapshot().await.serving_model().is_none());
+        assert!(!settings.lock().unwrap().provider_connected);
+        assert_eq!(settings.lock().unwrap().model, model);
+        let mut disconnected = false;
+        while let Ok(event) = rx.try_recv() {
+            if let omegon_traits::AgentEvent::RouteChanged { state, serving, .. } = event {
+                disconnected |= state == "disconnected" && serving.is_none();
+            }
+        }
+        assert!(
+            disconnected,
+            "authoritative route invalidation must notify frontends"
+        );
+    }
+
+    #[tokio::test]
+    async fn zen_late_withdrawal_cannot_disconnect_replacement_route() {
+        let controller = crate::route::RouteController::new(
+            crate::route::ProviderRoute::Serving {
+                model: "openai:gpt-5.6".into(),
+            },
+            Box::new(crate::bridge::NullBridge),
+            None,
+        );
+        assert!(
+            !controller
+                .invalidate_serving_model("opencode-zen:big-pickle", "Withdrawn")
+                .await
+        );
+        assert_eq!(
+            controller.snapshot().await.serving_model(),
+            Some("openai:gpt-5.6")
+        );
     }
 }

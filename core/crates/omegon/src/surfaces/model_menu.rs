@@ -69,8 +69,8 @@ pub fn provider_seeds(provider_id: &str) -> &'static [&'static str] {
             "claude-sonnet-5",
             "claude-haiku-4-5-20251001",
         ],
-        "openai" => &["gpt-5.6", "gpt-5-mini", "gpt-4.1"],
-        "openai-codex" => &["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+        "openai" => &["gpt-6-astra", "gpt-5.6", "gpt-5-mini"],
+        "openai-codex" => &["gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna"],
         "github-copilot" => &["gpt-5.6-sol", "claude-fable-5", "gpt-5.4-mini"],
         "ollama-cloud" => &["gpt-oss:120b", "qwen3.5:397b", "kimi-k3"],
         "moonshot" => &["kimi-k3", "kimi-k2.7-code", "kimi-k2.6"],
@@ -279,6 +279,44 @@ mod tests {
     #[test]
     fn anthropic_shortlist_uses_fable_5_1() {
         assert_eq!(provider_seeds("anthropic")[0], "claude-fable-5-1");
+    }
+
+    #[test]
+    fn astra_and_fable_are_visible_in_default_connected_shortlists() {
+        let registry = crate::model_registry::ModelRegistry::global();
+        let mut snapshot = ModelMenuSnapshot::default();
+        for provider in ["anthropic", "openai", "openai-codex"] {
+            snapshot.providers.insert(
+                provider.into(),
+                registry
+                    .models_for_provider(provider)
+                    .into_iter()
+                    .map(|model| ModelMenuModelSnapshot {
+                        id: format!("{provider}:{}", model.id),
+                        name: model.name.clone(),
+                        description: model.description.clone(),
+                        context_input: model.context_input,
+                        capabilities: model.capabilities.clone(),
+                        available: true,
+                    })
+                    .collect(),
+            );
+        }
+        let projection = project_model_menu(&snapshot, "");
+        for route in [
+            "anthropic:claude-fable-5-1",
+            "openai:gpt-6-astra",
+            "openai-codex:gpt-6-astra",
+        ] {
+            assert!(
+                projection
+                    .favorite_groups
+                    .iter()
+                    .flat_map(|group| &group.models)
+                    .any(|model| model.route_id == route && model.selectable && model.seeded),
+                "frontier route missing from the default shortlist: {route}"
+            );
+        }
     }
 
     #[test]

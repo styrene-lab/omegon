@@ -14,6 +14,7 @@ mod agent_events;
 mod auspex;
 mod auth_menu_projection;
 pub mod command_surfaces;
+mod connection_discovery;
 pub mod conv_widget;
 pub mod conversation;
 pub mod conversation_projection;
@@ -557,6 +558,7 @@ struct App {
     previous_harness_status: Option<crate::status::HarnessStatus>,
     /// Receiver for in-process operator-visible smoke-test events.
     smoke_event_rx: Option<std::sync::mpsc::Receiver<AgentEvent>>,
+    free_model_discovery: Option<connection_discovery::FreeModelDiscovery>,
     /// Startup capability tier detected at startup by systems check probes.
     pub capability_grade: Option<crate::startup::CapabilityTier>,
     /// Tutorial state — active when running /tutorial (lesson-based).
@@ -693,10 +695,12 @@ fn render_runtime_queue_info_line(
 }
 
 fn editor_height_for(editor: &Editor, main_area: Rect) -> u16 {
-    let content_width = main_area.width.saturating_sub(2).max(1);
+    let content_width = main_area.width.saturating_sub(4).max(1);
     let editor_rows = editor.visual_line_count(content_width) as u16;
     let max_editor = (main_area.height * 40 / 100).clamp(5, 20);
-    (editor_rows + 2).clamp(3, max_editor) // +2 for border
+    // A plain composer has a top and bottom border; contextual modes use
+    // the second row for their action hint instead.
+    (editor_rows + 2).clamp(3, max_editor)
 }
 
 enum CommandAdmission {
@@ -732,39 +736,6 @@ impl App {
             .or_else(|| registry.infer_grade(model_provider, model))
             .map(str::to_string)
             .unwrap_or_else(|| fallback.to_string())
-    }
-
-    fn context_class_tag(class: crate::settings::ContextClass) -> &'static str {
-        match class {
-            crate::settings::ContextClass::Compact => "cmp",
-            crate::settings::ContextClass::Standard => "std",
-            crate::settings::ContextClass::Extended => "ext",
-            crate::settings::ContextClass::Massive => "msv",
-        }
-    }
-
-    fn context_fill_bar(percent: f32) -> String {
-        let percent = percent.clamp(0.0, 100.0);
-        let filled = ((percent / 100.0) * 8.0).round().clamp(0.0, 8.0) as usize;
-        format!("▕{}{}▏", "█".repeat(filled), "░".repeat(8 - filled))
-    }
-
-    fn editor_context_widget(
-        actual: crate::settings::ContextClass,
-        context_window: usize,
-        _estimated_tokens: usize,
-        context_percent: f32,
-    ) -> String {
-        let class = Self::context_class_tag(actual);
-        let capacity = if context_window > 0 {
-            widgets::format_tokens(context_window)
-        } else {
-            widgets::format_tokens(actual.nominal_tokens())
-        };
-        let percent = context_percent.clamp(0.0, 100.0).round() as u8;
-
-        let bar = Self::context_fill_bar(context_percent);
-        format!("ctx:{class}@{capacity} {bar} {percent}%")
     }
 
     fn render_engine_status_row(&self, area: Rect, frame: &mut Frame, t: &dyn theme::Theme) {
@@ -1010,6 +981,7 @@ impl App {
             operator_events: std::collections::VecDeque::new(),
             previous_harness_status: None,
             smoke_event_rx: None,
+            free_model_discovery: None,
             capability_grade: None,
             tutorial: None,
             tutorial_overlay: None,
@@ -4140,20 +4112,37 @@ impl App {
     }
 
     fn provider_route_snapshot(&self) -> auth_menu_projection::ProviderRouteSnapshot {
-        let settings_model = self.settings().model.clone();
+        let settings = self.settings();
         let selected_provider = self
             .route_selected_model
             .as_deref()
-            .or_else(|| (!settings_model.is_empty()).then_some(settings_model.as_str()))
-            .map(crate::providers::infer_provider_id);
-        let serving_provider = self
-            .route_serving_model
-            .as_deref()
             .or_else(|| {
-                (!self.footer_data.model_id.is_empty())
-                    .then_some(self.footer_data.model_id.as_str())
+                self.route_state
+                    .is_none()
+                    .then_some(settings.model.as_str())
             })
+            .map(str::trim)
+            .filter(|model| !model.is_empty())
             .map(crate::providers::infer_provider_id);
+        // A known disconnected route must not borrow an old footer model. Until
+        // the first route event, bridge readiness permits the legacy fallback.
+        let serving_provider = if matches!(
+            self.route_state.as_deref(),
+            None | Some("serving" | "fallback")
+        ) {
+            self.route_serving_model
+                .as_deref()
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+                .or_else(|| {
+                    (settings.provider_connected && self.route_state.is_none())
+                        .then_some(self.footer_data.model_id.trim())
+                        .filter(|model| !model.is_empty())
+                })
+                .map(crate::providers::infer_provider_id)
+        } else {
+            None
+        };
         auth_menu_projection::ProviderRouteSnapshot {
             selected_provider,
             serving_provider,
@@ -4207,8 +4196,17 @@ impl App {
                 .map(crate::auth::provider_status_projection)
                 .collect(),
             route: self.provider_route_snapshot(),
-            selected_model: self.route_selected_model.clone(),
-            serving_model: self.route_serving_model.clone(),
+            selected_model: self
+                .route_selected_model
+                .clone()
+                .filter(|model| !model.trim().is_empty()),
+            serving_model: self.route_serving_model.clone().filter(|model| {
+                !model.trim().is_empty()
+                    && matches!(
+                        self.route_state.as_deref(),
+                        None | Some("serving" | "fallback")
+                    )
+            }),
             route_warning: self.footer_data.route_warning.clone(),
         }
     }
@@ -4253,10 +4251,14 @@ impl App {
                 .route_selected_model
                 .as_deref()
                 .unwrap_or(&selected_model);
-            let serving = self
-                .route_serving_model
-                .as_deref()
-                .unwrap_or(&self.footer_data.model_id);
+            let serving = if self.provider_route_snapshot().serving_provider.is_some() {
+                self.route_serving_model
+                    .as_deref()
+                    .filter(|model| !model.trim().is_empty())
+                    .unwrap_or(&self.footer_data.model_id)
+            } else {
+                ""
+            };
             summary.push_str(&format!(
                 "
 route: {route_state} · selected: {selected}"
@@ -5923,6 +5925,19 @@ warning: {warning}"
     }
 
     async fn submit_editor_buffer(&mut self, command_tx: &OperatorCommandTx) {
+        // Inspect before consuming editor tokens so connection discovery preserves
+        // attachment positions, collapsed pastes, and the operator's cursor.
+        let draft = self.editor.render_text();
+        let login_pending = self.login_prompt_tx.try_lock().is_ok_and(|tx| tx.is_some());
+        if !self.settings().provider_connected
+            && !draft.trim().is_empty()
+            && !draft.starts_with('/')
+            && !draft.trim_start().starts_with('!')
+            && !login_pending
+        {
+            self.open_auth_menu();
+            return;
+        }
         let (raw_text, attachments) = self.editor.take_submission();
         if raw_text.is_empty() && attachments.is_empty() {
             if self.awaiting_continuation && !self.agent_active {
@@ -6026,6 +6041,14 @@ warning: {warning}"
         }
 
         if text.is_empty() && attachments.is_empty() {
+            return;
+        }
+        if !self.settings().provider_connected {
+            self.editor.set_text(&raw_text);
+            for path in attachments {
+                self.editor.insert_attachment(path);
+            }
+            self.open_auth_menu();
             return;
         }
 
@@ -7897,17 +7920,22 @@ pub async fn run_tui(
 
     // Queue initial prompt if provided (--initial-prompt / --initial-prompt-file)
     if let Some(prompt) = config.initial_prompt {
-        let _ = try_admit_operator_command(
-            &command_tx,
-            TuiCommand::SubmitPrompt(PromptSubmission {
-                text: prompt,
-                image_paths: Vec::new(),
-                submitted_by: "startup".to_string(),
-                via: "tui",
-                queue_mode: app.queue_mode,
-                metadata: PromptMetadata::default(),
-            }),
-        );
+        if !app.settings().provider_connected {
+            app.editor.set_text(&prompt);
+            app.open_auth_menu();
+        } else {
+            let _ = try_admit_operator_command(
+                &command_tx,
+                TuiCommand::SubmitPrompt(PromptSubmission {
+                    text: prompt,
+                    image_paths: Vec::new(),
+                    submitted_by: "startup".to_string(),
+                    via: "tui",
+                    queue_mode: app.queue_mode,
+                    metadata: PromptMetadata::default(),
+                }),
+            );
+        }
     }
 
     // Start tutorial overlay if --tutorial flag was passed (e.g. from demo exec)
@@ -7925,6 +7953,9 @@ pub async fn run_tui(
     let mut runtime_trace = runtime_trace::TuiRuntimeTrace::new(config.debug_tui);
 
     loop {
+        if app.poll_free_model_discovery() {
+            scheduler.mark_dirty(TuiDrawReason::BackgroundEvent);
+        }
         // ── Splash replay (/splash command) ─────────────────────────
         if app.replay_splash {
             app.replay_splash = false;
@@ -9821,15 +9852,16 @@ mod slash_command_parsing_tests {
             .iter()
             .find(|command| command.name == "think")
             .expect("/think must be in COMMANDS");
-        for expected in ["off", "minimal", "low", "medium", "high"] {
+        for level in crate::settings::ThinkingLevel::all() {
+            let expected = level.as_str();
             assert!(
                 think.subcommands.contains(&expected),
                 "missing /think {expected}"
             );
         }
-        assert!(
-            !think.subcommands.contains(&"max"),
-            "/think max should not be advertised unless ThinkingLevel supports it"
+        assert_eq!(
+            think.subcommands.len(),
+            crate::settings::ThinkingLevel::all().len()
         );
     }
 }

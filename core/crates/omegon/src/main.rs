@@ -286,13 +286,8 @@ struct Cli {
     #[arg(long, global = true, value_parser = surfaces::layout::UiPresentationLevel::parse)]
     ui: Option<surfaces::layout::UiPresentationLevel>,
 
-    /// Model identifier (provider:model format)
-    #[arg(
-        short,
-        long,
-        default_value = "anthropic:claude-sonnet-4-6",
-        global = true
-    )]
+    /// Model identifier (provider:model format); otherwise use the saved selection
+    #[arg(short, long, default_value = "", global = true)]
     model: String,
 
     // ── Agent mode args (used when no subcommand) ───────────────────────
@@ -1486,6 +1481,9 @@ async fn main() -> anyhow::Result<()> {
     let is_interactive = matches!(cli.command, Some(Commands::Interactive) | None)
         && cli.prompt.is_none()
         && cli.prompt_file.is_none();
+    if !is_interactive && cli.model.is_empty() {
+        cli.model = bootstrap::noninteractive_default_model(&cli.cwd).unwrap_or_default();
+    }
     let is_acp_stdio = matches!(cli.command, Some(Commands::Acp { listen: None, .. }));
     let logs_file_only = is_interactive || is_acp_stdio;
     let filter =
@@ -4906,12 +4904,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         Err(e) => tracing::warn!(error = %e, "clipboard prune failed"),
     }
 
-    // On first launch (no profile.json), sweep the system for existing tools
-    // and let the operator choose a starting posture before the TUI appears.
-    if first_run::should_run(&cli.cwd) {
-        first_run::run_interactive(&cli.cwd, &shared_settings);
-    }
-
     // Fresh by default. --resume opts into session restore; --resume with no value
     // means "most recent" and --fresh forces a clean start.
     let resume = interactive_resume_mode(cli);
@@ -4929,7 +4921,11 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         .ok()
         .map(|s| s.model.clone())
         .unwrap_or_else(|| cli.model.clone());
-    let requested_provider = providers::infer_provider_id(&requested_start_model);
+    let requested_provider = if requested_start_model.is_empty() {
+        String::new()
+    } else {
+        providers::infer_provider_id(&requested_start_model)
+    };
     tracing::info!(
         selected = %requested_start_model,
         selected_provider = %requested_provider,
@@ -5286,7 +5282,7 @@ fn build_tui_secret_readiness_snapshot(
     // Resolve the persisted startup splash policy. The CLI flag remains the
     // highest-authority one-shot override, while `/splash` remains available
     // for cosmetic replay regardless of this startup decision.
-    let is_first_run = first_run::should_run(&cli.cwd);
+    let is_first_run = first_run::is_first_launch(&cli.cwd);
     let startup_splash = shared_settings
         .lock()
         .map(|settings| settings.startup_splash)
@@ -9579,6 +9575,12 @@ fn render_plan_list(runtime_state: &InteractiveAgentState) -> String {
 
 async fn run_auth_login(provider: &str) -> anyhow::Result<()> {
     let provider = auth::canonical_provider_id(provider);
+    if provider == providers::zen::PROVIDER_ID {
+        println!(
+            "OpenCode Zen Free needs no API key. Open om or omegon and use /connect free to choose a model and review its data terms."
+        );
+        return Ok(());
+    }
     let result = match provider {
         "anthropic" => auth::login_anthropic().await,
         "openai-codex" => auth::login_openai().await,
@@ -10760,6 +10762,18 @@ async fn run_sandboxed(cli: &Cli) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fresh_provider_cli_has_no_implicit_model() {
+        use clap::Parser;
+        assert!(super::Cli::try_parse_from(["om"]).unwrap().model.is_empty());
+        assert_eq!(
+            super::Cli::try_parse_from(["om", "--model", "openai:explicit"])
+                .unwrap()
+                .model,
+            "openai:explicit"
+        );
+    }
+
     use super::*;
     use crate::conversation::ConversationState;
     use crate::runtime_turn::ActiveTurnPhase;
@@ -14086,7 +14100,16 @@ mod tests {
                 std::env::remove_var("ANTHROPIC_API_KEY");
                 std::env::set_var("ANTHROPIC_OAUTH_TOKEN", "subscription-token");
             }
-            let cli = Cli::try_parse_from(vec!["omegon", "--prompt", "hello"]).unwrap();
+            let unselected = Cli::try_parse_from(vec!["omegon", "--prompt", "hello"]).unwrap();
+            assert!(anthropic_subscription_automation_warning(&unselected).is_none());
+            let cli = Cli::try_parse_from(vec![
+                "omegon",
+                "--model",
+                "anthropic:claude-sonnet-4-6",
+                "--prompt",
+                "hello",
+            ])
+            .unwrap();
             let warning = anthropic_subscription_automation_warning(&cli)
                 .expect("expected warning for headless anthropic oauth");
             assert!(warning.contains("operator agency wins"), "got: {warning}");

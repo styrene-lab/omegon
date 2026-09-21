@@ -52,7 +52,7 @@ class AgentSettings {
   model: String?
 
   /// Thinking level.
-  thinking_level: ("off"|"minimal"|"low"|"medium"|"high")?
+  thinking_level: ("off"|"minimal"|"low"|"medium"|"high"|"xhigh"|"max")?
 
   /// Behavioral posture.
   posture: ("explorator"|"fabricator"|"architect"|"devastator")?

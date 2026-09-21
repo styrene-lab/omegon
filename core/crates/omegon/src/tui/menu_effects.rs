@@ -41,6 +41,9 @@ pub(super) enum SelectorTarget {
     ModelPolicy,
     SecretName,
     ConnectionProviders,
+    FreeModels,
+    LocalModels,
+    ConnectionModels(String),
     Unknown(Option<String>),
 }
 
@@ -54,6 +57,11 @@ impl SelectorTarget {
             Some("model.policy") => Self::ModelPolicy,
             Some("secrets.name") => Self::SecretName,
             Some("auth.providers") => Self::ConnectionProviders,
+            Some("auth.free") => Self::FreeModels,
+            Some("auth.local") => Self::LocalModels,
+            Some(id) if id.starts_with("auth.models.") => {
+                Self::ConnectionModels(id.trim_start_matches("auth.models.").into())
+            }
             _ => Self::Unknown(selector_id),
         }
     }
@@ -292,6 +300,11 @@ impl App {
                     SelectorTarget::ModelPolicy => self.open_model_policy_selector(),
                     SelectorTarget::SecretName => self.open_secret_name_selector(),
                     SelectorTarget::ConnectionProviders => self.open_auth_provider_menu(),
+                    SelectorTarget::FreeModels => self.open_free_model_menu(),
+                    SelectorTarget::LocalModels => self.open_local_model_menu(),
+                    SelectorTarget::ConnectionModels(provider) => {
+                        self.open_model_provider_inventory_selector(&provider)
+                    }
                     SelectorTarget::Unknown(selector_id) => {
                         self.show_command_toast(CommandToast::new(
                             format!(

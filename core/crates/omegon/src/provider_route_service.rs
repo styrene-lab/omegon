@@ -512,10 +512,27 @@ impl ProviderRouteServiceContract for ProviderRouteService {
             }
         };
         let endpoint = inventory.endpoints.get(&offering.endpoint.value)?;
-        if !matches!(
-            endpoint.transport.value,
-            crate::inference_inventory::TransportSpec::Managed
-        ) {
+        // Embedded OpenAI endpoint metadata also drives model discovery. Its
+        // HTTP URL is not a user-defined manifest transport. Keep native model
+        // protocol selection only while every routing-critical field retains
+        // embedded ownership; an override must pass the manifest boundary.
+        let embedded_openai = endpoint.id.0 == "openai"
+            && offering.id.0.starts_with("openai:")
+            && [
+                endpoint.transport.source,
+                endpoint.adapter.source,
+                endpoint.secret_refs.source,
+                offering.endpoint.source,
+                offering.native_model_id.source,
+            ]
+            .into_iter()
+            .all(|source| source == crate::inference_inventory::InventorySource::Embedded);
+        if !embedded_openai
+            && !matches!(
+                endpoint.transport.value,
+                crate::inference_inventory::TransportSpec::Managed
+            )
+        {
             let plan =
                 match admit_manifest_endpoint_route(inventory, model_spec, required_capabilities) {
                     Ok(plan) => plan,
@@ -926,6 +943,13 @@ async fn resolve_provider_route(
 ) -> Option<ResolvedProviderRoute> {
     let selected_model = crate::providers::canonical_model_spec(model_spec);
     let selected_provider = crate::providers::infer_provider_id(&selected_model);
+    if selected_provider == crate::providers::zen::PROVIDER_ID {
+        crate::providers::zen::ensure_available(crate::providers::model_id_from_spec(
+            &selected_model,
+        ))
+        .await
+        .ok()?;
+    }
     let providers = if exact {
         vec![selected_provider.as_str()]
     } else {
@@ -969,6 +993,13 @@ struct ProviderLoopRouteSetup {
 
 #[async_trait::async_trait]
 impl crate::loop_driver::LoopRouteSetupContract for ProviderLoopRouteSetup {
+    async fn invalidate(&self, model: &str, detail: &str) -> bool {
+        match self.controller.as_ref() {
+            Some(controller) => controller.invalidate_serving_model(model, detail).await,
+            None => false,
+        }
+    }
+
     async fn serving_model(&self) -> Option<String> {
         let controller = self.controller.as_ref()?;
         controller
@@ -1150,10 +1181,7 @@ pub(crate) async fn loop_turn_route(
         let guard = settings.lock().ok()?;
         match guard.thinking {
             crate::settings::ThinkingLevel::Off => None,
-            crate::settings::ThinkingLevel::Minimal => Some("minimal".to_string()),
-            crate::settings::ThinkingLevel::Low => Some("low".to_string()),
-            crate::settings::ThinkingLevel::Medium => Some("medium".to_string()),
-            crate::settings::ThinkingLevel::High => Some("high".to_string()),
+            level => Some(level.as_str().to_string()),
         }
     });
     if bridge.endpoint_route_provenance_hint().is_some() {
@@ -1475,6 +1503,10 @@ pub(crate) async fn dispatch_loop_route(
             },
             Err(error) => error,
         };
+        if error.is::<crate::bridge::ProviderRouteUnavailable>() {
+            close_failed_response_request(&request, attempt - 1)?;
+            return Err(error);
+        }
         let server_retry_delay_ms = error
             .downcast_ref::<crate::upstream_errors::UpstreamResponseFailure>()
             .and_then(|failure| failure.retry_after_ms);
@@ -1800,10 +1832,13 @@ fn transient_retry_envelope_exhausted(
 fn stall_exhaustion_secs(provider: &str, model: &str, reasoning: Option<&str>) -> u64 {
     let long_reasoning = provider == "openai-codex"
         || ((provider == "openai" || provider == "openai-compatible")
-            && (model.contains("gpt-5") || model.contains("o3") || model.contains("o4")));
+            && (model.contains("gpt-5")
+                || crate::providers::model_id_from_spec(model) == "gpt-6-astra"
+                || model.contains("o3")
+                || model.contains("o4")));
     if long_reasoning {
         return match reasoning {
-            Some("high") => 2_400,
+            Some("high" | "xhigh" | "max") => 2_400,
             Some("medium") => 1_800,
             Some("low" | "minimal") | None | Some(_) => 1_200,
         };
@@ -2594,6 +2629,124 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    #[tokio::test]
+    #[allow(
+        clippy::await_holding_lock,
+        reason = "serialize process-global credential fixtures through native resolution and restoration"
+    )]
+    async fn astra_embedded_openai_uses_native_factory_and_override_stays_manifest() {
+        use crate::inference_inventory::{
+            EndpointId, EndpointPatch, EvidenceKind, InventoryLayer, InventorySnapshot,
+            InventorySource, TransportSpec,
+        };
+        struct RestoreEnv(Option<std::ffi::OsString>);
+        impl Drop for RestoreEnv {
+            fn drop(&mut self) {
+                unsafe {
+                    match self.0.take() {
+                        Some(value) => std::env::set_var("OPENAI_API_KEY", value),
+                        None => std::env::remove_var("OPENAI_API_KEY"),
+                    }
+                }
+            }
+        }
+        let _lock = crate::auth::TEST_AUTH_ENV_LOCK.lock().unwrap();
+        let _restore = RestoreEnv(std::env::var_os("OPENAI_API_KEY"));
+        unsafe {
+            std::env::set_var("OPENAI_API_KEY", "fixture-api-key");
+        }
+        let embedded =
+            InventoryLayer::embedded_registry(crate::model_registry::ModelRegistry::global());
+        let inventory = InventorySnapshot::build(1, vec![embedded.clone()]).unwrap();
+        let route = ProviderRouteService
+            .resolve_exact_admitted("openai:gpt-6-astra", None, &inventory, &["tools".into()])
+            .await
+            .expect("embedded native API route should resolve using canonical OPENAI_API_KEY");
+        assert_eq!(route.selected_model, "openai:gpt-6-astra");
+        assert!(
+            route.endpoint_provenance.is_none(),
+            "native client must not become a manifest ChatCompletions adapter"
+        );
+        let mut override_layer =
+            InventoryLayer::new(InventorySource::Project, EvidenceKind::Declared);
+        override_layer.endpoints.insert(
+            EndpointId("openai".into()),
+            EndpointPatch {
+                transport: Some(TransportSpec::Http {
+                    base_url: "https://example.invalid/v1".into(),
+                }),
+                ..Default::default()
+            },
+        );
+        for field in ["adapter", "secret_refs", "native_model_id", "endpoint"] {
+            let mut field_override =
+                InventoryLayer::new(InventorySource::Project, EvidenceKind::Declared);
+            match field {
+                "adapter" => {
+                    field_override.endpoints.insert(
+                        EndpointId("openai".into()),
+                        EndpointPatch {
+                            adapter: Some(crate::inference_inventory::AdapterId(
+                                "chat-completions".into(),
+                            )),
+                            ..Default::default()
+                        },
+                    );
+                }
+                "secret_refs" => {
+                    field_override.endpoints.insert(
+                        EndpointId("openai".into()),
+                        EndpointPatch {
+                            secret_refs: Some(vec!["OPENAI_API_KEY".into()]),
+                            ..Default::default()
+                        },
+                    );
+                }
+                "native_model_id" => {
+                    field_override.offerings.insert(
+                        crate::inference_inventory::OfferingId("openai:gpt-6-astra".into()),
+                        crate::inference_inventory::OfferingPatch {
+                            native_model_id: Some("gpt-6-astra".into()),
+                            ..Default::default()
+                        },
+                    );
+                }
+                "endpoint" => {
+                    field_override.offerings.insert(
+                        crate::inference_inventory::OfferingId("openai:gpt-6-astra".into()),
+                        crate::inference_inventory::OfferingPatch {
+                            endpoint: Some(EndpointId("openai".into())),
+                            ..Default::default()
+                        },
+                    );
+                }
+                _ => unreachable!(),
+            }
+            let snapshot =
+                InventorySnapshot::build(2, vec![embedded.clone(), field_override]).unwrap();
+            assert!(
+                ProviderRouteService
+                    .resolve_exact_admitted(
+                        "openai:gpt-6-astra",
+                        None,
+                        &snapshot,
+                        &["tools".into()]
+                    )
+                    .await
+                    .is_none(),
+                "{field} override must retain manifest validation"
+            );
+        }
+        let overridden = InventorySnapshot::build(2, vec![embedded, override_layer]).unwrap();
+        assert!(
+            ProviderRouteService
+                .resolve_exact_admitted("openai:gpt-6-astra", None, &overridden, &["tools".into()])
+                .await
+                .is_none(),
+            "project endpoint override must retain manifest secret/provenance validation"
+        );
+    }
+
     #[test]
     fn exact_route_admission_rejects_model_absent_from_current_inventory() {
         let snapshot = crate::inference_inventory::InventorySnapshot::empty();
@@ -2960,6 +3113,29 @@ mod tests {
             MANIFEST_CHAT_COMPLETIONS_GENERATION
         );
         assert_eq!(turn.options.model.as_deref(), Some("private-chat:model-v3"));
+    }
+
+    #[tokio::test]
+    async fn astra_turn_route_forwards_selected_frontier_effort() {
+        let model = "openai-codex:gpt-6-astra";
+        let shared = crate::settings::shared(model);
+        let bridge = crate::bridge::MockBridge { events: vec![] };
+        let setup = loop_route_setup(None, None);
+        let policy = LoopRoutePolicy {
+            selected_model: model.into(),
+            bridge_model: Some(model.into()),
+            extended_context: false,
+            settings: Some(shared.clone()),
+        };
+        for level in [
+            crate::settings::ThinkingLevel::XHigh,
+            crate::settings::ThinkingLevel::Max,
+        ] {
+            shared.lock().unwrap().thinking = level;
+            let route = loop_turn_route(&bridge, &setup, &policy, &StreamOptions::default()).await;
+            assert_eq!(route.options.reasoning.as_deref(), Some(level.as_str()));
+            assert_eq!(route.options.model.as_deref(), Some(model));
+        }
     }
 
     #[tokio::test]
@@ -4490,6 +4666,22 @@ mod tests {
             2_400
         );
         assert_eq!(stall_exhaustion_secs("anthropic", "model", None), 600);
+    }
+
+    #[test]
+    fn astra_reasoning_stall_budget_preserves_deep_reasoning_window() {
+        for provider in ["openai", "openai-codex"] {
+            for effort in ["high", "xhigh", "max"] {
+                assert_eq!(
+                    stall_exhaustion_secs(provider, "gpt-6-astra", Some(effort)),
+                    2_400
+                );
+            }
+        }
+        assert_eq!(
+            stall_exhaustion_secs("openai", "gpt-6-astra", Some("medium")),
+            1_800
+        );
     }
 
     #[test]

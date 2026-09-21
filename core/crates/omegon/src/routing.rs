@@ -505,6 +505,18 @@ mod tests {
     }
 
     #[test]
+    fn zen_anonymous_provider_is_not_an_automatic_grade_candidate() {
+        assert!(!is_inference_provider(crate::providers::zen::PROVIDER_ID));
+        let inventory = ProviderInventory::probe();
+        assert!(
+            !inventory
+                .entries
+                .iter()
+                .any(|entry| entry.provider_id == crate::providers::zen::PROVIDER_ID)
+        );
+    }
+
+    #[test]
     fn test_capability_grade_ordering() {
         assert!(CapabilityGradeBand::Leaf < CapabilityGradeBand::Mid);
         assert!(CapabilityGradeBand::Mid < CapabilityGradeBand::Frontier);

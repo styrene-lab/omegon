@@ -9,7 +9,6 @@ use super::workbench::{PlanDisplayItem, PlanDisplayStatus, SlimTurnState};
 use super::*;
 use crate::settings::{ContextClass, Settings, ThinkingLevel};
 use crate::tui::segments::Segment;
-use crate::tui::theme::Theme;
 use crate::update::UpdateInfo;
 use crate::web::WebDaemonStatus;
 use ratatui::Terminal;
@@ -468,7 +467,7 @@ fn compact_interaction_surfaces_remain_visible_during_publication() {
         "status line missing\n{rendered}"
     );
     assert!(
-        rendered.contains("Ask anything, or type / for commands"),
+        rendered.contains("Ask anything"),
         "composer missing\n{rendered}"
     );
     assert!(
@@ -579,6 +578,101 @@ fn session_reset_clears_instrument_panel_tool_activity() {
         !after.contains("4/4 active") && !after.contains("running ·"),
         "reset should clear tool activity chrome: {after}"
     );
+}
+
+#[tokio::test]
+async fn disconnected_submission_preserves_draft_and_attachments_without_starting_turn() {
+    let mut app = test_app();
+    app.settings.lock().unwrap().provider_connected = false;
+    let (tx, mut rx) = test_tx_with_rx();
+    app.editor.set_text("inspect this ");
+    app.editor
+        .insert_attachment(PathBuf::from("/tmp/draft.png"));
+    app.editor.insert('!');
+    let draft = app.editor.render_text();
+
+    app.submit_editor_buffer(&tx).await;
+
+    assert_eq!(app.editor.render_text(), draft);
+    assert!(
+        rx.try_recv().is_err(),
+        "disconnected draft must not enqueue inference"
+    );
+    assert!(!app.agent_active);
+    assert!(app.history.is_empty());
+    assert_eq!(app.active_menu.as_ref().unwrap().projection.id, "auth");
+    app.active_menu = None;
+    let (text, attachments) = app.editor.take_submission();
+    assert_eq!(text, "inspect this !");
+    assert_eq!(attachments, vec![PathBuf::from("/tmp/draft.png")]);
+}
+
+#[tokio::test]
+async fn disconnected_draft_can_be_submitted_once_after_connection_becomes_ready() {
+    let mut app = test_app();
+    app.settings.lock().unwrap().provider_connected = false;
+    let (tx, mut rx) = test_tx_with_rx();
+    app.editor.set_text("retained prompt");
+    app.submit_editor_buffer(&tx).await;
+    assert!(rx.try_recv().is_err());
+    app.settings.lock().unwrap().provider_connected = true;
+    app.active_menu = None;
+    assert_eq!(app.editor.render_text(), "retained prompt");
+    app.submit_editor_buffer(&tx).await;
+    match rx.try_recv().expect("connected prompt submission") {
+        TuiCommand::SubmitPrompt(prompt) => assert_eq!(prompt.text, "retained prompt"),
+        other => panic!("expected prompt, got {other:?}"),
+    }
+    assert!(rx.try_recv().is_err(), "draft must submit exactly once");
+    assert!(app.editor.is_empty());
+}
+
+#[tokio::test]
+async fn disconnected_submission_keeps_slash_and_shell_commands_available() {
+    let mut app = test_app();
+    app.settings.lock().unwrap().provider_connected = false;
+    let (tx, mut rx) = test_tx_with_rx();
+    app.editor.set_text("/connect");
+    app.submit_editor_buffer(&tx).await;
+    assert_eq!(app.active_menu.as_ref().unwrap().projection.id, "auth");
+    assert!(app.editor.is_empty());
+    app.active_menu = None;
+    app.editor.set_text("! pwd");
+    app.submit_editor_buffer(&tx).await;
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(TuiCommand::RunShellCommand { .. })
+    ));
+}
+
+#[test]
+fn disconnected_composer_has_no_model_capability_claims() {
+    for inline in [false, true] {
+        let mut app = test_app();
+        app.inline_active = inline;
+        app.settings.lock().unwrap().provider_connected = false;
+        app.settings.lock().unwrap().model.clear();
+        app.footer_data.provider_connected = false;
+        app.footer_data.model_id = "stale-model".into();
+        app.footer_data.thinking_level = "high".into();
+        app.footer_data.context_window = 1_000_000;
+        let backend = TestBackend::new(100, 8);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| app.render_shared_composer(frame, Rect::new(0, 0, 100, 3)))
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(text.contains("Choose a connection"), "{text}");
+        for stale in ["stale-model", "thinking", "%", "context"] {
+            assert!(!text.contains(stale), "{stale}: {text}");
+        }
+    }
 }
 
 #[tokio::test]
@@ -4031,11 +4125,11 @@ fn ui_command_can_toggle_individual_surfaces() {
 }
 
 #[test]
-fn empty_editor_hint_mentions_project_browser_when_dashboard_hidden() {
+fn empty_editor_hint_prioritizes_message_and_commands() {
     let mut app = test_app();
     app.apply_ui_preset(UiSurfaces::lean());
     let rendered = render_app_to_string(&mut app, 100, 20);
-    assert!(rendered.contains("F2 project"), "{rendered}");
+    assert!(rendered.contains("/ commands"), "{rendered}");
     assert!(!rendered.contains("^D tree"), "{rendered}");
 }
 
@@ -4182,16 +4276,29 @@ fn slash_help_opens_command_inventory_menu() {
 }
 
 #[test]
-fn empty_editor_hint_mentions_tool_detail_hotkey() {
+fn empty_editor_hint_stays_in_the_input() {
     let mut app = test_app();
     let rendered = render_app_to_string(&mut app, 100, 20);
-    assert!(rendered.contains("^O/Tab details"), "{rendered}");
-    assert!(!rendered.contains("^D tree"), "{rendered}");
-    assert!(rendered.contains("F2 project"), "{rendered}");
+    let help = rendered
+        .lines()
+        .find(|line| line.contains("Ask anything"))
+        .expect("empty composer help");
+    assert!(help.contains("⏎ send"), "{rendered}");
+    assert!(help.contains("/ commands"), "{rendered}");
+    assert!(!help.contains("^O/Tab details"), "{rendered}");
+    assert!(!help.contains("^D tree"), "{rendered}");
+    assert!(!help.contains("F2 project"), "{rendered}");
+    let area = app.editor_area.expect("rendered editor area");
+    let input = rendered.lines().nth(usize::from(area.y) + 1).unwrap();
+    assert!(
+        input.contains("Ask anything"),
+        "placeholder is not in the input row: {input}"
+    );
+    assert_eq!(area.height, 3, "plain composer frames its input");
 }
 
 #[test]
-fn draw_owns_full_root_background() {
+fn draw_uses_terminal_default_background() {
     let mut app = test_app();
     let backend = ratatui::backend::TestBackend::new(40, 8);
     let mut terminal = Terminal::new(backend).expect("test terminal");
@@ -4206,10 +4313,10 @@ fn draw_owns_full_root_background() {
     for y in 0..buffer.area.height {
         for x in 0..buffer.area.width {
             let cell = buffer.cell((x, y)).expect("cell in bounds");
-            assert_ne!(
+            assert_eq!(
                 cell.bg,
                 Color::Reset,
-                "cell ({x},{y}) retained Reset background; root draw left a transparent hole"
+                "cell ({x},{y}) overrides the terminal background"
             );
         }
     }
@@ -8272,13 +8379,13 @@ fn editor_top_line_shows_engine_block_details() {
     let rendered = render_app_to_string(&mut app, 140, 18);
 
     assert!(rendered.contains("claude-sonnet"), "{rendered}");
-    assert!(rendered.contains(" anthropic/claude-sonnet"), "{rendered}");
-    assert!(rendered.contains("󰿃 B"), "{rendered}");
-    assert!(rendered.contains(" high"), "{rendered}");
     assert!(
-        rendered.contains(" ctx:msv@1.0M ▕████░░░░▏ 50%"),
+        rendered.contains("claude-sonnet-4-6 · anthropic"),
         "{rendered}"
     );
+    assert!(!rendered.contains("󰿃 B"), "{rendered}");
+    assert!(rendered.contains("thinking high"), "{rendered}");
+    assert!(rendered.contains("50% of 1.0M context"), "{rendered}");
 }
 
 #[test]
@@ -8292,82 +8399,11 @@ fn editor_top_line_preserves_route_when_context_would_overflow() {
 
     let rendered = render_app_to_string(&mut app, 80, 18);
 
-    assert!(rendered.contains("openai-codex/gpt-5.5"), "{rendered}");
+    assert!(rendered.contains("gpt-5.5 · openai-codex"), "{rendered}");
 }
 
 #[test]
-fn editor_top_line_preserves_route_badge_contrast_after_bg_cleanup() {
-    let mut settings = Settings::new("openai-codex:gpt-5.5");
-    settings.thinking = ThinkingLevel::Minimal;
-    let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
-    app.apply_ui_preset(UiSurfaces::lean());
-    app.footer_data.context_window = 1_048_576;
-    app.footer_data.context_percent = 0.0;
-
-    let styles = rendered_cell_styles_for_text(&mut app, 140, 18, "openai-codex/gpt-5.5");
-
-    assert!(
-        styles
-            .iter()
-            .all(|(fg, bg)| *fg == crate::tui::theme::Alpharius.bg()
-                && *bg == crate::tui::theme::Alpharius.accent_muted()),
-        "route text should remain dark-on-accent after final bg cleanup, got {styles:?}"
-    );
-}
-
-#[test]
-fn editor_top_line_dividers_bridge_gradient_segment_backgrounds() {
-    let mut settings = Settings::new("openai-codex:gpt-5.5");
-    settings.thinking = ThinkingLevel::Minimal;
-    let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
-    app.apply_ui_preset(UiSurfaces::lean());
-    app.footer_data.context_window = 1_048_576;
-    app.footer_data.context_percent = 0.0;
-
-    let backend = ratatui::backend::TestBackend::new(140, 18);
-    let mut terminal = ratatui::Terminal::new(backend).unwrap();
-    terminal.draw(|frame| app.draw(frame)).unwrap();
-    let buf = terminal.backend().buffer();
-    let mut divider_styles = Vec::new();
-    for y in 0..buf.area.height {
-        for x in 0..buf.area.width {
-            let cell = &buf[(x, y)];
-            if cell.symbol() == "" {
-                divider_styles.push((cell.fg, cell.bg));
-            }
-        }
-    }
-
-    assert_eq!(
-        divider_styles,
-        vec![
-            (
-                crate::tui::theme::Alpharius.accent_muted(),
-                crate::tui::theme::Alpharius.accent()
-            ),
-            (
-                crate::tui::theme::Alpharius.accent(),
-                crate::tui::theme::Alpharius.card_bg()
-            ),
-            (
-                crate::tui::theme::Alpharius.card_bg(),
-                crate::tui::theme::Alpharius.card_bg()
-            ),
-            (
-                crate::tui::theme::Alpharius.card_bg(),
-                crate::tui::theme::Alpharius.surface_bg()
-            ),
-            (
-                crate::tui::theme::Alpharius.surface_bg(),
-                crate::tui::theme::Alpharius.surface_bg()
-            ),
-        ],
-        "engine ribbon should bridge route → grade → profile → thinking → context → editor backgrounds: {divider_styles:?}"
-    );
-}
-
-#[test]
-fn editor_top_line_restores_context_fill_bar() {
+fn composer_context_is_readable_without_a_gauge() {
     let mut settings = Settings::new("anthropic:claude-sonnet-4-6");
     settings.thinking = ThinkingLevel::High;
     let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
@@ -8381,18 +8417,15 @@ fn editor_top_line_restores_context_fill_bar() {
 
     let rendered = render_app_to_string(&mut app, 180, 18);
 
-    assert!(
-        rendered.contains("ctx:msv@1.0M ▕████░░░░▏ 50%"),
-        "{rendered}"
-    );
-    assert!(rendered.contains("▕████░░░░▏"), "{rendered}");
+    assert!(rendered.contains("50% of 1.0M context"), "{rendered}");
+    assert!(!rendered.contains("▕████░░░░▏"), "{rendered}");
     assert!(!rendered.contains("ctx:cmp→msv"), "{rendered}");
     assert!(!rendered.contains("κ ▰"), "{rendered}");
     assert!(!rendered.contains("◆"), "{rendered}");
 }
 
 #[test]
-fn editor_top_line_grades_actual_model_not_route_intent() {
+fn composer_preserves_the_actual_model_variant() {
     let mut settings = Settings::new("openai-codex:gpt-5.6-sol");
     settings.thinking = ThinkingLevel::Low;
     let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
@@ -8402,13 +8435,13 @@ fn editor_top_line_grades_actual_model_not_route_intent() {
     let rendered = render_app_to_string(&mut app, 140, 18);
 
     assert!(
-        rendered.contains("openai-codex/gpt-5.6-sol  󰿃 S  default   low   ctx:"),
+        rendered.contains("gpt-5.6-sol · openai-codex · thinking low"),
         "{rendered}"
     );
 }
 
 #[test]
-fn active_turn_keeps_engine_ribbon_and_moves_spinner_to_status_row() {
+fn active_turn_keeps_model_identity_and_separate_activity() {
     let mut settings = Settings::new("openai-codex:gpt-5.5");
     settings.thinking = ThinkingLevel::High;
     let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
@@ -8422,8 +8455,8 @@ fn active_turn_keeps_engine_ribbon_and_moves_spinner_to_status_row() {
     let rendered = render_app_to_string(&mut app, 160, 20);
 
     assert!(
-        rendered.contains("openai-codex/gpt-5.5  󰿃 S  default   high   ctx:"),
-        "active turn must keep engine route/grade/thinking/context visible: {rendered}"
+        rendered.contains("gpt-5.5 · openai-codex · thinking high"),
+        "active turn must keep model identity visible: {rendered}"
     );
     assert!(
         rendered.contains("⟳") && rendered.contains("· active turn"),
@@ -10335,6 +10368,85 @@ fn model_and_auth_provider_rows_share_login_metadata() {
 }
 
 #[test]
+fn disconnected_route_after_serving_does_not_reuse_stale_footer_as_serving_connection() {
+    let mut app = test_app();
+    app.handle_agent_event(AgentEvent::RouteChanged {
+        state: "serving".into(),
+        selected: Some("anthropic:prior-model".into()),
+        serving: Some("anthropic:prior-model".into()),
+        warning: None,
+        message: "Connected".into(),
+    });
+    assert_eq!(app.footer_data.model_id, "anthropic:prior-model");
+    app.handle_agent_event(AgentEvent::RouteChanged {
+        state: "disconnected".into(),
+        selected: Some("anthropic:prior-model".into()),
+        serving: None,
+        warning: None,
+        message: "Credentials expired".into(),
+    });
+    // The route event is authoritative even before the next footer/settings sync.
+    assert!(app.provider_route_snapshot().serving_provider.is_none());
+    app.open_auth_menu();
+    let menu = &app.active_menu.as_ref().unwrap().projection;
+    assert!(
+        !menu
+            .tabs
+            .iter()
+            .flat_map(|tab| &tab.groups)
+            .flat_map(|group| &group.rows)
+            .flat_map(|row| &row.badges)
+            .any(|badge| badge.label == "serving")
+    );
+    assert!(
+        !menu
+            .summary
+            .as_deref()
+            .unwrap_or_default()
+            .contains("serving:")
+    );
+    app.open_model_menu();
+    assert!(
+        !app.active_menu
+            .as_ref()
+            .unwrap()
+            .projection
+            .summary
+            .as_deref()
+            .unwrap_or_default()
+            .contains("serving:")
+    );
+}
+
+#[test]
+fn disconnected_empty_selection_never_invents_anthropic_badges() {
+    let mut app = test_app();
+    app.settings.lock().unwrap().model.clear();
+    app.settings.lock().unwrap().provider_connected = false;
+    app.handle_agent_event(AgentEvent::RouteChanged {
+        state: "disconnected".into(),
+        selected: Some(String::new()),
+        serving: None,
+        warning: None,
+        message: "Choose a connection".into(),
+    });
+    let route = app.provider_route_snapshot();
+    assert!(route.selected_provider.is_none());
+    assert!(route.serving_provider.is_none());
+    app.open_auth_menu();
+    let menu = &app.active_menu.as_ref().unwrap().projection;
+    assert!(
+        !menu
+            .tabs
+            .iter()
+            .flat_map(|tab| &tab.groups)
+            .flat_map(|group| &group.rows)
+            .flat_map(|row| &row.badges)
+            .any(|badge| matches!(badge.label.as_str(), "selected" | "serving"))
+    );
+}
+
+#[test]
 fn provider_rows_mark_settings_model_as_selected_before_route_event() {
     let mut app = test_app();
     app.route_selected_model = None;
@@ -11436,7 +11548,6 @@ fn native_usability_primary_composer_hint_survives_narrow_width() {
     for width in [40, 56, 90] {
         for (input, hint) in [
             ("", "⏎ send"),
-            ("draft", "⏎ send"),
             ("/usage", "⏎ run command"),
             ("!pwd", "⏎ run directly"),
         ] {
@@ -11446,4 +11557,116 @@ fn native_usability_primary_composer_hint_survives_narrow_width() {
             assert!(rendered.contains(hint), "{width}: {input}: {rendered}");
         }
     }
+}
+
+#[test]
+fn terminal_composer_placeholder_is_dim_and_disappears_when_typing() {
+    for presentation in [
+        TerminalPresentation::Inline,
+        TerminalPresentation::Fullscreen,
+    ] {
+        for width in [40, 80, 120] {
+            let mut app = test_app();
+            app.inline_active = presentation == TerminalPresentation::Inline;
+            let backend = ratatui::backend::TestBackend::new(width, 24);
+            let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+            terminal
+                .draw(|frame| app.draw(frame))
+                .expect("empty editor draw");
+            let area = app.editor_area.expect("editor area");
+            let cell = &terminal.backend().buffer()[(area.x + 2, area.y + 1)];
+            assert!(
+                cell.modifier.contains(Modifier::DIM),
+                "placeholder must be faint"
+            );
+            assert_eq!(cell.fg, Color::Reset);
+            assert_eq!(cell.bg, Color::Reset);
+            assert_eq!(area.height, 3);
+            app.editor.set_text("A real message");
+            let rendered = render_app_to_string(&mut app, width, 24);
+            assert!(rendered.contains("A real message"), "{rendered}");
+            for hint in ["Ask anything", "⏎ send", "/ commands", "newline", "history"] {
+                assert!(!rendered.contains(hint), "{hint}: {rendered}");
+            }
+        }
+    }
+}
+
+#[test]
+fn inline_composer_has_a_compact_readable_frame() {
+    let mut app = test_app();
+    app.inline_active = true;
+    app.footer_data.model_id = "anthropic:claude-sonnet-4-6".into();
+    app.footer_data.model_provider = "anthropic".into();
+    app.footer_data.model_tier.clear();
+    app.footer_data.thinking_level.clear();
+    app.footer_data.context_window = 200_000;
+    app.footer_data.context_percent = 25.0;
+    let rendered = render_app_to_string(&mut app, 100, 8);
+    let area = app.editor_area.unwrap();
+    assert_eq!(
+        area.y, 1,
+        "idle composer should follow one spacer row: {rendered}"
+    );
+    assert_eq!(area.height, 3);
+    assert!(rendered.contains("claude-sonnet-4-6"), "{rendered}");
+    assert!(rendered.contains("25% of 200k"), "{rendered}");
+    assert!(rendered.contains("│ Ask anything"), "{rendered}");
+    assert!(
+        rendered.contains('╰') && rendered.contains('╯'),
+        "{rendered}"
+    );
+    for noise in [
+        "eng cloud",
+        "grade",
+        "think",
+        "ctx:",
+        "ready · idle",
+        "^O/Tab",
+    ] {
+        assert!(!rendered.contains(noise), "{noise}: {rendered}");
+    }
+}
+
+#[test]
+fn framed_composer_cursor_tracks_padded_wrapped_text() {
+    use ratatui::{TerminalOptions, Viewport};
+    for inline in [false, true] {
+        let mut app = test_app();
+        app.inline_active = inline;
+        app.editor.set_text(&("a".repeat(36) + "界é"));
+        app.editor.move_end();
+        let mut terminal = Terminal::with_options(
+            TestBackend::new(50, 30),
+            TerminalOptions {
+                viewport: Viewport::Fixed(Rect::new(3, 10, 40, 8)),
+            },
+        )
+        .unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let area = app.editor_area.unwrap();
+        let cursor = terminal.get_cursor_position().unwrap();
+        // A short fullscreen viewport may allocate only one content row;
+        // the wrapped tail and cursor must scroll together above the bottom border.
+        let tail_y = area.y + 2.min(area.height.saturating_sub(2));
+        assert_eq!((cursor.x, cursor.y), (area.x + 5, tail_y));
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(area.x + 2, tail_y)].symbol(), "界");
+        assert_eq!(buffer[(area.x + 4, tail_y)].symbol(), "é");
+        assert_eq!(buffer[(area.x, area.bottom() - 1)].symbol(), "╰");
+    }
+}
+
+#[test]
+fn inline_composer_reappears_after_notice_expiry() {
+    let mut app = test_app();
+    app.inline_active = true;
+    app.show_toast("NOTICE_EXPIRY_PROBE", ratatui_toaster::ToastType::Info);
+    assert!(render_app_to_string(&mut app, 100, 8).contains("NOTICE_EXPIRY_PROBE"));
+    app.operator_events.back_mut().unwrap().expires_at =
+        std::time::Instant::now() - std::time::Duration::from_secs(1);
+    let rendered = render_app_to_string(&mut app, 100, 8);
+    assert!(!rendered.contains("NOTICE_EXPIRY_PROBE"), "{rendered}");
+    assert!(rendered.contains("│ Ask anything"), "{rendered}");
+    assert!(app.operator_events.is_empty());
 }

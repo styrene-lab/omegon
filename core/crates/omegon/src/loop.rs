@@ -1648,10 +1648,13 @@ mod legacy_route_policy_tests {
     ) -> u64 {
         let is_openai_reasoning = provider == "openai-codex"
             || ((provider == "openai" || provider == "openai-compatible")
-                && (model.contains("gpt-5") || model.contains("o3") || model.contains("o4")));
+                && (model.contains("gpt-5")
+                    || crate::providers::model_id_from_spec(model) == "gpt-6-astra"
+                    || model.contains("o3")
+                    || model.contains("o4")));
         if is_openai_reasoning {
             return match reasoning {
-                Some("high") => 2_400,
+                Some("high" | "xhigh" | "max") => 2_400,
                 Some("medium") => 1_800,
                 Some("low" | "minimal") => 1_200,
                 _ => 1_200,
@@ -4333,6 +4336,11 @@ mod tests {
     #[tokio::test]
     async fn path_always_allow_grants_directory_without_second_prompt() {
         let workspace = tempfile::tempdir().unwrap();
+        // Persistent grants follow the active profile. Seed an isolated project
+        // profile so this test never inherits or updates the operator's user profile.
+        crate::settings::Profile::default()
+            .save(workspace.path())
+            .unwrap();
         let outside = std::env::current_dir()
             .unwrap()
             .join("target")
@@ -4417,6 +4425,17 @@ mod tests {
                 .contains("outside content"),
             "dispatch result: {:?}",
             first_dispatch.results[0].content
+        );
+        let persisted = crate::settings::Profile::load_with_source(workspace.path());
+        assert!(matches!(
+            persisted.source,
+            crate::settings::ProfileSource::Project(_)
+        ));
+        assert!(
+            persisted
+                .profile
+                .effective_trusted_directories()
+                .contains(&outside.canonicalize().unwrap().display().to_string())
         );
         assert_eq!(first_dispatch.permission_decisions.len(), 1);
         assert_eq!(
@@ -4932,6 +4951,22 @@ mod tests {
         assert_eq!(
             stall_exhaustion_secs("anthropic", "claude-sonnet-4-5", Some("high")),
             600
+        );
+    }
+
+    #[test]
+    fn astra_reasoning_stall_budget_preserves_deep_reasoning_window() {
+        for provider in ["openai", "openai-codex"] {
+            for effort in ["high", "xhigh", "max"] {
+                assert_eq!(
+                    stall_exhaustion_secs(provider, "gpt-6-astra", Some(effort)),
+                    2_400
+                );
+            }
+        }
+        assert_eq!(
+            stall_exhaustion_secs("openai", "gpt-6-astra", Some("medium")),
+            1_800
         );
     }
 

@@ -21,8 +21,10 @@ import uuid
 FIXTURE_MODEL = "openai:omegon-tui-fixture"
 
 
-def tui_command(binary, workspace, log, presentation="fullscreen", detail="active"):
-    command = [str(binary), "--cwd", str(workspace), "--model", FIXTURE_MODEL, "--no-splash", "--fresh", "--log-level", "debug", "--log-file", str(log)]
+def tui_command(binary, workspace, log, presentation="fullscreen", detail="active", *, unconfigured=False):
+    command = [str(binary), "--cwd", str(workspace), "--no-splash", "--fresh", "--log-level", "debug", "--log-file", str(log)]
+    if not unconfigured:
+        command += ["--model", FIXTURE_MODEL]
     if presentation is not None:
         command += ["--tui", presentation]
     if detail is not None:
@@ -31,9 +33,24 @@ def tui_command(binary, workspace, log, presentation="fullscreen", detail="activ
 
 
 def ready_marker(presentation, detail):
-    # Full detail exposes readiness through its composer. The subsequent distinct
-    # provider request proves submission; the compact idle label is not mounted.
-    return "⏎ send" if (presentation, detail) == ("fullscreen", "full") else "ready · idle"
+    # Composer visibility alone does not prove idle: reply_ready combines this
+    # marker with authority closure, live-status absence, and publication count.
+    return "Ask anything" if presentation == "inline" or detail == "full" else "ready · idle"
+
+
+def authority_runtime_idle(records):
+    started = {record["payload"]["turn_id"] for record in records if record["event_type"] == "turn.started"}
+    closed = {record["payload"]["turn_id"] for record in records if record["event_type"] == "turn.closed"}
+    return bool(started) and started <= closed
+
+
+def reply_ready(current, transcript, marker, presentation, detail, *, runtime_idle):
+    # The empty composer placeholder is visible during streaming too. Require
+    # durable terminalization and its rendered idle state, including publication.
+    return (runtime_idle and ready_marker(presentation, detail) in current
+            and "Working ·" not in current
+            and "Publishing completed output" not in current
+            and transcript.count(marker) == 1)
 
 
 @contextmanager
@@ -144,6 +161,48 @@ def assert_quiet_startup(text, entry="omegon"):
         assert old_output not in text, f"startup still dumps bootstrap/provider diagnostics: {old_output}"
 
 
+def assert_unconfigured_startup(text):
+    assert "Choose a connection" in text, "startup does not expose its unconfigured state"
+    for phantom in ("anthropic", "claude-sonnet", "thinking ", " context", "ctx:",
+                    "No LLM provider available", "Fabricator", "Architect", "Explorator", "Devastator"):
+        assert phantom not in text, f"unconfigured startup exposes stale route/setup information: {phantom}"
+
+
+def assert_unconfigured_draft(text, draft):
+    assert text.count(draft) == 1, "cancelled connection must preserve one unsent draft"
+    assert "No LLM provider available" not in text, "disconnected draft reached the null provider"
+    assert "TUI_FIXTURE_REPLY" not in text, "disconnected draft reached inference"
+
+
+def assert_unconfigured_session(root):
+    journals = sorted(root.rglob("*.authority.jsonl"))
+    assert journals, "no session authority evidence found"
+    events = [json.loads(line)["event_type"] for path in journals for line in path.read_text().splitlines() if line]
+    for forbidden in ("prompt.admitted", "turn.started", "model.request_prepared"):
+        assert forbidden not in events, f"unconfigured draft entered session execution: {forbidden}"
+    return {"journals": [{"file": str(path.relative_to(root)), "sha256": digest(path)} for path in journals],
+            "event_types": events, "inference_requests": 0, "conversation_turns": 0}
+
+
+def prepare_unconfigured_workspace(root):
+    workspace = root / "workspace"
+    workspace.mkdir()
+    return workspace
+
+
+def tui_environment(root, *, fresh_install=False, unconfigured=False):
+    # Never inherit operator credentials, config locations, or launcher child state.
+    environment = {"PATH": os.environ["PATH"], "HOME": str(root), "OMEGON_HOME": str(root / "omegon-home"),
+                   "XDG_CONFIG_HOME": str(root / ".config"), "TERM": "xterm-256color", "LANG": "en_US.UTF-8",
+                   "NO_COLOR": "1"}
+    if not unconfigured:
+        environment.update({"OPENAI_API_KEY": "local-only",
+                            "OMEGON_PROJECT_ENDPOINT_616363657074616E6365_TOKEN": "local-only"})
+    if not (fresh_install or unconfigured):
+        environment["OMEGON_CHILD"] = "1"
+    return environment
+
+
 def group_exists(group: int) -> bool:
     # Existence and signal permission are distinct. Read the process table;
     # reserve signals for cleanup of the invocation's owned group.
@@ -178,7 +237,9 @@ reasoning = true
     return workspace
 
 
-def run(binary: Path, output: Path, presentation="fullscreen", detail="active", entry=None, stress=False):
+def run(binary: Path, output: Path, presentation="fullscreen", detail="active", entry=None, stress=False, fresh_install=False, unconfigured=False):
+    if unconfigured and stress:
+        raise ValueError("unconfigured acceptance cannot run provider stress turns")
     binary = binary.resolve(strict=True)
     checkout = Path(__file__).resolve().parents[1]
     if output.resolve().is_relative_to(checkout):
@@ -188,7 +249,8 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
     ledger = {"binary": str(binary), "binary_sha256": digest(binary), "started": time.time(),
               "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=checkout, text=True).strip(),
               "dirty": subprocess.check_output(["git", "status", "--porcelain"], cwd=checkout, text=True),
-              "captures": [], "passed": False, "tui": presentation, "ui": detail, "entry": entry, "stress": stress}
+              "captures": [], "passed": False, "tui": presentation, "ui": detail, "entry": entry, "stress": stress, "fresh_install": fresh_install,
+              "unconfigured": unconfigured, "terminal_owner": "private-headless-tmux", "gui_windows_created": 0}
 
     def tmux(*args, check=True):
         return subprocess.run(["tmux", "-L", socket, *args], check=check, capture_output=True, text=True, timeout=10).stdout
@@ -221,23 +283,36 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
     with tempfile.TemporaryDirectory(prefix="omegon-tui-") as temporary, fixture_provider() as provider:
         root = Path(temporary)
         provider.stress = stress
-        workspace = prepare_fixture_workspace(root, provider)
+        workspace = prepare_unconfigured_workspace(root) if unconfigured else prepare_fixture_workspace(root, provider)
+        if fresh_install and not unconfigured:
+            (workspace / ".omegon/profile.json").unlink()
         log = output / "omegon.log"
+
+        def turn_settled(number):
+            records = []
+            for journal in root.rglob("*.authority.jsonl"):
+                contents = journal.read_text()
+                # A writer may still be finishing the last record. Never infer
+                # idle from a partial journal observation.
+                if contents and not contents.endswith("\n"):
+                    return False
+                records.extend(json.loads(line) for line in contents.splitlines() if line)
+            return reply_ready(screen(), history(), f"TUI_FIXTURE_REPLY_{number}", presentation, detail,
+                               runtime_idle=authority_runtime_idle(records))
+
         executable = binary
         if entry:
             executable = root / entry
             shutil.copy2(checkout / "scripts/omegon-launcher.sh", executable)
             executable.chmod(0o755)
-        command = tui_command(executable, workspace, log, None if entry else presentation, None if entry else detail)
+        command = tui_command(executable, workspace, log, None if entry else presentation, None if entry else detail, unconfigured=unconfigured)
         # Start with an explicit environment, so real credentials/plugins cannot leak into the fixture.
-        environment = {"PATH": os.environ["PATH"], "HOME": str(root), "OMEGON_HOME": str(root / "omegon-home"),
-                       "XDG_CONFIG_HOME": str(root / ".config"), "TERM": "xterm-256color", "LANG": "en_US.UTF-8",
-                       "OMEGON_CHILD": "1", "NO_COLOR": "1", "OPENAI_API_KEY": "local-only",
-                       "OMEGON_PROJECT_ENDPOINT_616363657074616E6365_TOKEN": "local-only"}
+        environment = tui_environment(root, fresh_install=fresh_install, unconfigured=unconfigured)
         if entry:
             environment["OMEGON_BIN"] = str(binary)
         launch = ["env", "-i", *(f"{key}={value}" for key, value in environment.items()), *command]
         ledger["command"] = command
+        ledger["environment_keys"] = sorted(environment)
         try:
             # A primary marker and short shell trailer establish preservation and clean exit.
             shell = "printf '%s\n' TUI_PRIMARY_BEFORE; " + shlex.join(launch) + "; result=$?; printf '\nTUI_EXIT_%s\n' \"$result\"; sleep 30"
@@ -249,14 +324,86 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
             ledger["process"] = subprocess.check_output(["ps", "-p", ledger["pid"], "-o", "pid=,lstart=,command="], text=True)
             if str(binary) not in ledger["process"]:
                 raise RuntimeError("running process does not identify the requested binary")
-            wait_for(lambda: log.exists() and "terminal input boundary acquired" in log.read_text(), "TUI startup")
-            wait_for(lambda: ("ready · idle" if presentation == "inline" else "Ready for first turn") in screen(), "initial semantic view")
+            def startup_ready():
+                if (fresh_install or unconfigured) and "How would you like to work?" in screen():
+                    capture("legacy-first-run")
+                    raise AssertionError("fresh startup exposed legacy posture wizard")
+                return log.exists() and "terminal input boundary acquired" in log.read_text()
+            wait_for(startup_ready, "TUI startup")
+            initial_marker = "Choose a connection" if unconfigured else ("Ask anything" if presentation == "inline" else "Ready for first turn")
+            wait_for(lambda: initial_marker in screen(), "initial semantic view")
             assert tmux("display-message", "-p", "-t", "run:0.0", "#{alternate_on}").strip() == ("0" if presentation == "inline" else "1")
             if "semantic frontend is unavailable" in screen():
                 raise AssertionError("startup exposed an unavailable session projection")
             capture("01-startup")
+            styled = output / "01-startup-styled.ansi"
+            styled.write_text(tmux("capture-pane", "-p", "-e", "-t", "run:0.0"))
+            ledger["style_capture"] = {"file": styled.name, "sha256": digest(styled)}
+            assert "38;2;" not in styled.read_text() and "48;2;" not in styled.read_text(), "startup overrides terminal colors"
+            assert "Ask anything" in screen() and "⏎ send" in screen()
+            action("send-keys", "-t", "run:0.0", "-l", "EDITOR_PLACEHOLDER_PROBE")
+            wait_for(lambda: "EDITOR_PLACEHOLDER_PROBE" in screen(), "message replaces placeholder")
+            assert "Ask anything" not in screen() and "⏎ send" not in screen(), "message retains editor hints"
+            capture("01a-message-without-hints")
+            action("send-keys", "-t", "run:0.0", "C-u")
+            wait_for(lambda: "Ask anything" in screen(), "cleared editor restores placeholder")
+            assert provider.requests == 0, "placeholder probe submitted a message"
             capture("00-startup-primary", primary=True)
+            if unconfigured:
+                startup = (output / "00-startup-primary.txt").read_text()
+                assert_unconfigured_startup(startup + screen())
+                draft = "UNCONFIGURED_DRAFT_" + uuid.uuid4().hex[:12]
+                action("send-keys", "-t", "run:0.0", "-l", draft)
+                wait_for(lambda: draft in screen(), "unconfigured draft appears")
+                capture("unconfigured-01-draft")
+                action("send-keys", "-t", "run:0.0", "Enter")
+                wait_for(lambda: "Existing connections" in screen() and "Free hosted models" in screen(), "draft opens connection choices")
+                assert "Local models" in screen() and "Add provider" in screen()
+                capture("unconfigured-02-connections")
+                action("send-keys", "-t", "run:0.0", "Escape")
+                wait_for(lambda: draft in screen() and "Existing connections" not in screen(), "cancel preserves unsubmitted draft")
+                assert_unconfigured_draft(history(), draft)
+                capture("unconfigured-03-cancelled-draft", primary=True)
+                assert provider.requests == 0, "unconfigured interaction reached fixture inference"
+                for profile in (root / ".omegon/profile.json", workspace / ".omegon/profile.json",
+                                root / "omegon-home/profile.json", root / ".config/omegon/auth.json"):
+                    assert not profile.exists(), f"unconfigured interaction created {profile.name}"
+                assert not (workspace / ".omegon/inference.toml").exists()
+                assert digest(binary) == ledger["binary_sha256"], "binary changed during capture"
+                ledger["unconfigured_checks"] = {"no_model_argument": "--model" not in command,
+                                                 "no_child_marker": "OMEGON_CHILD" not in environment,
+                                                 "no_profile_or_credentials_written": True,
+                                                 "no_fixture_manifest": True, "draft_preserved": draft,
+                                                 "inference_requests": provider.requests}
+                action("send-keys", "-t", "run:0.0", "C-u")
+                action("send-keys", "-t", "run:0.0", "-l", "/quit")
+                action("send-keys", "-t", "run:0.0", "Enter")
+                wait_for(lambda: "TUI_EXIT_0" in screen(), "clean unconfigured exit")
+                assert tmux("display-message", "-p", "-t", "run:0.0", "#{alternate_on}:#{mouse_any_flag}").strip() == "0:0"
+                capture("09-shell-return")
+                ledger["session_checks"] = assert_unconfigured_session(root)
+                for number, journal in enumerate(ledger["session_checks"]["journals"]):
+                    copy = output / f"unconfigured-session-{number}.authority.jsonl"
+                    shutil.copy2(root / journal["file"], copy)
+                    journal["evidence_file"] = copy.name
+                ledger["passed"] = True
+                return
             assert_quiet_startup((output / "00-startup-primary.txt").read_text(), entry or "omegon")
+            if fresh_install:
+                startup = (output / "00-startup-primary.txt").read_text()
+                for legacy in ("Fabricator", "Architect", "Explorator", "Devastator", "Found existing tools:", "Choice [1]:"):
+                    assert legacy not in startup, f"legacy first-run output: {legacy}"
+                assert not (root / ".omegon/profile.json").exists(), "startup created a global profile"
+                assert not (workspace / ".omegon/profile.json").exists(), "startup created a project profile"
+                assert provider.requests == 0
+                ledger["fresh_install_checks"] = {"no_child_marker": "OMEGON_CHILD" not in environment,
+                                                  "no_profile_written": True, "no_setup_input": True}
+                action("send-keys", "-t", "run:0.0", "-l", "/quit")
+                action("send-keys", "-t", "run:0.0", "Enter")
+                wait_for(lambda: "TUI_EXIT_0" in screen(), "clean fresh-install exit")
+                capture("09-shell-return")
+                ledger["passed"] = True
+                return
             action("send-keys", "-t", "run:0.0", "-l", "/connect")
             action("send-keys", "-t", "run:0.0", "Enter")
             wait_for(lambda: "Existing connections" in screen(), "Connections opens")
@@ -316,10 +463,10 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
                     wait_for(lambda: "UNSENT_DRAFT_SURVIVES" in screen(), "draft survives active browsing")
                     capture("stress-return-draft")
                     action("send-keys", "-t", "run:0.0", "C-u")
-                wait_for(lambda: f"TUI_FIXTURE_REPLY_{number}" in history(), f"visible reply {number}")
+                wait_for(lambda: turn_settled(number), f"reply {number} published once and runtime idle")
                 capture(f"0{number + 1}-turn-{number}")
             action("resize-window", "-t", "run:0", "-x", "90", "-y", "30")
-            wait_for(lambda: "TUI_FIXTURE_REPLY_2" in history() and ready_marker(presentation, detail) in screen(), "reply survives resize and runtime becomes idle")
+            wait_for(lambda: turn_settled(2), "reply survives resize exactly once and runtime becomes idle")
             capture("04-resize")
             if presentation == "inline":
                 prior = history()
@@ -363,7 +510,7 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
             wait_for(lambda: "Project browser" in screen() and "No active work" in screen() and "Permission required" not in screen(), "return to project work tab after denial")
             capture("07-return-project-work")
             action("send-keys", "-t", "run:0.0", "Escape")
-            wait_for(lambda: "TUI_FIXTURE_REPLY_4" in history() and ready_marker(presentation, detail) in screen(), "denied tool turn completes")
+            wait_for(lambda: turn_settled(4), "denied tool turn completes")
             capture("08-denied-turn-complete")
             assert not Path(provider.tool_path).exists(), "denied write changed the filesystem"
             assert provider.requests == 4, f"unexpected inference requests: {provider.requests}"
@@ -376,9 +523,7 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
                 wait_for(lambda: "Project browser" in screen(), "Project during cancel probe")
                 action("send-keys", "-t", "run:0.0", "C-c")
                 action("send-keys", "-t", "run:0.0", "Escape")
-                wait_for(lambda: ready_marker(presentation, detail) in screen(), "cancel releases composer")
-                wait_for(lambda: "CANCEL_DRAFT_SURVIVES" in screen(), "cancel preserves unsent draft")
-                wait_for(lambda: "Turn cancelled or revoked." in history(), "cancellation outcome in history")
+                wait_for(lambda: "CANCEL_DRAFT_SURVIVES" in screen() and "Turn cancelled or revoked." in history(), "cancel preserves draft and reports terminal outcome")
                 capture("stress-cancel-draft")
                 provider.release_cancel.set()
                 action("send-keys", "-t", "run:0.0", "C-u")
@@ -388,7 +533,7 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
                 capture("stress-new-boundary")
                 action("send-keys", "-t", "run:0.0", "-l", "fixture after cancellation and reset")
                 action("send-keys", "-t", "run:0.0", "Enter")
-                wait_for(lambda: "TUI_FIXTURE_REPLY_6" in history() and ready_marker(presentation, detail) in screen(), "next turn after cancel and reset")
+                wait_for(lambda: turn_settled(6), "next turn after cancel and reset")
                 assert provider.requests == 6
                 capture("stress-recovered")
             if digest(binary) != ledger["binary_sha256"]:
@@ -401,6 +546,10 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
             ledger["passed"] = True
         finally:
             ledger["provider_requests"] = provider.requests
+            for number, journal in enumerate(sorted(root.rglob("*.authority.jsonl"))):
+                target = output / f"authority-{number}.jsonl"
+                shutil.copy2(journal, target)
+                ledger.setdefault("authority_journals", []).append({"file": target.name, "sha256": digest(target)})
             ledger["finished"] = time.time()
             try:
                 # Only this invocation's private terminal server is terminated.
@@ -418,6 +567,7 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
                             time.sleep(0.05)
                         if group_exists(group):
                             raise RuntimeError("owned process group survived forced cleanup")
+                ledger["cleanup_verified"] = True
             except Exception as error:
                 ledger["passed"] = False
                 ledger["cleanup_error"] = str(error)
@@ -436,5 +586,7 @@ if __name__ == "__main__":
     parser.add_argument("--ui", choices=["active", "full"], default="active")
     parser.add_argument("--entry", choices=["om", "omegon"], help="test the fixed-build launcher default without UI flags")
     parser.add_argument("--stress", action="store_true", help="gate a large stream, cancel from Project, and replace the conversation")
+    parser.add_argument("--fresh-install", action="store_true", help="verify profile-free non-child startup without a posture wizard")
+    parser.add_argument("--unconfigured", action="store_true", help="verify no-model, no-credential startup and draft preservation through connection cancellation")
     arguments = parser.parse_args()
-    run(arguments.binary, arguments.output.resolve(), arguments.tui, arguments.ui, arguments.entry, arguments.stress)
+    run(arguments.binary, arguments.output.resolve(), arguments.tui, arguments.ui, arguments.entry, arguments.stress, arguments.fresh_install, arguments.unconfigured)

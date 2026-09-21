@@ -97,7 +97,7 @@ impl Editor {
         ta.set_cursor_line_style(Style::default());
         ta.set_cursor_style(Style::default().add_modifier(Modifier::REVERSED));
         ta.set_placeholder_text("Ask anything, or type / for commands");
-        ta.set_placeholder_style(Style::default().fg(Color::from_u32(0x00405870)));
+        ta.set_placeholder_style(Style::default().add_modifier(Modifier::DIM));
         Self {
             textarea: ta,
             mode: EditorMode::Normal,
@@ -489,10 +489,13 @@ impl Editor {
             .set_style(Style::default().fg(t.fg()).bg(t.surface_bg()));
         self.textarea
             .set_cursor_line_style(Style::default().bg(t.surface_bg()));
-        self.textarea
-            .set_cursor_style(Style::default().fg(t.bg()).bg(t.fg()));
-        self.textarea
-            .set_placeholder_style(Style::default().fg(t.dim()));
+        self.textarea.set_cursor_style(
+            Style::default()
+                .fg(t.fg())
+                .bg(t.surface_bg())
+                .add_modifier(Modifier::REVERSED),
+        );
+        self.textarea.set_placeholder_style(t.style_dim());
     }
 
     /// Number of content lines in the editor (for dynamic height).

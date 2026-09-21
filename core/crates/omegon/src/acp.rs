@@ -4455,7 +4455,7 @@ impl OmegonAcpAgent {
                 },
                 format!("Thinking set to: {}", args.trim()),
             ).await,
-            "/thinking" | "/think" => "Use the thinking dropdown or /think <off|minimal|low|medium|high>".into(),
+            "/thinking" | "/think" => "Use the thinking dropdown or /think <off|minimal|low|medium|high|xhigh|max>".into(),
             "/posture" if !args.is_empty() => self.request_worker_setting(
                 |ack| WorkerRequest::SetPosture {
                     value: args.trim().to_string(),

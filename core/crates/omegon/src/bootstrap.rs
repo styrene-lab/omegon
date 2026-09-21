@@ -50,6 +50,12 @@ pub fn initialize_shared_settings(init: &SettingsInit<'_>) -> SharedSettings {
             profile.apply_to(&mut s);
         }
 
+        // An omitted model retains the saved selection. Explicit CLI selection
+        // wins over profile state, including an unavailable explicit model.
+        if !init.model.trim().is_empty() {
+            s.set_model(init.model);
+        }
+
         // CLI posture flag overrides profile default.
         if let Some(posture_name) = init.cli_posture {
             crate::apply_posture_to_settings(posture_name, &mut s, init.cwd);
@@ -107,6 +113,17 @@ pub fn initialize_shared_settings(init: &SettingsInit<'_>) -> SharedSettings {
     }
 
     shared
+}
+
+/// Resolve an omitted automation model through saved intent or the provider
+/// registry. Interactive startup deliberately waits for an operator selection.
+pub fn noninteractive_default_model(cwd: &Path) -> Option<String> {
+    let profile = settings::Profile::load(cwd);
+    profile
+        .last_used_model
+        .filter(|model| !model.provider.trim().is_empty() && !model.model_id.trim().is_empty())
+        .map(|model| format!("{}:{}", model.provider, model.model_id))
+        .or_else(providers::automation_safe_model)
 }
 
 // ─── LLM bridge resolution ─────────────────────────────────────────────────
@@ -274,6 +291,49 @@ pub fn build_loop_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fresh_provider_cli_override_and_saved_selection() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".omegon")).unwrap();
+        std::fs::write(
+            tmp.path().join(".omegon/profile.json"),
+            r#"{"lastUsedModel":{"provider":"anthropic","modelId":"saved-model"}}"#,
+        )
+        .unwrap();
+        for (requested, expected) in [
+            ("openai:explicit-model", "openai:explicit-model"),
+            ("", "anthropic:saved-model"),
+        ] {
+            let shared = initialize_shared_settings(&SettingsInit {
+                model: requested,
+                cwd: tmp.path(),
+                cli_posture: None,
+                slim: false,
+                full: false,
+                max_turns: 0,
+                apply_profile_posture: true,
+            });
+            assert_eq!(shared.lock().unwrap().model, expected);
+        }
+    }
+
+    #[test]
+    fn fresh_provider_noninteractive_preserves_saved_selection() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".omegon")).unwrap();
+        std::fs::write(
+            tmp.path().join(".omegon/profile.json"),
+            r#"{"lastUsedModel":{"provider":"openai","modelId":"saved-model"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            noninteractive_default_model(tmp.path()).as_deref(),
+            Some("openai:saved-model")
+        );
+    }
 
     #[test]
     fn initialize_shared_settings_applies_slim_as_explorator() {

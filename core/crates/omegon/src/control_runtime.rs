@@ -1300,11 +1300,7 @@ pub async fn model_view_response(
 ) -> SlashCommandResponse {
     let s = shared_settings.lock().unwrap().clone();
     let provider = s.provider().to_string();
-    let connected = if crate::auth::provider_connected_for_model(&s.model) {
-        "Yes"
-    } else {
-        "No"
-    };
+    let connected = if s.provider_connected { "Yes" } else { "No" };
     let thinking = {
         let raw = s.thinking.as_str();
         let mut chars = raw.chars();
@@ -1596,7 +1592,7 @@ pub async fn set_model_response(
         }
         if let Ok(mut s) = shared_settings.lock() {
             s.set_model(&effective_model);
-            s.provider_connected = crate::auth::provider_connected_for_model(&effective_model);
+            s.provider_connected = serving_matches;
             let mut profile = settings::Profile::load(&agent.cwd);
             profile.capture_from(&s);
             let _ = profile.save(&agent.cwd);
@@ -1705,15 +1701,11 @@ pub async fn switch_dispatcher_response(
         .unwrap_or_default();
     let current_provider = crate::providers::infer_provider_id(&current_model);
     let reg = crate::model_registry::ModelRegistry::global();
-    let tier_model = reg
-        .grade_model(&normalized_profile, &current_provider)
-        .unwrap_or(&current_model)
-        .to_string();
     let requested_model_spec = requested_model.map(ToOwned::to_owned).unwrap_or_else(|| {
-        if current_provider.is_empty() || current_provider == "anthropic" {
-            format!("anthropic:{tier_model}")
-        } else {
+        if let Some(tier_model) = reg.grade_model(&normalized_profile, &current_provider) {
             format!("{current_provider}:{tier_model}")
+        } else {
+            current_model.clone()
         }
     });
     let effective_model = requested_model_spec.clone();
@@ -1728,12 +1720,21 @@ pub async fn switch_dispatcher_response(
     }
 
     if !effective_model.is_empty() {
-        if let Some(new_bridge) = providers::auto_detect_bridge(&effective_model).await {
+        let new_bridge = providers::auto_detect_bridge(&effective_model).await;
+        let route = crate::route::RouteController::resolve_startup(
+            effective_model.clone(),
+            &[],
+            &crate::route::CredentialLedger,
+        )
+        .await;
+        let connected =
+            new_bridge.is_some() && matches!(route, crate::route::ProviderRoute::Serving { .. });
+        if let Some(new_bridge) = new_bridge {
             let mut guard = bridge.write().await;
             *guard = new_bridge;
         }
         if let Ok(mut s) = shared_settings.lock() {
-            s.provider_connected = crate::auth::provider_connected_for_model(&effective_model);
+            s.provider_connected = connected;
         }
     }
 
@@ -1851,13 +1852,7 @@ pub async fn thinking_view_response(
         .ok()
         .map(|settings| settings.thinking);
     let mut rows = Vec::new();
-    for level in [
-        crate::settings::ThinkingLevel::Off,
-        crate::settings::ThinkingLevel::Minimal,
-        crate::settings::ThinkingLevel::Low,
-        crate::settings::ThinkingLevel::Medium,
-        crate::settings::ThinkingLevel::High,
-    ] {
+    for &level in crate::settings::ThinkingLevel::all() {
         let mut row = PaletteRowProjection::action(
             format!("think.{}", level.as_str()),
             format!("/think {}", level.as_str()),
@@ -1906,6 +1901,8 @@ fn thinking_level_description(level: crate::settings::ThinkingLevel) -> &'static
         crate::settings::ThinkingLevel::Low => "use light reasoning for simple work",
         crate::settings::ThinkingLevel::Medium => "use the default balanced reasoning level",
         crate::settings::ThinkingLevel::High => "use deeper reasoning for complex work",
+        crate::settings::ThinkingLevel::XHigh => "use extra reasoning for difficult work",
+        crate::settings::ThinkingLevel::Max => "use maximum reasoning depth",
     }
 }
 
@@ -3533,6 +3530,10 @@ pub async fn auth_login_daemon_response(provider: &str) -> SlashCommandResponse 
         };
     };
     match provider_info.auth_method {
+        auth::AuthMethod::Anonymous => SlashCommandResponse {
+            accepted: false,
+            output: Some("Open om or omegon and use /connect free to choose a free model and review its data terms. No API key is required.".into()),
+        },
         auth::AuthMethod::OAuth => SlashCommandResponse {
             accepted: false,
             output: Some(format!(
@@ -3955,7 +3956,9 @@ pub async fn profile_apply_response(
         && let Ok(mut settings) = shared_settings.lock()
     {
         settings.set_model(model);
-        settings.provider_connected = crate::auth::provider_connected_for_model(model);
+        // The controller confirmed this serving route; anonymous providers do
+        // not have stored credentials to re-probe.
+        settings.provider_connected = true;
     }
 
     let new_model = shared_settings
@@ -5893,6 +5896,21 @@ pub(crate) fn format_auth_status(status: &auth::AuthStatus) -> String {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn zen_model_status_reports_authoritative_connection_state() {
+        let shared = settings::shared("opencode-zen:big-pickle");
+        for (ready, expected) in [(true, "Yes"), (false, "No")] {
+            shared.lock().unwrap().provider_connected = ready;
+            let response = model_view_response(&shared).await;
+            assert!(
+                response
+                    .output
+                    .unwrap()
+                    .contains(&format!("Connected:       {expected}"))
+            );
+        }
+    }
+
     struct EnvironmentGuard {
         key: &'static str,
         previous: Option<std::ffi::OsString>,
@@ -6525,6 +6543,41 @@ mod tests {
 
     #[tokio::test]
     async fn profile_capture_response_updates_runtime_profile_source_for_user_target() {
+        const ISOLATED_HOME: &str = "OMEGON_TEST_USER_PROFILE_HOME";
+        let Ok(home) = std::env::var(ISOLATED_HOME) else {
+            // The user-target handler intentionally ignores cwd. Exercise it in
+            // a separate process so parallel tests never see a changed HOME.
+            let home = tempfile::tempdir().unwrap();
+            let operator_profile = dirs::home_dir().unwrap().join(".omegon/profile.json");
+            let before = std::fs::read(&operator_profile).ok();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "control_runtime::tests::profile_capture_response_updates_runtime_profile_source_for_user_target",
+                    "--nocapture",
+                ])
+                .env(ISOLATED_HOME, home.path())
+                .env("HOME", home.path())
+                .env("OMEGON_HOME", home.path().join("omegon-home"))
+                .env("XDG_CONFIG_HOME", home.path().join(".config"))
+                .output()
+                .unwrap();
+            assert_eq!(
+                std::fs::read(&operator_profile).ok(),
+                before,
+                "user-target test changed the operator profile"
+            );
+            assert!(
+                output.status.success(),
+                "isolated user-target test failed: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(home.path().join(".omegon/profile.json").is_file());
+            return;
+        };
+        let expected_path = Path::new(&home).join(".omegon/profile.json");
+        assert_eq!(dirs::home_dir().unwrap(), Path::new(&home));
         let tmp = tempfile::tempdir().unwrap();
         let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
         let response =
@@ -6534,9 +6587,13 @@ mod tests {
         assert!(response.accepted, "{response:?}");
         let source = settings.lock().unwrap().profile_source.clone();
         assert!(
-            matches!(source, settings::ProfileSource::User(_)),
+            matches!(&source, settings::ProfileSource::User(path) if path == &expected_path),
             "{source:?}"
         );
+        let saved: settings::Profile =
+            serde_json::from_slice(&std::fs::read(expected_path).unwrap()).unwrap();
+        assert_eq!(saved.last_used_model.unwrap().model_id, "claude-sonnet-4-6");
+        assert!(!tmp.path().join(".omegon/profile.json").exists());
     }
 
     #[tokio::test]
@@ -6581,6 +6638,8 @@ mod tests {
         assert!(output.contains(
             "- `/think high` — ◉ high · current · use deeper reasoning for complex work"
         ));
+        assert!(output.contains("`/think xhigh`"));
+        assert!(output.contains("`/think max`"));
         assert!(output.contains("Use `/think <level>` to apply a level directly."));
     }
 
@@ -7017,6 +7076,72 @@ mod context_compaction_tests {
             output.lines().any(|line| line.contains("admission=")),
             "model list must disclose route admission: {output}"
         );
+    }
+
+    #[tokio::test]
+    async fn zen_dispatcher_preserves_anonymous_bridge_readiness() {
+        let _catalog = crate::providers::zen::test_catalog(&["big-pickle"]);
+        let mut agent = test_agent();
+        std::fs::create_dir_all(agent.cwd.join(".omegon")).unwrap();
+        std::fs::write(agent.cwd.join(".omegon/profile.json"), "{}").unwrap();
+        let shared = settings::shared("opencode-zen:big-pickle");
+        let bridge = Arc::new(tokio::sync::RwLock::new(
+            Box::new(MockBridge { events: vec![] }) as Box<dyn LlmBridge>,
+        ));
+        let (events, _) = broadcast::channel(8);
+        for requested in [Some("opencode-zen:big-pickle"), None] {
+            let response = switch_dispatcher_response(
+                &mut agent,
+                &shared,
+                &bridge,
+                "zen-dispatch",
+                "B",
+                requested,
+                &events,
+            )
+            .await;
+            assert!(response.accepted, "{:?}", response.output);
+            let current = shared.lock().unwrap();
+            assert!(current.provider_connected);
+            assert_eq!(current.model, "opencode-zen:big-pickle");
+        }
+        std::fs::remove_dir_all(&agent.cwd).unwrap();
+    }
+
+    #[tokio::test]
+    async fn zen_profile_apply_preserves_authoritative_serving_route() {
+        let _catalog = crate::providers::zen::test_catalog(&["big-pickle"]);
+        let mut agent = test_agent();
+        std::fs::create_dir_all(agent.cwd.join(".omegon")).unwrap();
+        std::fs::write(agent.cwd.join(".omegon/profile.json"),
+            r#"{"lastUsedModel":{"provider":"opencode-zen","modelId":"big-pickle"},"modelIntent":{"exactModelOverride":"opencode-zen:big-pickle"}}"#).unwrap();
+        let shared = settings::shared("opencode-zen:big-pickle");
+        let controller = Arc::new(crate::route::RouteController::new(
+            crate::route::ProviderRoute::Serving {
+                model: crate::route::ModelRouteSpec::parse("opencode-zen:big-pickle"),
+            },
+            Box::new(MockBridge { events: vec![] }),
+            None,
+        ));
+        let bridge = controller.bridge();
+        let mut state = test_runtime_state_with_evictable_context();
+        let (events, _) = broadcast::channel(8);
+        let response = profile_apply_response(
+            &mut agent,
+            &mut state,
+            &shared,
+            &bridge,
+            Some(controller.clone()),
+            &events,
+        )
+        .await;
+        assert!(response.accepted, "{:?}", response.output);
+        assert_eq!(
+            controller.snapshot().await.serving_model(),
+            Some("opencode-zen:big-pickle")
+        );
+        assert!(shared.lock().unwrap().provider_connected);
+        std::fs::remove_dir_all(&agent.cwd).unwrap();
     }
 
     #[tokio::test]

@@ -51,6 +51,8 @@ pub(crate) fn interactive_startup(
             },
             label(serving)
         )
+    } else if !bridge_ready {
+        format!("Not connected · selected {}", label(selected))
     } else {
         label(selected)
     };
@@ -329,7 +331,7 @@ mod tests {
             },
             false,
         );
-        assert!(summary.contains("openai:fixture"));
+        assert!(summary.contains("Not connected · selected openai:fixture"));
         assert_eq!(
             problem.as_deref(),
             Some(

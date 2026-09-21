@@ -79,11 +79,21 @@ pub(super) fn build_provider_status_rows(
                 kind: MenuRowKind::Object,
                 badges,
                 metadata,
-                primary_action: Some(MenuActionProjection::command(
-                    format!("{row_prefix}.{provider}.login"),
-                    "Connect",
-                    login_command.clone(),
-                )),
+                primary_action: Some(
+                    if status.availability == ProviderAvailabilityProjection::Available {
+                        MenuActionProjection::open_selector(
+                            format!("{row_prefix}.{provider}.models"),
+                            "Choose model",
+                            format!("auth.models.{provider}"),
+                        )
+                    } else {
+                        MenuActionProjection::command(
+                            format!("{row_prefix}.{provider}.login"),
+                            "Connect",
+                            login_command.clone(),
+                        )
+                    },
+                ),
                 actions: vec![
                     {
                         let mut action = MenuActionProjection::command(
@@ -147,7 +157,7 @@ fn build_connection_menu(inputs: AuthenticationMenuInputs, available: bool) -> M
     let mut summary = if available {
         "Choose a provider to configure. / filters providers."
     } else {
-        "Provider credentials. Use /model to select a route."
+        "Choose an existing connection, a free hosted model, or a local model."
     }
     .to_string();
     if inputs.providers.iter().any(|provider| {
@@ -191,6 +201,36 @@ fn build_connection_menu(inputs: AuthenticationMenuInputs, available: bool) -> M
         .collect();
     let mut rows = build_provider_status_rows("auth.provider", providers, &inputs.route);
     if !available {
+        for (id, label, description) in [
+            (
+                "free",
+                "Free hosted models",
+                "Explore OpenCode Zen's current free models and their data-use terms. No account required.",
+            ),
+            (
+                "local",
+                "Local models",
+                "Choose an available model served on this machine.",
+            ),
+        ] {
+            rows.push(MenuRowProjection {
+                id: format!("auth.{id}"),
+                label: label.into(),
+                description: description.into(),
+                value: None,
+                kind: MenuRowKind::Action,
+                badges: vec![],
+                metadata: vec![],
+                primary_action: Some(MenuActionProjection::open_selector(
+                    format!("auth.{id}.open"),
+                    label,
+                    format!("auth.{id}"),
+                )),
+                actions: vec![],
+                safety: None,
+                availability: None,
+            });
+        }
         rows.push(MenuRowProjection {
             id: "auth.add".into(),
             label: "Add provider".into(),
@@ -270,6 +310,24 @@ mod tests {
     }
 
     #[test]
+    fn connected_provider_primary_action_selects_models_while_refresh_remains_available() {
+        let rows = build_provider_status_rows(
+            "auth.provider",
+            vec![provider("openai")],
+            &Default::default(),
+        );
+        let row = &rows[0];
+        let primary = row.primary_action.as_ref().unwrap();
+        assert_eq!(primary.target_row_id.as_deref(), Some("auth.models.openai"));
+        assert!(primary.command.is_none());
+        assert!(
+            row.actions
+                .iter()
+                .any(|action| action.command.as_deref() == Some("/connect openai"))
+        );
+    }
+
+    #[test]
     fn connect_expired_connections_stay_existing_and_catalog_is_searchable() {
         let mut expired = provider("anthropic");
         expired.availability = ProviderAvailabilityProjection::ExpiredCredentials;
@@ -298,12 +356,20 @@ mod tests {
     }
 
     #[test]
-    fn connect_empty_state_has_one_deliberate_add_action() {
+    fn connect_empty_state_offers_free_local_and_provider_discovery() {
         let menu = build_authentication_menu(Default::default());
         let rows = &menu.tabs[0].groups[0].rows;
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].label, "Add provider");
-        let action = rows[0].primary_action.as_ref().unwrap();
+        assert_eq!(rows.len(), 3);
+        for label in ["Free hosted models", "Local models", "Add provider"] {
+            assert!(rows.iter().any(|row| row.label == label));
+        }
+        let action = rows
+            .iter()
+            .find(|row| row.label == "Add provider")
+            .unwrap()
+            .primary_action
+            .as_ref()
+            .unwrap();
         assert_eq!(
             action.command, None,
             "discovery cannot dispatch authentication"

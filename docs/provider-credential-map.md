@@ -40,8 +40,8 @@ The canonical routing and lease semantics are in
 ## Authentication class versus credential source
 
 Authentication class is contribution metadata: it states whether a factory
-accepts an API key, OAuth, either, token exchange, or a declared local credential
-posture. It is not a credential and does not identify where one request found
+accepts an API key, OAuth, either, token exchange, anonymous hosted access, or a
+declared local credential posture. It is not a credential and does not identify where one request found
 its credential.
 
 Credential-source class is dispatch evidence. The resolver may identify an
@@ -57,6 +57,13 @@ credential is an API key, OAuth token, or token-exchange credential.
 Credential availability is evaluated at execution boundaries and may change.
 Do not infer current authentication, refreshability, quota, or route eligibility
 from a static catalog row.
+
+The `opencode-zen` contribution uses anonymous hosted access. Selecting a free
+model uses the gateway's documented public token and ignores stored API keys.
+The ordinary credential inventory does not treat this public route as an
+established connection. `/connect free` refreshes eligible models and displays
+the applicable data terms before selection. The separate `opencode-go` provider
+continues to require its own API key.
 
 ## Routing boundary
 

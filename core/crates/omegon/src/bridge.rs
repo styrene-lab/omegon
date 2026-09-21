@@ -261,6 +261,15 @@ struct BridgeRequest {
 
 // ─── Bridge trait ───────────────────────────────────────────────────────────
 
+/// A definitive loss of the selected serving route, distinct from transient
+/// capacity or transport failures. Carries no credentials or upstream payload.
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
+pub(crate) struct ProviderRouteUnavailable {
+    pub(crate) model: String,
+    pub(crate) message: String,
+}
+
 /// Options for an LLM stream request.
 #[derive(Debug, Clone, Default)]
 pub struct StreamOptions {

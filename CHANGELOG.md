@@ -18,6 +18,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- GPT-6 Astra is available in native OpenAI API and Codex model choices and becomes their frontier/default model; saved selections and lower-cost grades remain intact. Direct OpenAI Astra uses Responses for text and tools, with supported reasoning parameters. Extra-high and maximum thinking are independently selectable. API and Codex context ceilings remain route-specific. Claude Fable 5.1 remains the verified Anthropic frontier default.
+
+- Fresh interactive sessions start without an implicit provider or model. Disconnected submission preserves the draft and opens connection choices; model, thinking, and context telemetry appear only for a usable route. Explicit CLI models override saved profiles, and provider defaults use the shared registry. `/connect free` offers reviewed anonymous OpenCode Zen models with data-use terms and live availability checks; free routes never fall back to paid providers.
+
+- Fresh interactive launches enter the editor without the legacy named-posture questionnaire, detected-tool inventory, or automatic posture-profile write. `om` and `omegon` retain their independent layout/detail defaults; explicit saved postures and CLI compatibility remain supported.
+
+- The shared composer uses a thin padded frame, the complete model name, and plain context usage. Empty grade/thinking fields and decorative route glyphs are removed. Inline idle input sits beside the transcript instead of below reserved activity space; its placeholder keeps only message, command, and send guidance. Inline notifications now expire through the shared render path.
+
+- The TUI defaults to terminal foreground/background colors and ANSI signal colors instead of loading Alpharius. Composer guidance is a dim placeholder inside the empty input, disappears while typing a message, and no longer reserves a separate help row.
+
 - Authoritative TUI completion, idle reconciliation, and session reset now release abandoned permission and operator-wait queues while preserving the operator's draft and covered menu.
 
 - WezTerm compatibility trials release temporary resize panes once, before closing the main pane, and retain pane ownership when cleanup fails. Validation of this correction uses headless mocked trials.

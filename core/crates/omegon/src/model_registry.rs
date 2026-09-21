@@ -863,10 +863,34 @@ mod tests {
     }
 
     #[test]
+    fn astra_is_admitted_on_native_openai_routes_with_published_limits() {
+        let reg = ModelRegistry::global();
+        for (provider, ceiling) in [("openai", 1_050_000), ("openai-codex", 872_000)] {
+            let info = reg
+                .model_info(&format!("{provider}:gpt-6-astra"))
+                .unwrap_or_else(|| panic!("missing Astra route for {provider}"));
+            assert_eq!(info.name, "GPT-6 Astra");
+            assert_eq!(info.context_input, ceiling);
+            assert_eq!(info.context_output, 128_000);
+            assert!(info.supports_reasoning);
+            for capability in ["coding", "vision", "tools"] {
+                assert!(info.capabilities.iter().any(|value| value == capability));
+            }
+            assert_eq!(reg.context_ceiling(provider, "gpt-6-astra"), Some(ceiling));
+            assert_eq!(reg.default_model(provider), Some("gpt-6-astra"));
+            assert_eq!(reg.grade_model("S", provider), Some("gpt-6-astra"));
+            assert_eq!(reg.exact_grade(provider, "gpt-6-astra"), Some("S"));
+        }
+        assert_eq!(reg.grade_model("B", "openai-codex"), Some("gpt-5.6-terra"));
+        assert_eq!(reg.grade_model("D", "openai-codex"), Some("gpt-5.6-luna"));
+        assert_eq!(reg.default_model("anthropic"), Some("claude-fable-5-1"));
+    }
+
+    #[test]
     fn default_model_lookup() {
         let reg = ModelRegistry::global();
-        assert_eq!(reg.default_model("openai"), Some("gpt-5.6"));
-        assert_eq!(reg.default_model("openai-codex"), Some("gpt-5.6"));
+        assert_eq!(reg.default_model("openai"), Some("gpt-6-astra"));
+        assert_eq!(reg.default_model("openai-codex"), Some("gpt-6-astra"));
         assert_eq!(reg.default_model("github-copilot"), Some("gpt-5.4"));
         assert_eq!(reg.default_model("anthropic"), Some("claude-fable-5-1"));
         assert_eq!(reg.default_model("nonexistent"), None);
@@ -875,8 +899,8 @@ mod tests {
     #[test]
     fn grade_model_lookup() {
         let reg = ModelRegistry::global();
-        assert_eq!(reg.grade_model("S", "openai"), Some("gpt-5.6"));
-        assert_eq!(reg.grade_model("S", "openai-codex"), Some("gpt-5.6"));
+        assert_eq!(reg.grade_model("S", "openai"), Some("gpt-6-astra"));
+        assert_eq!(reg.grade_model("S", "openai-codex"), Some("gpt-6-astra"));
         assert_eq!(reg.grade_model("B", "openai-codex"), Some("gpt-5.6-terra"));
         assert_eq!(reg.grade_model("D", "openai-codex"), Some("gpt-5.6-luna"));
         assert_eq!(reg.grade_model("S", "github-copilot"), Some("gpt-5.4"));
@@ -1084,7 +1108,8 @@ mod tests {
         let reg = ModelRegistry::global();
         assert_eq!(reg.infer_grade("openai", "gpt-5.6"), Some("S"));
         assert_eq!(reg.infer_grade("openai", "gpt-5.5"), Some("S"));
-        assert_eq!(reg.exact_grade("openai-codex", "gpt-5.6"), Some("S"));
+        assert_eq!(reg.exact_grade("openai-codex", "gpt-6-astra"), Some("S"));
+        assert_eq!(reg.infer_grade("openai-codex", "gpt-5.6"), Some("S"));
         assert_eq!(reg.exact_grade("openai-codex", "gpt-5.6-terra"), Some("B"));
         assert_eq!(reg.exact_grade("openai-codex", "gpt-5.6-luna"), Some("D"));
         assert_eq!(

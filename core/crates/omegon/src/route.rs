@@ -609,7 +609,11 @@ pub(crate) fn intent_from_route(route: &ProviderRoute) -> ModelIntent {
     match route {
         ProviderRoute::Serving { model } => ModelIntent::pinned_model(model.as_str().to_string()),
         ProviderRoute::Fallback { selected, .. } | ProviderRoute::Disconnected { selected, .. } => {
-            ModelIntent::pinned_model(selected.as_str().to_string())
+            if selected.as_str().is_empty() {
+                ModelIntent::default()
+            } else {
+                ModelIntent::pinned_model(selected.as_str().to_string())
+            }
         }
         ProviderRoute::LoginPending { prior, .. } => intent_from_route(prior),
     }
@@ -685,8 +689,37 @@ impl RouteController {
         fallback_providers: &[String],
         ledger: &impl CredentialProbe,
     ) -> ProviderRoute {
+        if selected_model.trim().is_empty() {
+            return ProviderRoute::Disconnected {
+                selected: ModelRouteSpec::parse(""),
+                reason: DisconnectedReason::ProviderUnavailable {
+                    provider: String::new(),
+                    detail: "Choose a connection with /connect".into(),
+                },
+            };
+        }
         let selected_model = crate::providers::canonical_model_spec(&selected_model);
         let selected_provider = crate::providers::infer_provider_id(&selected_model);
+        if selected_provider == crate::providers::zen::PROVIDER_ID {
+            return if crate::providers::zen::ensure_available(crate::providers::model_id_from_spec(
+                &selected_model,
+            ))
+            .await
+            .is_ok()
+            {
+                ProviderRoute::Serving {
+                    model: ModelRouteSpec::parse(selected_model),
+                }
+            } else {
+                ProviderRoute::Disconnected {
+                    selected: ModelRouteSpec::parse(selected_model),
+                    reason: DisconnectedReason::ProviderUnavailable {
+                        provider: selected_provider,
+                        detail: "Choose an available free model with /connect free".into(),
+                    },
+                }
+            };
+        }
         crate::auth::trace_auth_store_probe(&selected_provider, "route_startup:selected");
         let selected_probe = ledger.probe_provider(&selected_provider);
         tracing::info!(selected_model = %selected_model, selected_provider = %selected_provider, credential_state = %selected_probe.summary(), fallback_providers = ?fallback_providers, "provider route startup credential probe");
@@ -909,8 +942,24 @@ impl RouteController {
             drop(state);
             return Ok(self.emit_changed().await);
         };
+        if provider == crate::providers::zen::PROVIDER_ID {
+            crate::providers::zen::ensure_available(crate::providers::model_id_from_spec(
+                model.as_str(),
+            ))
+            .await?;
+        }
         crate::auth::trace_auth_store_probe(&provider, "route_switch_model");
-        let credential_state = ledger.probe_provider(&provider);
+        let credential_state = if provider == crate::providers::zen::PROVIDER_ID
+            && crate::providers::zen::supports_model(crate::providers::model_id_from_spec(
+                model.as_str(),
+            )) {
+            CredentialState::Valid {
+                source: CredentialSource::External,
+                oauth: false,
+            }
+        } else {
+            ledger.probe_provider(&provider)
+        };
         tracing::info!(model = %model, provider = %provider, credential_state = %credential_state.summary(), "provider route model switch credential probe");
         if !credential_state.is_valid() {
             let reason = disconnected_for_provider_state(provider, credential_state);
@@ -936,6 +985,26 @@ impl RouteController {
         state.warning = None;
         drop(state);
         Ok(self.emit_changed().await)
+    }
+
+    /// Invalidate only the route that failed. A late failure from an older
+    /// request must not disconnect a newly selected model.
+    pub(crate) async fn invalidate_serving_model(&self, model: &str, detail: &str) -> bool {
+        let mut state = self.state.write().await;
+        if serving_model_from_route(&state.route) != Some(model) {
+            return false;
+        }
+        state.route = ProviderRoute::Disconnected {
+            selected: ModelRouteSpec::parse(model),
+            reason: DisconnectedReason::ProviderUnavailable {
+                provider: crate::providers::infer_provider_id(model),
+                detail: detail.into(),
+            },
+        };
+        state.warning = Some(detail.into());
+        drop(state);
+        self.emit_changed().await;
+        true
     }
 
     pub async fn logout(&self, provider: String, selected_model: String) -> RouteSnapshot {
@@ -1328,6 +1397,53 @@ mod tests {
                 .map(|(provider, state)| ((*provider).to_string(), state.clone()))
                 .collect(),
         )
+    }
+
+    #[tokio::test]
+    async fn zen_explicit_model_switch_serves_without_credentials_and_rejects_paid() {
+        let _catalog = crate::providers::zen::test_catalog(&["big-pickle"]);
+        let controller = RouteController::default();
+        let bridge = crate::providers::resolve_provider("opencode-zen").await;
+        let snapshot = controller
+            .switch_model("opencode-zen:big-pickle".into(), &ledger(&[]), bridge)
+            .await
+            .unwrap();
+        assert_eq!(snapshot.serving_model(), Some("opencode-zen:big-pickle"));
+        assert!(snapshot.warning.is_none());
+        let paid = controller
+            .switch_model(
+                "opencode-zen:paid".into(),
+                &ledger(&[]),
+                Some(Box::new(NullBridge)),
+            )
+            .await;
+        assert!(paid.is_err());
+        assert_eq!(
+            controller.snapshot().await.serving_model(),
+            Some("opencode-zen:big-pickle")
+        );
+        let route = RouteController::resolve_startup(
+            "opencode-zen:paid".into(),
+            &["openai".into()],
+            &ledger(&[("openai", valid())]),
+        )
+        .await;
+        assert!(matches!(route, ProviderRoute::Disconnected { .. }));
+    }
+
+    #[tokio::test]
+    async fn fresh_provider_startup_without_model_never_probes_credentials() {
+        struct NoProbe;
+        impl CredentialProbe for NoProbe {
+            fn probe_provider(&self, _: &str) -> CredentialState {
+                panic!("unselected startup must not probe credentials");
+            }
+        }
+        let route =
+            RouteController::resolve_startup(String::new(), &["openai".into()], &NoProbe).await;
+        assert!(matches!(route, ProviderRoute::Disconnected {
+            selected, reason: DisconnectedReason::ProviderUnavailable { provider, .. }
+        } if selected.as_str().is_empty() && provider.is_empty()));
     }
 
     #[test]
