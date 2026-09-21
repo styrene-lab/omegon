@@ -61,8 +61,9 @@ shared editor up to four rows including its borders and primary hint, and alloca
 the remaining rows to status and the unfinished response tail. Stable answer text
 is published above this region while it streams; the viewport is never the answer
 container. Long drafts scroll inside
-the same editor. Decisions use the existing fullscreen composition with scrolling
-context. The first implementation always borrows fullscreen for a decision: the
+the same editor. Decisions use the existing shared decision widget with scrolling
+context. Borrowed screens use a clean canvas rather than the fullscreen workspace.
+The first implementation always borrows fullscreen for a decision: the
 complete shared widget needs more than the remaining live rows. This avoids a
 second permission layout or input policy. At unusably tiny geometry,
 show a resize indication and never render misleading partial action labels.
@@ -76,7 +77,9 @@ when a requested panel is available in the fullscreen workspace.
 
 Slash autocomplete stays attached to the shared composer with geometry clamped to
 the live area. File-reference pickers use their existing fullscreen selector. Rich navigation (Project, menus, process/diff/copy inspectors, extension
-modals, tutorial, command panels) borrows fullscreen from inline. Images use textual
+modals, tutorial, command panels) borrows fullscreen from inline. This grants space
+to the owning widget without rendering the transcript, composer, or workspace
+behind it. Explicit fullscreen retains the full workspace composition. Images use textual
 alt/path references in published history and existing rich inspection when available.
 
 ## Navigation and terminal ownership

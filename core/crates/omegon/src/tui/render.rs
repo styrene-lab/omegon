@@ -6,6 +6,16 @@
 
 use super::interaction::NavigationOwner;
 use super::*;
+use crate::surfaces::layout::TerminalPresentation;
+
+#[derive(Default)]
+struct WorkspaceGeometry {
+    main_area: Rect,
+    conversation_area: Rect,
+    footer_area: Rect,
+    editor_area: Rect,
+    inst_area: Rect,
+}
 
 fn fit_composer_hint(hint: &str, width: usize) -> String {
     use unicode_width::UnicodeWidthStr;
@@ -31,6 +41,11 @@ impl App {
         let mut draw_phases = runtime_trace::DrawPhaseTimings::default();
         self.refresh_at_picker();
         let area = frame.area();
+        self.conversation_area = None;
+        self.editor_area = None;
+        self.dashboard_area = None;
+        self.workbench_area = None;
+        self.copy_text_copy_button_area = None;
         frame.render_widget(Clear, area);
         frame.render_widget(
             Block::default().style(Style::default().bg(self.theme.bg())),
@@ -49,6 +64,186 @@ impl App {
 
         let area = frame.area();
         draw_phases.preparation = draw_started.elapsed();
+        let borrowed_screen = self.base_terminal == TerminalPresentation::Inline;
+        let WorkspaceGeometry {
+            main_area,
+            conversation_area,
+            footer_area,
+            editor_area,
+            inst_area,
+        } = if borrowed_screen {
+            // Canonical history remains available through explicit fullscreen;
+            // borrowing screen space does not project or publish that history.
+            WorkspaceGeometry {
+                main_area: area,
+                ..Default::default()
+            }
+        } else {
+            self.draw_workspace(frame, &mut draw_phases)
+        };
+
+        let t = &self.theme;
+
+        if owner == NavigationOwner::Composer
+            && let Some(ref picker) = self.at_picker
+        {
+            picker.render(area, frame, t.as_ref());
+        }
+
+        if owner == NavigationOwner::Project
+            && let Some(browser) = &self.project_browser
+        {
+            browser.render(frame, self.theme.as_ref());
+        }
+
+        if let Some(menu) = &self.active_menu
+            && owner == NavigationOwner::Menu
+        {
+            menu_surface::render_menu_surface(
+                frame,
+                area,
+                self.theme.as_ref(),
+                &menu.projection,
+                &menu.state,
+            );
+        }
+
+        if let Some(viewer) = &self.process_viewer
+            && owner == NavigationOwner::Process
+        {
+            process_viewer::render_process_viewer(frame, area, self.theme.as_ref(), viewer);
+        }
+
+        // Selector popup (overlays everything when active)
+        if let Some(ref sel) = self.selector
+            && owner == NavigationOwner::Selector
+        {
+            sel.render(area, frame, t.as_ref());
+        }
+
+        // ── Post-render effects (tachyonfx) — each zone processed separately ──
+        if !borrowed_screen {
+            self.effects.process(
+                frame.buffer_mut(),
+                conversation_area,
+                footer_area,
+                editor_area,
+            );
+        }
+
+        // ── Tutorial overlay — rendered on top of everything except toasts ──
+        if let Some(ref overlay) = self.tutorial_overlay
+            && owner == NavigationOwner::Tutorial
+        {
+            let footer_h = footer_area.height;
+            overlay.render(main_area, frame.buffer_mut(), self.theme.as_ref(), footer_h);
+        }
+
+        // ── Toast notifications — rendered last, on top of everything ──
+        self.footer_data.operator_events = self
+            .operator_events
+            .iter()
+            .rev()
+            .take(2)
+            .map(|e| crate::tui::footer::OperatorEventLine {
+                icon: e.icon,
+                message: e.message.clone(),
+                color: e.color,
+            })
+            .collect();
+
+        // ── Final bg cleanup pass ───────────────────────────────────
+        // Normalize unowned/default background leakage without erasing
+        // intentional theme-backed badges or panels. This pass started as a
+        // guard against Color::Reset bleed-through from widgets/temp buffers;
+        // keep that fence, but make the allow-list semantic instead of a stale
+        // hand-picked subset of theme colors.
+        if !borrowed_screen {
+            let base = self.theme.surface_bg();
+            let intentional_backgrounds = self.theme.intentional_backgrounds();
+            // inst_area already computed above — no duplicate layout calc
+            let buf = frame.buffer_mut();
+            for y in area.top()..area.bottom() {
+                for x in area.left()..area.right() {
+                    // Skip instrument panel — it owns its pixels
+                    if inst_area.width > 0
+                        && x >= inst_area.x
+                        && x < inst_area.right()
+                        && y >= inst_area.y
+                        && y < inst_area.bottom()
+                    {
+                        continue;
+                    }
+                    let cell = &mut buf[(x, y)];
+                    if cell.bg == Color::Reset || !intentional_backgrounds.contains(&cell.bg) {
+                        cell.set_bg(base);
+                    }
+                }
+            }
+        }
+
+        // Render command panel above the main surfaces and below blocking prompts/modals.
+        if let Some(panel) = &self.command_panel
+            && owner == NavigationOwner::Panel
+        {
+            command_surfaces::render_panel(area, frame.buffer_mut(), self.theme.as_ref(), panel);
+        }
+
+        // Render responder-backed blocking prompts above passive command panels.
+        if let Some(prompt) = &self.command_prompt
+            && owner == NavigationOwner::Prompt
+        {
+            command_surfaces::render_prompt(area, frame.buffer_mut(), self.theme.as_ref(), prompt);
+        }
+
+        // Render first-class copy text surface above command prompts/panels.
+        if self.copy_text_modal.is_some() && owner == NavigationOwner::Copy {
+            self.render_copy_text_modal(frame);
+        }
+
+        // Render operator toast above normal TUI surfaces and copy text surfaces, but below
+        // blocking extension overlays/prompts so confirmations never obscure required choices.
+        self.render_operator_event_toast(frame);
+
+        if owner == NavigationOwner::ExtensionModal
+            && let Some((widget_id, data, _, _)) = &self.active_modal
+        {
+            extension_overlays::render_modal(frame, self.theme.as_ref(), widget_id, data);
+        }
+        // Render action prompt if active
+        if let Some((widget_id, actions)) = &self.active_action_prompt
+            && owner == NavigationOwner::ExtensionAction
+        {
+            extension_overlays::render_action_prompt(
+                frame,
+                self.theme.as_ref(),
+                widget_id,
+                actions,
+            );
+        }
+        // The same owner used by keyboard routing paints above every passive
+        // surface. Those surfaces retain their selection and scroll state.
+        if owner == NavigationOwner::Decision
+            && let Some(prompt) = self
+                .interaction
+                .prompt
+                .as_ref()
+                .or(self.command_prompt.as_ref())
+        {
+            command_surfaces::render_prompt(area, frame.buffer_mut(), self.theme.as_ref(), prompt);
+        }
+        self.theme.finish_frame(frame.buffer_mut());
+        self.last_draw_phase_timings = draw_phases;
+    }
+}
+
+impl App {
+    fn draw_workspace(
+        &mut self,
+        frame: &mut Frame,
+        draw_phases: &mut runtime_trace::DrawPhaseTimings,
+    ) -> WorkspaceGeometry {
+        let area = frame.area();
         let background_started = std::time::Instant::now();
 
         // ── Global background fill ──────────────────────────────────
@@ -361,43 +556,6 @@ impl App {
             render_workbench_panel(workbench_area, frame, self.theme.as_ref(), &workbench_state);
         }
 
-        // ── Sync footer data from settings (every frame) ────
-        {
-            let s = self.settings();
-            self.footer_data.model_id = s.model.clone();
-            self.footer_data.model_provider = s.provider().to_string();
-            self.footer_data.context_class = s.effective_requested_class();
-            self.footer_data.actual_context_class = s.context_class;
-            self.footer_data.context_window = s.context_window;
-            self.footer_data.thinking_level = s.thinking.as_str().to_string();
-            self.footer_data.posture = s.posture.effective.display_name().to_string();
-            self.footer_data.runtime_brand =
-                if self.ui_presentation.level == UiPresentationLevel::Om {
-                    "OM".to_string()
-                } else {
-                    "Omegon".to_string()
-                };
-            self.footer_data.principal_id = s
-                .operating_profile()
-                .identity
-                .summary_principal()
-                .to_string();
-            self.footer_data.authorization = s.operating_profile().authorization.summary();
-            self.footer_data.provider_connected = s.provider_connected;
-            self.footer_data.sandbox = s.sandbox;
-            self.footer_data.is_oauth = s.provider_is_oauth;
-        }
-        {
-            self.footer_data.model_tier = Self::displayed_model_grade(
-                &self.footer_data.model_provider,
-                &self.footer_data.model_id,
-                &self.footer_data.harness.capability_grade,
-            );
-        }
-        self.footer_data.turn = self.turn;
-        self.footer_data.tool_calls = self.tool_calls;
-        self.footer_data.compactions = self.dashboard.compactions;
-
         // ── Session row (slim mode only, below workbench) ───────
         if session_area.height > 0 {
             self.session_row.viewport_hint = if self.conversation.conv_state.scroll_offset > 0 {
@@ -537,160 +695,15 @@ impl App {
         let inst_area = self.render_bottom_footer(footer_area, frame, t.as_ref());
 
         self.render_shared_composer(frame, editor_area);
-        let t = &self.theme;
-
-        if owner == NavigationOwner::Composer
-            && let Some(ref picker) = self.at_picker
-        {
-            picker.render(area, frame, t.as_ref());
-        }
-
-        if owner == NavigationOwner::Project
-            && let Some(browser) = &self.project_browser
-        {
-            browser.render(frame, self.theme.as_ref());
-        }
-
-        if let Some(menu) = &self.active_menu
-            && owner == NavigationOwner::Menu
-        {
-            menu_surface::render_menu_surface(
-                frame,
-                area,
-                self.theme.as_ref(),
-                &menu.projection,
-                &menu.state,
-            );
-        }
-
-        if let Some(viewer) = &self.process_viewer
-            && owner == NavigationOwner::Process
-        {
-            process_viewer::render_process_viewer(frame, area, self.theme.as_ref(), viewer);
-        }
-
-        // Selector popup (overlays everything when active)
-        if let Some(ref sel) = self.selector
-            && owner == NavigationOwner::Selector
-        {
-            sel.render(area, frame, t.as_ref());
-        }
-
-        // ── Post-render effects (tachyonfx) — each zone processed separately ──
-        self.effects.process(
-            frame.buffer_mut(),
+        WorkspaceGeometry {
+            main_area,
             conversation_area,
             footer_area,
             editor_area,
-        );
-
-        // ── Tutorial overlay — rendered on top of everything except toasts ──
-        if let Some(ref overlay) = self.tutorial_overlay
-            && owner == NavigationOwner::Tutorial
-        {
-            let footer_h = footer_area.height;
-            overlay.render(main_area, frame.buffer_mut(), self.theme.as_ref(), footer_h);
+            inst_area,
         }
-
-        // ── Toast notifications — rendered last, on top of everything ──
-        self.footer_data.operator_events = self
-            .operator_events
-            .iter()
-            .rev()
-            .take(2)
-            .map(|e| crate::tui::footer::OperatorEventLine {
-                icon: e.icon,
-                message: e.message.clone(),
-                color: e.color,
-            })
-            .collect();
-
-        // ── Final bg cleanup pass ───────────────────────────────────
-        // Normalize unowned/default background leakage without erasing
-        // intentional theme-backed badges or panels. This pass started as a
-        // guard against Color::Reset bleed-through from widgets/temp buffers;
-        // keep that fence, but make the allow-list semantic instead of a stale
-        // hand-picked subset of theme colors.
-        {
-            let base = self.theme.surface_bg();
-            let intentional_backgrounds = self.theme.intentional_backgrounds();
-            // inst_area already computed above — no duplicate layout calc
-            let buf = frame.buffer_mut();
-            for y in area.top()..area.bottom() {
-                for x in area.left()..area.right() {
-                    // Skip instrument panel — it owns its pixels
-                    if inst_area.width > 0
-                        && x >= inst_area.x
-                        && x < inst_area.right()
-                        && y >= inst_area.y
-                        && y < inst_area.bottom()
-                    {
-                        continue;
-                    }
-                    let cell = &mut buf[(x, y)];
-                    if cell.bg == Color::Reset || !intentional_backgrounds.contains(&cell.bg) {
-                        cell.set_bg(base);
-                    }
-                }
-            }
-        }
-
-        // Render command panel above the main surfaces and below blocking prompts/modals.
-        if let Some(panel) = &self.command_panel
-            && owner == NavigationOwner::Panel
-        {
-            command_surfaces::render_panel(area, frame.buffer_mut(), self.theme.as_ref(), panel);
-        }
-
-        // Render responder-backed blocking prompts above passive command panels.
-        if let Some(prompt) = &self.command_prompt
-            && owner == NavigationOwner::Prompt
-        {
-            command_surfaces::render_prompt(area, frame.buffer_mut(), self.theme.as_ref(), prompt);
-        }
-
-        // Render first-class copy text surface above command prompts/panels.
-        if self.copy_text_modal.is_some() && owner == NavigationOwner::Copy {
-            self.render_copy_text_modal(frame);
-        }
-
-        // Render operator toast above normal TUI surfaces and copy text surfaces, but below
-        // blocking extension overlays/prompts so confirmations never obscure required choices.
-        self.render_operator_event_toast(frame);
-
-        if owner == NavigationOwner::ExtensionModal
-            && let Some((widget_id, data, _, _)) = &self.active_modal
-        {
-            extension_overlays::render_modal(frame, self.theme.as_ref(), widget_id, data);
-        }
-        // Render action prompt if active
-        if let Some((widget_id, actions)) = &self.active_action_prompt
-            && owner == NavigationOwner::ExtensionAction
-        {
-            extension_overlays::render_action_prompt(
-                frame,
-                self.theme.as_ref(),
-                widget_id,
-                actions,
-            );
-        }
-        // The same owner used by keyboard routing paints above every passive
-        // surface. Those surfaces retain their selection and scroll state.
-        if owner == NavigationOwner::Decision
-            && let Some(prompt) = self
-                .interaction
-                .prompt
-                .as_ref()
-                .or(self.command_prompt.as_ref())
-        {
-            command_surfaces::render_prompt(area, frame.buffer_mut(), self.theme.as_ref(), prompt);
-        }
-        self.theme.finish_frame(frame.buffer_mut());
-        self.last_draw_phase_timings = draw_phases;
     }
-}
 
-impl App {
     fn prepare_shared_frame(&mut self) {
         // Check for available update (non-blocking)
         let update_toast: Option<(String, UpdateSeverity)> = self.update_rx.as_ref().and_then(|rx| {
@@ -748,6 +761,44 @@ impl App {
             self.dashboard.context_used_pct = self.footer_data.context_percent;
             self.dashboard.context_window_k = self.footer_data.context_window;
         }
+        // Keep the shared composer projection current even while an inline
+        // control surface borrows the screen. No workspace telemetry is rendered
+        // or consumed here; these values come from authoritative settings/state.
+        {
+            let s = self.settings();
+            self.footer_data.model_id = s.model.clone();
+            self.footer_data.model_provider = s.provider().to_string();
+            self.footer_data.context_class = s.effective_requested_class();
+            self.footer_data.actual_context_class = s.context_class;
+            self.footer_data.context_window = s.context_window;
+            self.footer_data.thinking_level = s.thinking.as_str().to_string();
+            self.footer_data.posture = s.posture.effective.display_name().to_string();
+            self.footer_data.runtime_brand =
+                if self.ui_presentation.level == UiPresentationLevel::Om {
+                    "OM".to_string()
+                } else {
+                    "Omegon".to_string()
+                };
+            self.footer_data.principal_id = s
+                .operating_profile()
+                .identity
+                .summary_principal()
+                .to_string();
+            self.footer_data.authorization = s.operating_profile().authorization.summary();
+            self.footer_data.provider_connected = s.provider_connected;
+            self.footer_data.sandbox = s.sandbox;
+            self.footer_data.is_oauth = s.provider_is_oauth;
+        }
+        {
+            self.footer_data.model_tier = Self::displayed_model_grade(
+                &self.footer_data.model_provider,
+                &self.footer_data.model_id,
+                &self.footer_data.harness.capability_grade,
+            );
+        }
+        self.footer_data.turn = self.turn;
+        self.footer_data.tool_calls = self.tool_calls;
+        self.footer_data.compactions = self.dashboard.compactions;
     }
 
     pub(super) fn render_shared_composer(&mut self, frame: &mut Frame, editor_area: Rect) {
@@ -1099,5 +1150,203 @@ impl App {
             frame.render_widget(ratatui::widgets::Clear, palette_area);
             frame.render_widget(palette, palette_area);
         }
+    }
+}
+
+#[cfg(test)]
+mod borrowed_screen_tests {
+    use super::*;
+    use crate::surfaces::layout::TerminalPresentation;
+    use ratatui::{backend::TestBackend, buffer::Buffer};
+
+    fn app(base: TerminalPresentation) -> App {
+        let mut app = App::new(crate::settings::shared("test"));
+        app.theme = Box::new(theme::TerminalTheme);
+        app.base_terminal = base;
+        app.inline_active = false;
+        for index in 0..60 {
+            app.conversation
+                .push_system(&format!("HISTORY_SENTINEL {index}"));
+        }
+        app.editor.set_text("UNSENT_EDITOR_SENTINEL");
+        app.publication_boundary = app.conversation.segments().len();
+        app.native_publication.automatic.attach(
+            app.conversation.publication_generation(),
+            app.publication_boundary,
+        );
+        app
+    }
+    fn draw(app: &mut App, width: u16, height: u16) -> Buffer {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        terminal.backend().buffer().clone()
+    }
+    fn text(buffer: &Buffer) -> String {
+        buffer
+            .content
+            .chunks(usize::from(buffer.area.width))
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn borrowed_screen_settings_and_model_do_not_paint_fullscreen_workspace() {
+        for model in [false, true] {
+            let mut app = app(TerminalPresentation::Inline);
+            if model {
+                app.open_model_menu();
+            } else {
+                app.open_settings_menu();
+            }
+            let output = text(&draw(&mut app, 200, 50));
+            assert!(
+                output.contains(if model { "Model" } else { "Settings" }),
+                "{output}"
+            );
+            assert!(
+                !output.contains("HISTORY_SENTINEL"),
+                "borrowed menu painted restored history: {output}"
+            );
+            assert!(
+                !output.contains("UNSENT_EDITOR_SENTINEL"),
+                "borrowed menu painted composer: {output}"
+            );
+            assert!(
+                app.conversation_area.is_none()
+                    && app.editor_area.is_none()
+                    && app.dashboard_area.is_none()
+                    && app.workbench_area.is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn borrowed_screen_explicit_fullscreen_retains_workspace_behind_menu() {
+        let mut app = app(TerminalPresentation::Fullscreen);
+        app.open_settings_menu();
+        let output = text(&draw(&mut app, 200, 50));
+        assert!(output.contains("Settings"));
+        assert!(output.contains("HISTORY_SENTINEL"), "{output}");
+        assert!(output.contains("UNSENT_EDITOR_SENTINEL"), "{output}");
+        assert!(app.conversation_area.is_some() && app.editor_area.is_some());
+    }
+
+    #[test]
+    fn borrowed_screen_does_not_measure_history_or_mutate_publication_on_return() {
+        let mut app = app(TerminalPresentation::Inline);
+        app.conversation.conv_state.heights = vec![17, 31];
+        app.conversation.conv_state.scroll_offset = 7;
+        app.conversation.conv_state.user_scrolled = true;
+        let boundary = app.publication_boundary;
+        let generation = app.native_publication.automatic.generation();
+        let stale = Some(Rect::new(0, 0, 200, 50));
+        app.conversation_area = stale;
+        app.editor_area = stale;
+        app.dashboard_area = stale;
+        app.workbench_area = stale;
+        app.copy_text_copy_button_area = stale;
+        app.open_settings_menu();
+        draw(&mut app, 200, 50);
+        assert_eq!(app.conversation.conv_state.heights, [17, 31]);
+        assert_eq!(app.conversation.conv_state.scroll_offset, 7);
+        assert!(
+            app.conversation_area.is_none()
+                && app.editor_area.is_none()
+                && app.dashboard_area.is_none()
+                && app.workbench_area.is_none()
+                && app.copy_text_copy_button_area.is_none()
+        );
+        app.active_menu = None;
+        app.inline_active = true;
+        let output = text(&draw(&mut app, 120, 8));
+        assert!(output.contains("UNSENT_EDITOR_SENTINEL"));
+        assert!(!output.contains("HISTORY_SENTINEL"));
+        assert_eq!(app.publication_boundary, boundary);
+        assert_eq!(app.native_publication.automatic.generation(), generation);
+        assert_eq!(app.conversation.segments().len(), boundary);
+        assert_eq!(app.conversation.conv_state.heights, [17, 31]);
+        assert_eq!(app.conversation.conv_state.scroll_offset, 7);
+        assert!(
+            app.conversation_area.is_none()
+                && app.dashboard_area.is_none()
+                && app.workbench_area.is_none()
+                && app.editor_area.is_some()
+        );
+    }
+
+    #[test]
+    fn borrowed_screen_settings_changes_refresh_inline_composer_without_context_event() {
+        let mut app = app(TerminalPresentation::Fullscreen);
+        app.update_settings(|settings| {
+            settings.model = "openai-codex:gpt-5.4".into();
+            settings.provider_connected = true;
+            settings.thinking = crate::settings::ThinkingLevel::Minimal;
+        });
+        draw(&mut app, 160, 40);
+        assert_eq!(app.footer_data.thinking_level, "minimal");
+        app.base_terminal = TerminalPresentation::Inline;
+        app.open_settings_menu();
+        // The settings command changes authoritative settings and sends a
+        // notification. It does not require an inference/ContextUpdated event.
+        app.update_settings(|settings| {
+            settings.model = "openai-codex:gpt-6-astra".into();
+            settings.thinking = crate::settings::ThinkingLevel::High;
+            settings.context_window = 200_000;
+        });
+        app.handle_agent_event(AgentEvent::SystemNotification {
+            message: "Thinking level: high".into(),
+        });
+        let menu_output = text(&draw(&mut app, 160, 40));
+        assert!(!menu_output.contains("HISTORY_SENTINEL"));
+        assert_eq!(app.footer_data.thinking_level, "high");
+        assert_eq!(app.footer_data.model_id, "openai-codex:gpt-6-astra");
+        assert_eq!(app.footer_data.context_window, 200_000);
+        app.active_menu = None;
+        app.inline_active = true;
+        let output = text(&draw(&mut app, 160, 8));
+        assert!(
+            output.contains("gpt-6-astra") && output.contains("thinking high"),
+            "{output}"
+        );
+        assert!(!output.contains("gpt-5.4") && !output.contains("thinking minimal"));
+        assert!(output.contains("UNSENT_EDITOR_SENTINEL"));
+    }
+
+    #[test]
+    fn borrowed_screen_decision_covers_mounted_selector_and_restores_its_owner() {
+        let mut app = app(TerminalPresentation::Inline);
+        app.open_settings_menu();
+        let menu = app.active_menu.clone();
+        app.selector = Some(selector::Selector::new(
+            "SELECTOR_SENTINEL",
+            vec![selector::SelectOption {
+                value: "one".into(),
+                label: "Retained choice".into(),
+                description: String::new(),
+                active: true,
+            }],
+        ));
+        let output = text(&draw(&mut app, 200, 50));
+        assert!(output.contains("SELECTOR_SENTINEL") && !output.contains("HISTORY_SENTINEL"));
+        let (respond, _receive) = std::sync::mpsc::channel();
+        app.handle_agent_event(AgentEvent::PermissionRequest {
+            tool_name: "write".into(),
+            path: "src/allowed.rs".into(),
+            kind: omegon_traits::PermissionRequestKind::PathBoundary,
+            persistence: omegon_traits::PermissionPersistence::ProjectDirectory,
+            grant_path: None,
+            respond: std::sync::Arc::new(std::sync::Mutex::new(Some(respond))),
+        });
+        assert_eq!(app.navigation_owner(), NavigationOwner::Decision);
+        let output = text(&draw(&mut app, 200, 50));
+        assert!(output.contains("Permission required"));
+        assert!(!output.contains("HISTORY_SENTINEL") && !output.contains("SELECTOR_SENTINEL"));
+        assert!(app.editor_area.is_none());
+        app.cancel_blocking_interactions();
+        assert_eq!(app.navigation_owner(), NavigationOwner::Selector);
+        assert_eq!(app.active_menu, menu);
+        assert_eq!(app.selector.as_ref().unwrap().cursor, 0);
+        assert!(text(&draw(&mut app, 200, 50)).contains("SELECTOR_SENTINEL"));
     }
 }

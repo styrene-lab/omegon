@@ -396,6 +396,34 @@ def test_activity_fixture_continuation_cancel_and_recovery_avoid_legacy_permissi
         assert not server.tool_waiting.is_set(), "activity cancellation request hit the unrelated permission fixture"
 
 
+def test_borrowed_menu_backdrop_rejects_hidden_history_and_workspace_chrome():
+    clean = "\n\n  ╭ Settings ─╮\n  │ Model    │\n  ╰──────────╯\n\n"
+    runner.assert_borrowed_menu_backdrop(clean, "Settings")
+    for invalid in ("BACKDROP_HISTORY_49\n" + clean,
+                    clean + "Ask anything\n",
+                    clean + "workbench · workspace\n",
+                    clean.replace("  │ Model", "x │ Model"),
+                    clean.replace("│ Model    │", "│ BACKDROP_HISTORY_02 │")):
+        try:
+            runner.assert_borrowed_menu_backdrop(invalid, "Settings")
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("borrowed menu accepted hidden history or workspace chrome")
+
+
+def test_menu_backdrop_fixture_has_substantial_completed_history_without_tools():
+    with runner.fixture_provider() as server:
+        server.menu_backdrop = True
+        request = Request(server.url + "/v1/chat/completions", data=b'{"messages": []}', headers={"Content-Type": "application/json"})
+        with urlopen(request, timeout=2) as response:
+            body = response.read().decode()
+        assert "All done" in body and '"finish_reason": "stop"' in body
+        for line in range(50):
+            assert body.count(f"BACKDROP_HISTORY_{line:02}") == 1
+        assert '"tool_calls"' not in body and server.requests == 1
+
+
 if __name__ == "__main__":
     command = runner.tui_command(Path("/binary with spaces"), Path("/workspace"), Path("/log"), "inline", "full")
     assert "--tui" in command and "--ui" in command, "fixture must select both axes explicitly"
@@ -436,3 +464,6 @@ if __name__ == "__main__":
 
     test_activity_fixture_holds_working_thinking_response_and_emits_bounded_tool()
     test_activity_fixture_continuation_cancel_and_recovery_avoid_legacy_permission_probe()
+
+    test_borrowed_menu_backdrop_rejects_hidden_history_and_workspace_chrome()
+    test_menu_backdrop_fixture_has_substantial_completed_history_without_tools()

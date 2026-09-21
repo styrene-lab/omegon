@@ -11754,11 +11754,12 @@ fn terminal_composer_placeholder_uses_hint_role_and_disappears_when_typing() {
 fn inline_composer_has_a_compact_readable_frame() {
     let mut app = test_app();
     app.inline_active = true;
-    app.footer_data.model_id = "anthropic:claude-sonnet-4-6".into();
-    app.footer_data.model_provider = "anthropic".into();
-    app.footer_data.model_tier.clear();
-    app.footer_data.thinking_level.clear();
-    app.footer_data.context_window = 200_000;
+    app.update_settings(|settings| {
+        settings.model = "anthropic:claude-sonnet-4-6".into();
+        settings.provider_connected = true;
+        settings.thinking = crate::settings::ThinkingLevel::Off;
+        settings.context_window = 200_000;
+    });
     app.footer_data.context_percent = 25.0;
     let rendered = render_app_to_string(&mut app, 100, 8);
     let area = app.editor_area.unwrap();
@@ -11769,6 +11770,7 @@ fn inline_composer_has_a_compact_readable_frame() {
     assert_eq!(area.height, 3);
     assert!(rendered.contains("claude-sonnet-4-6"), "{rendered}");
     assert!(rendered.contains("25% of 200k"), "{rendered}");
+    assert!(rendered.contains("thinking off"), "{rendered}");
     assert!(rendered.contains("│ Ask anything"), "{rendered}");
     assert!(
         rendered.contains('╰') && rendered.contains('╯'),
@@ -11777,7 +11779,7 @@ fn inline_composer_has_a_compact_readable_frame() {
     for noise in [
         "eng cloud",
         "grade",
-        "think",
+        "think ·",
         "ctx:",
         "ready · idle",
         "^O/Tab",

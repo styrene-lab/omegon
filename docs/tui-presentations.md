@@ -36,9 +36,12 @@ command-line override, or saving an unrelated setting, does not save the inferre
 layout or detail. Existing explicit Active/Full preferences continue to apply.
 
 F2 opens Project in fullscreen. Menus, reference pickers, inspectors, tutorials,
-and permission decisions also use the shared fullscreen widgets. Closing them
-returns to the selected base and preserves the draft. Changing the base while a
-rich view is open takes effect after closing that view. Mouse capture is disabled
+and permission decisions also use the shared fullscreen widgets. From inline,
+they borrow a clean alternate screen without loading the transcript or workspace
+behind the widget. Closing them returns to the selected base and preserves the
+draft and native scrollback. Explicit fullscreen keeps its normal workspace
+behind menus. Changing the base while a rich view is open takes effect after
+closing that view. Mouse capture is disabled
 in inline so the terminal can select text; fullscreen retains the mouse preference.
 
 Active scrollback groups each completed run of tool outcomes. Full includes detailed tool

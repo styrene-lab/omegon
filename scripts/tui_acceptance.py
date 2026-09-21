@@ -173,6 +173,21 @@ def assert_control_palette(captures):
     assert descriptions and all(span["fg"] in (244, 248) for span in descriptions), "selector descriptions lack secondary/hint contrast"
 
 
+def assert_borrowed_menu_backdrop(viewport, title):
+    rows = viewport.splitlines()
+    tops = [(index, row.index("╭")) for index, row in enumerate(rows) if f"╭ {title} " in row]
+    assert tops, f"{title} menu frame is absent"
+    top, left = tops[0]
+    bottoms = [index for index in range(top + 1, len(rows)) if rows[index].lstrip().startswith("╰")]
+    assert bottoms, "menu bottom frame is absent"
+    bottom = bottoms[0]
+    assert all(not row.strip() for row in rows[:top] + rows[bottom + 1:]), "borrowed menu exposes transcript or workspace outside its frame"
+    for row in rows[top:bottom + 1]:
+        assert not row[:left].strip() and row.rstrip().endswith(("╮", "│", "╯")), "borrowed menu exposes content beside its frame"
+    for forbidden in ("BACKDROP_HISTORY_", "Ask anything", "workbench ·", "mouse passthrough", "TUI_PRIMARY_RESUME_BEFORE"):
+        assert forbidden not in viewport, f"borrowed menu leaked underlying surface: {forbidden}"
+
+
 def tui_command(binary, workspace, log, presentation="fullscreen", detail="active", *, unconfigured=False):
     command = [str(binary), "--cwd", str(workspace), "--no-splash", "--fresh", "--log-level", "debug", "--log-file", str(log)]
     if not unconfigured:
@@ -345,6 +360,9 @@ def fixture_provider():
                     pass  # Failed acceptance terminates its owned client before releasing gates.
                 return
             reply = f"TUI_FIXTURE_REPLY_{number}"
+            if server.menu_backdrop:
+                reply += "\nAll done. This completed reply is retained only as the resumed session history fixture.\n"
+                reply += "".join(f"BACKDROP_HISTORY_{line:02} Prior conversation content must stay hidden behind borrowed menus.\n" for line in range(50))
             if server.tool_path is not None and number >= 4:
                 reply += (" The operator denied the requested write. The fixture has completed its permission check "
                           "and will make no further tool calls. The requested file remains absent, the prior project "
@@ -377,6 +395,7 @@ def fixture_provider():
     server.streaming = False
     server.markdown = False
     server.activity = False
+    server.menu_backdrop = False
     server.activity_stages = [threading.Event() for _ in range(5)]
     server.release_activity = [threading.Event() for _ in range(5)]
     server.markdown_prefix_waiting = threading.Event()
@@ -515,7 +534,9 @@ def assert_streaming_payload(transcript, markers):
         assert normalized.count(marker + body) == 1, f"streamed payload lost or altered nonwhitespace characters: {marker}"
 
 
-def run(binary: Path, output: Path, presentation="fullscreen", detail="active", entry=None, stress=False, fresh_install=False, unconfigured=False, streaming=False, markdown=False, controls=False, activity=False):
+def run(binary: Path, output: Path, presentation="fullscreen", detail="active", entry=None, stress=False, fresh_install=False, unconfigured=False, streaming=False, markdown=False, controls=False, activity=False, menu_backdrop=False):
+    if menu_backdrop and (presentation != "inline" or unconfigured or stress or streaming or markdown or controls or activity or entry):
+        raise ValueError("menu-backdrop acceptance requires configured inline layout without another scenario")
     if activity and (unconfigured or stress or streaming or markdown or controls):
         raise ValueError("activity acceptance requires a configured layout without another scenario")
     if controls and (unconfigured or stress or streaming or markdown):
@@ -536,7 +557,7 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
               "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=checkout, text=True).strip(),
               "dirty": subprocess.check_output(["git", "status", "--porcelain"], cwd=checkout, text=True),
               "captures": [], "passed": False, "tui": presentation, "ui": detail, "entry": entry, "stress": stress, "fresh_install": fresh_install,
-              "unconfigured": unconfigured, "streaming": streaming, "markdown": markdown, "controls": controls, "activity": activity, "terminal_owner": "private-headless-tmux", "gui_windows_created": 0}
+              "unconfigured": unconfigured, "streaming": streaming, "markdown": markdown, "controls": controls, "activity": activity, "menu_backdrop": menu_backdrop, "terminal_owner": "private-headless-tmux", "gui_windows_created": 0}
 
     diff = subprocess.check_output(["git", "diff", "HEAD", "--binary"], cwd=checkout)
     (output / "source.diff").write_bytes(diff)
@@ -585,6 +606,7 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
         provider.streaming = streaming
         provider.markdown = markdown
         provider.activity = activity
+        provider.menu_backdrop = menu_backdrop
         workspace = prepare_unconfigured_workspace(root) if unconfigured else prepare_fixture_workspace(root, provider)
         if activity:
             (workspace / ".omegon/profile.json").write_text(json.dumps({"permissions": {"tools": {"bash": "allow"}}}) + "\n")
@@ -620,7 +642,7 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
         command = tui_command(executable, workspace, log, None if entry else presentation, None if entry else detail, unconfigured=unconfigured)
         # Start with an explicit environment, so real credentials/plugins cannot leak into the fixture.
         environment = tui_environment(root, fresh_install=fresh_install, unconfigured=unconfigured)
-        if controls or activity:
+        if controls or activity or menu_backdrop:
             environment.pop("NO_COLOR", None)
         if entry:
             environment["OMEGON_BIN"] = str(binary)
@@ -650,6 +672,89 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
             if "semantic frontend is unavailable" in screen():
                 raise AssertionError("startup exposed an unavailable session projection")
             capture("01-startup")
+            if menu_backdrop:
+                def backdrop_command(text):
+                    action("send-keys", "-t", "run:0.0", "-l", text)
+                    action("send-keys", "-t", "run:0.0", "Enter")
+                backdrop_command("create the completed local history fixture")
+                wait_for(lambda: turn_settled(1), "seed history turn completed")
+                capture("backdrop-seed-primary", primary=True)
+                assert "BACKDROP_HISTORY_49" in history()
+                backdrop_command("/quit")
+                wait_for(lambda: "TUI_EXIT_0" in screen(), "seed harness saved and exited")
+                journals = sorted(root.rglob("*.authority.jsonl"))
+                assert len(journals) == 1, "expected exactly one saved session"
+                session_id = json.loads(journals[0].read_text().splitlines()[0])["session_id"]
+                old_group = ledger["process_group"]
+                resume_command = [argument for argument in command if argument != "--fresh"] + ["--resume", session_id]
+                resume_launch = ["env", "-i", *(f"{key}={value}" for key, value in environment.items()), *resume_command]
+                resume_shell = "printf '%s\n' TUI_PRIMARY_RESUME_BEFORE; " + shlex.join(resume_launch) + "; result=$?; printf '\nTUI_RESUME_EXIT_%s\n' \"$result\"; sleep 30"
+                action("new-window", "-d", "-t", "run:1", "-n", "resumed", "-c", str(workspace), resume_shell)
+                action("swap-window", "-s", "run:0", "-t", "run:1")
+                ledger["pid"] = tmux("display-message", "-p", "-t", "run:0.0", "#{pane_pid}").strip()
+                ledger["process_group"] = os.getpgid(int(ledger["pid"]))
+                assert ledger["process_group"] == int(ledger["pid"]), "resumed child must own process group"
+                os.killpg(old_group, signal.SIGTERM)
+                wait_for(lambda: not group_exists(old_group), "retired seed process group exited", seconds=5)
+                wait_for(lambda: "1" not in tmux("list-windows", "-t", "run", "-F", "#{window_index}").split(), "retired seed window closed", seconds=5)
+                wait_for(lambda: "Session attached" in screen() and "Ask anything" in screen(), "resumed inline session attached")
+                ledger["resume"] = {"session_id": session_id, "command": resume_command,
+                    "retired_process_group": old_group, "retired_group_cleanup_verified": True,
+                    "pid": ledger["pid"], "process": subprocess.check_output(["ps", "-p", ledger["pid"], "-o", "pid=,lstart=,command="], text=True)}
+                assert str(binary) in ledger["resume"]["process"]
+                capture("backdrop-resumed-inline", primary=True)
+                assert "BACKDROP_HISTORY_" not in history(), "resume replayed prior history into native inline output"
+                assert "TUI_PRIMARY_RESUME_BEFORE" in history()
+                for command_text, title in (("/settings", "Settings"), ("/model", "Model"), ("/think", "Thinking level")):
+                    backdrop_command(command_text)
+                    wait_for(lambda: f"╭ {title} " in screen(), f"{title} borrowed menu opened")
+                    name = title.lower().replace(" ", "-")
+                    capture(f"backdrop-{name}")
+                    styled = output / f"backdrop-{name}.ansi"
+                    styled.write_text(tmux("capture-pane", "-e", "-p", "-t", "run:0.0"))
+                    assert tmux("display-message", "-p", "-t", "run:0.0", "#{alternate_on}").strip() == "1"
+                    assert_borrowed_menu_backdrop(screen(), title)
+                    ledger.setdefault("backdrop_menus", []).append({"title": title, "file": styled.name, "sha256": digest(styled)})
+                    if title == "Thinking level":
+                        # Selector order comes from ThinkingLevel::all(): off,
+                        # minimal, low, medium, high, xhigh, max. Up clamps at 0.
+                        action("send-keys", "-t", "run:0.0", *("Up" for _ in range(7)), *("Down" for _ in range(4)), "Enter")
+                    else:
+                        action("send-keys", "-t", "run:0.0", "Escape")
+                    wait_for(lambda: tmux("display-message", "-p", "-t", "run:0.0", "#{alternate_on}").strip() == "0" and "Ask anything" in screen(), f"{title} returned to inline")
+                    if title == "Thinking level":
+                        wait_for(lambda: "thinking high" in screen(), "thinking selection updates inline composer metadata")
+                        capture("backdrop-thinking-selection-return")
+                    assert history().count("TUI_PRIMARY_RESUME_BEFORE") == 1, "menu return damaged or replayed primary terminal output"
+                    assert "BACKDROP_HISTORY_" not in history(), "menu return replayed canonical history into native inline output"
+                draft = "BACKDROP_UNSENT_DRAFT"
+                action("send-keys", "-t", "run:0.0", "-l", draft)
+                action("send-keys", "-t", "run:0.0", "F2")
+                wait_for(lambda: "Project browser" in screen(), "draft opens Project browser")
+                capture("backdrop-project-draft")
+                action("resize-window", "-t", "run:0", "-x", "72", "-y", "24")
+                wait_for(lambda: "Project browser" in screen(), "Project survives resize")
+                action("send-keys", "-t", "run:0.0", "Escape")
+                wait_for(lambda: draft in screen() and "Project browser" not in screen(), "Escape restores unsent draft")
+                capture("backdrop-draft-restored", primary=True)
+                assert history().count(draft) == 1 and provider.requests == 1
+                assert "TUI_PRIMARY_RESUME_BEFORE" in history()
+                action("send-keys", "-t", "run:0.0", "C-u")
+                action("resize-window", "-t", "run:0", "-x", "120", "-y", "40")
+                backdrop_command("/ui terminal fullscreen")
+                wait_for(lambda: tmux("display-message", "-p", "-t", "run:0.0", "#{alternate_on}").strip() == "1" and "BACKDROP_HISTORY_" in screen(), "explicit fullscreen retains session history")
+                capture("backdrop-explicit-fullscreen-history")
+                assert provider.requests == 1 and digest(binary) == ledger["binary_sha256"]
+                ledger["menu_backdrop_checks"] = {"actual_saved_session_resumed": True, "borrowed_menus_blank": True,
+                    "primary_preserved": True, "draft_preserved_after_project_resize": True,
+                    "explicit_fullscreen_history_visible": True, "thinking_selection_updates_inline_composer": True,
+                    "local_requests": 1, "paid_requests": 0}
+                backdrop_command("/quit")
+                wait_for(lambda: "TUI_RESUME_EXIT_0" in screen(), "resumed harness clean exit")
+                assert tmux("display-message", "-p", "-t", "run:0.0", "#{alternate_on}:#{mouse_any_flag}").strip() == "0:0"
+                capture("backdrop-shell-return")
+                ledger["passed"] = True
+                return
             if activity:
                 def activity_snapshot(name, phase, tail_marker=None, tool=False):
                     def phase_visible():
@@ -1222,6 +1327,7 @@ if __name__ == "__main__":
     parser.add_argument("--tui", choices=["inline", "fullscreen"], default="fullscreen")
     parser.add_argument("--ui", choices=["active", "full"], default="active")
     parser.add_argument("--entry", choices=["om", "omegon"], help="test the fixed-build launcher default without UI flags")
+    parser.add_argument("--menu-backdrop", action="store_true", help="gate resumed inline menus against hidden fullscreen history and preserve draft/primary output")
     parser.add_argument("--activity", action="store_true", help="gate live phases, real bounded tool activity, cancel, and recovery")
     parser.add_argument("--controls", action="store_true", help="gate neutral control hierarchy and selection without inference")
     parser.add_argument("--markdown", action="store_true", help="gate live Markdown styles, word wrapping, code indentation, and resize")
@@ -1230,4 +1336,4 @@ if __name__ == "__main__":
     parser.add_argument("--fresh-install", action="store_true", help="verify profile-free non-child startup without a posture wizard")
     parser.add_argument("--unconfigured", action="store_true", help="verify no-model, no-credential startup and draft preservation through connection cancellation")
     arguments = parser.parse_args()
-    run(arguments.binary, arguments.output.resolve(), arguments.tui, arguments.ui, arguments.entry, arguments.stress, arguments.fresh_install, arguments.unconfigured, arguments.streaming, arguments.markdown, arguments.controls, arguments.activity)
+    run(arguments.binary, arguments.output.resolve(), arguments.tui, arguments.ui, arguments.entry, arguments.stress, arguments.fresh_install, arguments.unconfigured, arguments.streaming, arguments.markdown, arguments.controls, arguments.activity, arguments.menu_backdrop)
