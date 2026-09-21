@@ -1937,10 +1937,10 @@ impl EventBus {
                         service.capability.id.as_str()
                     );
                 }
-                if !graph
+                if graph
                     .capability_owners
                     .get(&service.capability.id)
-                    .is_some_and(|owner| owner == &feature.contribution_id)
+                    .is_none_or(|owner| owner != &feature.contribution_id)
                 {
                     self.pending_features.clear();
                     self.pending_internal_tools.clear();

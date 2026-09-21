@@ -1071,7 +1071,7 @@ fn copy_extension_source_tree(
     for raw_name in read_directory_names(source, 10_000)? {
         if path.is_empty()
             && raw_name.starts_with(b".")
-            && !binary.is_some_and(|binary| binary.first() == Some(&raw_name))
+            && binary.is_none_or(|binary| binary.first() != Some(&raw_name))
         {
             continue;
         }
