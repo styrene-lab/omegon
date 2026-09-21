@@ -313,6 +313,19 @@ formation, and an evaluation baseline for later learning policies.
 
 **Corpus:** [memory-candidate-reconciliation](changes/memory-candidate-reconciliation/proposal.md).
 
+**Post-Wave-5 entry:** The [drift assessment](changes/memory-candidate-reconciliation/assessment.md)
+uses integrated `main` at `7b2da402`. Completed extraction batches and pending lifecycle
+facts are different representations. Existing extraction recovery is not admission
+recovery. Freeze candidate/evidence/decision identities and confirmation composition
+before matching, atomic admission, or host adapters are implemented in parallel.
+
+**Delivery:** `feat/memory-wave6-reconciliation` is a planning seed directly from
+that main revision. Its change-local tasks own the ordered implementation slices.
+One owner controls shared types, backend contracts, and migrations. Fixtures and
+read-side/host planning can proceed against frozen contracts; migration numbers and
+live-evaluation limits must be selected when implementation starts. New callable or
+schema surface requires measured composition-budget review.
+
 **Scope:** Add bounded scoped equivalence. Distinguish reuse, refinement, correction,
 and unresolved conflict. Preserve independent evidence identities and retired history.
 Commit candidate state, facts, edges, and receipts atomically with version checks.
@@ -333,6 +346,11 @@ validation limits model authority and unresolved claims remain inspectable.
 reduction and knowledge-update criteria without exceeding false-merge or task-regression
 tolerances. If it fails, retain unresolved candidates and revise the policy before
 enabling broader semantic admission.
+
+Wave 5's quotation-based smoke comparison does not establish those semantic admission
+criteria. Build development and held-out equivalence/correction/conflict cases,
+including correlated sources and deliberate nonmatches, and obtain a fresh live-run
+budget before any model-backed acceptance experiment.
 
 ## Wave 7 — Maintain freshness without confusing age with truth
 

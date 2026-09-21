@@ -2,16 +2,25 @@
 
 ## Intent
 
-Replace append-or-exact-hash behavior with evidence-aware admission. Repeated
-paraphrases, explicit corrections, refinements, and unresolved contradictions
-require different durable outcomes.
+Plan evidence-aware admission after Wave 5, against source revision `7b2da402`.
+Repeated paraphrases, explicit corrections, refinements, and unresolved
+contradictions require different durable outcomes. This change is planned, not
+implemented. See [the source assessment](assessment.md) for the starting boundary.
 
 ## Scope
 
-A bounded candidate reconciliation service with new/equivalent/refinement/
-correction/conflict decisions, source-aware evidence accounting, and atomic
-versioned admission. Foreground writes, lifecycle ingestion, and background
-extraction use the same domain rules with explicit admission intent.
+Freeze candidate identity, decision ownership, admission units, and confirmation
+contracts first. Then add bounded matching, atomic versioned admission, recoverable
+decision work, host/read-side integration, and reconciliation evaluation.
+
+Reuse `MemoryMutation`, operation receipts, `FactPrecondition`, both backends, and
+the managed memory service. Foreground writes, lifecycle ingestion, and extracted
+candidates use shared domain validation with explicit admission intent. Ordinary
+explicit writes do not acquire blanket operator approval. Inferred lifecycle
+admission retains its operator-confirmation policy.
+
+Maintenance revalidation and procedural learning remain sibling work. This plan
+does not authorize implementation, migrations, provider calls, or live spending.
 
 ## Success criteria
 
@@ -19,3 +28,7 @@ extraction use the same domain rules with explicit admission intent.
 - Explicit corrections preserve historical evidence and supersession.
 - Unresolved contradictions remain inspectable without silently choosing the newest.
 - Retries and repeated evidence do not masquerade as independent confirmation.
+- Durable decision recovery resumes admission without re-extracting completed batches.
+- Changed decisions or target versions invalidate the corresponding operator approval.
+- Development and held-out reconciliation corpora meet newly frozen measured
+  thresholds under a fresh, explicitly authorized live budget.
