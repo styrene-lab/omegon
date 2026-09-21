@@ -22,7 +22,7 @@ pub(crate) enum SessionBlobError {
     Invalid(String),
 }
 
-type Result<T> = std::result::Result<T, SessionBlobError>;
+pub(crate) type Result<T> = std::result::Result<T, SessionBlobError>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -302,6 +302,54 @@ impl SessionBlobStore {
         self.read(content_ref, required_projection).map(|_| ())
     }
 
+    /// Fail-fast reader for bounded replay. Publication is atomic, so this reader
+    /// need not wait on the writer mutex; an inconsistent snapshot is unavailable.
+    pub(crate) fn read_bounded(
+        &self,
+        content_ref: &ContentRef,
+        required_projection: ProjectionClass,
+        max_file_bytes: usize,
+        check: &mut dyn FnMut(usize) -> Result<()>,
+    ) -> Result<Vec<u8>> {
+        check(0)?;
+        if content_ref.projection_class != required_projection {
+            return Err(SessionBlobError::Invalid(
+                "content projection is not authorized".into(),
+            ));
+        }
+        validate_digest(&content_ref.digest)?;
+        validate_media_type(&content_ref.media_type)?;
+        ensure_existing_directory(&self.root)?;
+        ensure_existing_directory(&self.digest_dir())?;
+        let storage = content_ref.storage_reference();
+        let metadata_bytes = read_bounded_file(
+            &self.metadata_path(&storage)?,
+            max_file_bytes.min(1024 * 1024),
+            check,
+        )?;
+        let metadata: BlobMetadata = serde_json::from_slice(&metadata_bytes)?;
+        metadata.validate_ref(content_ref)?;
+        check(0)?;
+        let bytes = read_bounded_file(
+            &self.blob_path(&storage)?,
+            max_file_bytes.min(MAX_SESSION_BLOB_BYTES as usize),
+            check,
+        )?;
+        if bytes.len() as u64 != content_ref.byte_length {
+            return Err(SessionBlobError::Invalid("content length changed".into()));
+        }
+        let mut digest = Sha256::new();
+        for chunk in bytes.chunks(64 * 1024) {
+            check(0)?;
+            digest.update(chunk);
+        }
+        if format!("{:x}", digest.finalize()) != content_ref.digest {
+            return Err(SessionBlobError::Invalid("content digest changed".into()));
+        }
+        check(0)?;
+        Ok(bytes)
+    }
+
     fn validate_locked(
         &self,
         content_ref: &ContentRef,
@@ -496,7 +544,7 @@ fn open_regular_file(path: &Path) -> Result<File> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW);
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
     let file = options.open(path)?;
     if !file.metadata()?.is_file() {
@@ -505,6 +553,36 @@ fn open_regular_file(path: &Path) -> Result<File> {
         ));
     }
     Ok(file)
+}
+
+/// Charge the whole bounded allocation before reading; poll between fixed-size
+/// reads. Reject devices/FIFOs and files that change during this snapshot.
+pub(crate) fn read_bounded_file(
+    path: &Path,
+    maximum: usize,
+    check: &mut dyn FnMut(usize) -> Result<()>,
+) -> Result<Vec<u8>> {
+    check(0)?;
+    let mut file = open_regular_file(path)?;
+    let before = file.metadata()?;
+    let length = usize::try_from(before.len())
+        .ok()
+        .filter(|length| *length <= maximum)
+        .ok_or_else(|| SessionBlobError::Invalid("replay file byte limit exceeded".into()))?;
+    check(length)?;
+    let mut bytes = vec![0; length];
+    for chunk in bytes.chunks_mut(64 * 1024) {
+        check(0)?;
+        file.read_exact(chunk)?;
+    }
+    check(0)?;
+    let after = file.metadata()?;
+    if before.len() != after.len() || before.modified()? != after.modified()? {
+        return Err(SessionBlobError::Invalid(
+            "replay file changed during read".into(),
+        ));
+    }
+    Ok(bytes)
 }
 
 struct TemporaryFile {
@@ -649,6 +727,70 @@ fn sync_directory(_path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_blob_reads_enforce_metadata_budget_and_mid_read_cancellation() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SessionBlobStore::at(directory.path().join("blobs"));
+        let bytes = vec![b'x'; 200_000];
+        let reference = store
+            .write(&bytes, "text/plain", ProjectionClass::Default)
+            .unwrap();
+        let mut charged = 0;
+        let mut polls = 0;
+        assert_eq!(
+            store
+                .read_bounded(&reference, ProjectionClass::Default, 300_000, &mut |n| {
+                    charged += n;
+                    polls += 1;
+                    Ok(())
+                })
+                .unwrap(),
+            bytes
+        );
+        assert!(charged > bytes.len(), "metadata is part of the read budget");
+        assert!(polls > 8, "large blobs poll across reads and hashing");
+        let mut reading_blob = false;
+        let mut subsequent_polls = 0;
+        let error = store
+            .read_bounded(&reference, ProjectionClass::Default, 300_000, &mut |n| {
+                if n == bytes.len() {
+                    reading_blob = true;
+                }
+                if reading_blob && n == 0 {
+                    subsequent_polls += 1;
+                    if subsequent_polls == 2 {
+                        return Err(SessionBlobError::Invalid("controlled cancellation".into()));
+                    }
+                }
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(error.to_string().contains("controlled cancellation"));
+        let metadata = store.metadata_path(&reference.storage_reference()).unwrap();
+        fs::write(metadata, vec![b' '; 300_001]).unwrap();
+        assert!(
+            store
+                .read_bounded(&reference, ProjectionClass::Default, 300_000, &mut |_| Ok(
+                    ()
+                ))
+                .unwrap_err()
+                .to_string()
+                .contains("byte limit")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_blob_file_reader_rejects_symlinks_and_special_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = directory.path().join("data");
+        fs::write(&target, b"data").unwrap();
+        let link = directory.path().join("link");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(read_bounded_file(&link, 100, &mut |_| Ok(())).is_err());
+        assert!(read_bounded_file(Path::new("/dev/null"), 100, &mut |_| Ok(())).is_err());
+    }
     use std::sync::Barrier;
 
     fn store(directory: &tempfile::TempDir, name: &str) -> SessionBlobStore {

@@ -27,6 +27,8 @@ pub(crate) enum SessionViewKind {
 
 #[derive(Debug, Clone)]
 pub(crate) struct SessionViewTarget {
+    /// Process-local identity of this publication, independent of caller generations.
+    pub(crate) binding_id: Uuid,
     pub(crate) snapshot: PathBuf,
     pub(crate) session_id: String,
     pub(crate) stream_id: Option<Uuid>,
@@ -54,6 +56,12 @@ pub(crate) struct DeferredSessionViewBinding {
 
 impl DeferredSessionViewBinding {
     pub(crate) fn bind(&self, binding: SessionViewBinding) {
+        binding
+            .published
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .target
+            .binding_id = Uuid::new_v4();
         *self
             .binding
             .write()
@@ -72,6 +80,7 @@ impl DeferredSessionViewBinding {
 impl SessionViewBinding {
     pub(crate) fn new(snapshot: PathBuf, session_id: String) -> Self {
         let target = SessionViewTarget {
+            binding_id: Uuid::new_v4(),
             snapshot,
             session_id,
             stream_id: None,
@@ -97,7 +106,8 @@ impl SessionViewBinding {
             .clone()
     }
 
-    pub(crate) fn replace(&self, target: SessionViewTarget) {
+    pub(crate) fn replace(&self, mut target: SessionViewTarget) {
+        target.binding_id = Uuid::new_v4();
         let generation = target.generation;
         *self
             .published
@@ -471,6 +481,7 @@ mod tests {
             .publish(&replay, &ALL_SHADOW_PROJECTORS);
         let target = SessionViewTarget {
             snapshot,
+            binding_id: Uuid::new_v4(),
             session_id: SESSION_ID.into(),
             stream_id: Some(replay.frontier().stream_id()),
             generation: 7,
@@ -503,6 +514,45 @@ mod tests {
         assert_eq!(view.status, SemanticSessionStatus::LegacyUnavailable);
         assert!(view.frontier_sequence > 0);
         assert!(view.transcript.is_empty());
+    }
+
+    #[test]
+    fn capture_binding_identity_fences_same_generation_rebinds_and_paths() {
+        let binding = DeferredSessionViewBinding::default();
+        let first =
+            SessionViewBinding::new(PathBuf::from("first/session.json"), "same-session".into());
+        binding.bind(first.clone());
+        let original = binding.snapshot().unwrap();
+        assert!(crate::session_advisory::generation_is_current(
+            &binding, &original
+        ));
+        let mut wrong_path = original.clone();
+        wrong_path.snapshot = PathBuf::from("second/session.json");
+        assert!(!crate::session_advisory::generation_is_current(
+            &binding,
+            &wrong_path
+        ));
+        binding.bind(SessionViewBinding::new(
+            original.snapshot.clone(),
+            original.session_id.clone(),
+        ));
+        assert_eq!(binding.snapshot().unwrap().generation, original.generation);
+        assert!(!crate::session_advisory::generation_is_current(
+            &binding, &original
+        ));
+        binding.bind(first.clone());
+        let rebound = binding.snapshot().unwrap();
+        assert!(!crate::session_advisory::generation_is_current(
+            &binding, &original
+        ));
+        first.replace(rebound.clone());
+        assert!(!crate::session_advisory::generation_is_current(
+            &binding, &rebound
+        ));
+        assert!(crate::session_advisory::generation_is_current(
+            &binding,
+            &binding.snapshot().unwrap()
+        ));
     }
 
     #[test]

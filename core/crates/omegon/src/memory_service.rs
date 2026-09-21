@@ -347,6 +347,12 @@ pub(crate) enum MemoryRequestV1 {
         #[serde(skip, default)]
         cancellation: CancellationToken,
     },
+    EmbeddingIndexingRecord {
+        scope: MemoryScopeV1,
+        fact_id: String,
+        #[serde(skip, default)]
+        cancellation: CancellationToken,
+    },
     GetEdges {
         scope: MemoryScopeV1,
         mind: String,
@@ -366,6 +372,12 @@ pub(crate) enum MemoryRequestV1 {
         mind: String,
         model: String,
         limit: usize,
+        #[serde(skip, default)]
+        cancellation: CancellationToken,
+    },
+    FormationCursor {
+        scope: MemoryScopeV1,
+        key: omegon_memory::FormationCaptureKey,
         #[serde(skip, default)]
         cancellation: CancellationToken,
     },
@@ -473,9 +485,11 @@ impl MemoryRequestV1 {
             | Self::VectorSearch { cancellation, .. }
             | Self::EmbeddingMetadata { cancellation, .. }
             | Self::EmbeddingIndexState { cancellation, .. }
+            | Self::EmbeddingIndexingRecord { cancellation, .. }
             | Self::GetEdges { cancellation, .. }
             | Self::ListEpisodes { cancellation, .. }
             | Self::PendingFormations { cancellation, .. }
+            | Self::FormationCursor { cancellation, .. }
             | Self::SearchEpisodes { cancellation, .. }
             | Self::ApplyMutation { cancellation, .. }
             | Self::ApplyToolMutation { cancellation, .. }
@@ -508,8 +522,10 @@ pub(crate) enum MemoryPayloadV1 {
     EmbeddingMetadata(Option<EmbeddingMetadata>),
     RecallReport(omegon_memory::VectorSearchReport),
     EmbeddingIndexState(omegon_memory::EmbeddingIndexState),
+    EmbeddingIndexingRecord(Option<omegon_memory::EmbeddingIndexingRecord>),
     Edges(Vec<Edge>),
     Episodes(Vec<Episode>),
+    FormationCursor(Option<omegon_memory::FormationCursor>),
     Mutation(MemoryMutationOutcome),
     Jsonl(JsonlSyncReportV1),
     Vault(VaultSyncReportV1),
@@ -554,6 +570,8 @@ pub(crate) enum ManagedMemoryIndexStateV1 {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ManagedMemoryStatusV1 {
+    #[serde(default)]
+    pub indexing: omegon_memory::EmbeddingIndexingSummary,
     pub total_facts: usize,
     pub active_facts: usize,
     pub project_facts: usize,
@@ -1778,10 +1796,12 @@ fn execute_request(
                         .await?;
                     Ok(MemoryPayloadV1::Selection(selection))
                 }
-                MemoryRequestV1::ManagedStatus { .. } => {
+                MemoryRequestV1::ManagedStatus { mind, .. } => {
                     let stats = backend.inventory_stats().await?;
+                    let indexing = backend.embedding_indexing_summary(&mind).await?;
                     let (authority, index_state) = managed_status_metadata(config);
                     Ok(MemoryPayloadV1::ManagedStatus(ManagedMemoryStatusV1 {
+                        indexing,
                         total_facts: stats.total_facts,
                         active_facts: stats.active_facts,
                         project_facts: stats.project_facts,
@@ -1836,6 +1856,10 @@ fn execute_request(
                     .embedding_index_state(&fact_id, &space)
                     .await
                     .map(MemoryPayloadV1::EmbeddingIndexState),
+                MemoryRequestV1::EmbeddingIndexingRecord { fact_id, .. } => backend
+                    .embedding_indexing_record(&fact_id)
+                    .await
+                    .map(MemoryPayloadV1::EmbeddingIndexingRecord),
                 MemoryRequestV1::EmbeddingMetadata { mind, .. } => backend
                     .embedding_metadata(&mind)
                     .await
@@ -1854,6 +1878,10 @@ fn execute_request(
                     .pending_formations(&mind, &model, limit)
                     .await
                     .map(MemoryPayloadV1::Episodes),
+                MemoryRequestV1::FormationCursor { key, .. } => backend
+                    .formation_cursor(&key)
+                    .await
+                    .map(MemoryPayloadV1::FormationCursor),
                 MemoryRequestV1::SearchEpisodes {
                     mind, query, limit, ..
                 } => backend
@@ -2087,9 +2115,11 @@ fn request_scope(request: &MemoryRequestV1) -> MemoryScopeV1 {
         | MemoryRequestV1::VectorSearch { scope, .. }
         | MemoryRequestV1::EmbeddingMetadata { scope, .. }
         | MemoryRequestV1::EmbeddingIndexState { scope, .. }
+        | MemoryRequestV1::EmbeddingIndexingRecord { scope, .. }
         | MemoryRequestV1::GetEdges { scope, .. }
         | MemoryRequestV1::ListEpisodes { scope, .. }
         | MemoryRequestV1::PendingFormations { scope, .. }
+        | MemoryRequestV1::FormationCursor { scope, .. }
         | MemoryRequestV1::SearchEpisodes { scope, .. }
         | MemoryRequestV1::ApplyMutation { scope, .. }
         | MemoryRequestV1::ApplyToolMutation { scope, .. }

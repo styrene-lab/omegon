@@ -223,6 +223,45 @@ pub enum EmbeddingIndexState {
     Ready,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EmbeddingIndexingReason {
+    Pending,
+    Unavailable,
+    Timeout,
+    Cancelled,
+    GenerationFailed,
+    WriteFailed,
+    Incompatible,
+    SourceChanged,
+}
+
+impl EmbeddingIndexingReason {
+    pub fn retryable(self) -> bool {
+        !matches!(self, Self::Incompatible | Self::SourceChanged)
+    }
+}
+
+/// One outstanding attempt per fact. Unknown space is permitted before the
+/// provider returns verified identity; it must never be inferred from a label.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmbeddingIndexingRecord {
+    pub fact: FactPrecondition,
+    pub attempt_id: String,
+    pub space: Option<EmbeddingSpace>,
+    pub reason: EmbeddingIndexingReason,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmbeddingIndexingSummary {
+    pub pending: usize,
+    pub retryable: usize,
+    pub terminal: usize,
+    /// Active facts with no identified vector and no recorded attempt.
+    pub untracked: usize,
+    pub reasons: std::collections::BTreeMap<EmbeddingIndexingReason, usize>,
+}
+
 /// A fact with search scoring attached.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -470,6 +509,22 @@ pub struct FormationCoverage {
     pub first_sequence: u64,
     /// Version of the producer's evidence-selection rules, not extraction policy.
     pub policy_version: u16,
+}
+
+/// Local capture namespace. Imported episodes do not advance this namespace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FormationCaptureKey {
+    pub mind: String,
+    pub session_id: String,
+    pub stream_id: String,
+    pub policy_version: u16,
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FormationCursor {
+    pub sequence: u64,
+    pub event_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -749,12 +804,24 @@ pub enum MemoryMutation {
         fact: FactPrecondition,
         embedding: IdentifiedEmbedding,
     },
+    RecordEmbeddingIndexing {
+        record: EmbeddingIndexingRecord,
+    },
+    CompleteEmbeddingIndexing {
+        fact: FactPrecondition,
+        attempt_id: String,
+        embedding: IdentifiedEmbedding,
+    },
     CreateEdge {
         mind: String,
         request: CreateEdge,
     },
     StoreEpisode {
         request: StoreEpisode,
+    },
+    StoreCoveragePage {
+        request: StoreEpisode,
+        expected: Option<FormationCursor>,
     },
     CompleteFormation {
         episode_id: String,
@@ -799,11 +866,20 @@ pub enum MemoryMutationEffect {
         model_name: String,
         dims: u32,
     },
+    EmbeddingIndexingRecorded {
+        fact: FactPrecondition,
+        attempt_id: String,
+    },
     EdgeCreated {
         edge_id: String,
     },
     EpisodeStored {
         episode_id: String,
+    },
+    CoverageStored {
+        episode_id: String,
+        key: FormationCaptureKey,
+        cursor: FormationCursor,
     },
     FormationCompleted {
         episode_id: String,

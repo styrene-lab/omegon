@@ -91,6 +91,7 @@ impl std::error::Error for MemoryFeatureInvokeError {}
 
 mod checkpoint;
 pub(crate) mod confirmation;
+mod finalization;
 mod formation;
 mod lifecycle;
 mod recovery;
@@ -123,10 +124,13 @@ pub struct MemoryFeature {
     session_binding: Option<crate::session_consumers::DeferredSessionViewBinding>,
     session_id: Mutex<Option<String>>,
     session_end_tasks: Arc<Mutex<SessionEndTaskState>>,
+    finalization_running: Arc<AtomicBool>,
+    finalization_sender: Option<tokio::sync::mpsc::Sender<finalization::Message>>,
     recovery_started: bool,
     recovery_status: tokio::sync::watch::Sender<recovery::Status>,
     checkpoint_turns: u32,
     checkpoint_task: Option<SessionEndTask>,
+    checkpoint_backlog: Arc<AtomicBool>,
     last_pre_eviction: Option<omegon_traits::ContextCheckpointOutcome>,
     status_root: std::path::PathBuf,
 }
@@ -164,10 +168,13 @@ impl MemoryFeature {
             session_binding: None,
             session_id: Mutex::new(None),
             session_end_tasks: Arc::new(Mutex::new(SessionEndTaskState::default())),
+            finalization_running: Arc::new(AtomicBool::new(false)),
+            finalization_sender: None,
             recovery_started: false,
             recovery_status: tokio::sync::watch::channel(recovery::Status::default()).0,
             checkpoint_turns: 0,
             checkpoint_task: None,
+            checkpoint_backlog: Arc::new(AtomicBool::new(false)),
             last_pre_eviction: None,
             status_root: std::env::current_dir().unwrap_or_default(),
         }
@@ -333,6 +340,35 @@ impl MemoryFeature {
     }
 }
 
+struct EmbeddingObservation<'a> {
+    root: &'a std::path::Path,
+    settled: bool,
+}
+
+impl EmbeddingObservation<'_> {
+    fn settle(
+        &mut self,
+        state: crate::surfaces::memory_status::CapabilityState,
+        reason: Option<crate::surfaces::memory_status::CapabilityReason>,
+    ) {
+        crate::status::update_memory_capabilities(self.root, |status| {
+            status.embeddings = crate::surfaces::memory_status::ComponentReadiness { state, reason }
+        });
+        self.settled = true;
+    }
+}
+
+impl Drop for EmbeddingObservation<'_> {
+    fn drop(&mut self) {
+        if !self.settled {
+            self.settle(
+                crate::surfaces::memory_status::CapabilityState::Degraded,
+                Some(crate::surfaces::memory_status::CapabilityReason::Cancelled),
+            );
+        }
+    }
+}
+
 async fn persist_embedding(
     embed_svc: &Arc<dyn EmbeddingService>,
     binding: &crate::memory_service::MemoryBinding,
@@ -340,35 +376,44 @@ async fn persist_embedding(
     content: String,
     operation_id: String,
     cancellation: tokio_util::sync::CancellationToken,
+    root: &std::path::Path,
 ) {
-    let generated = tokio::select! {
-        _ = cancellation.cancelled() => return,
-        result = tokio::time::timeout(std::time::Duration::from_secs(30), embed_svc.embed_identified(&content)) => result,
+    use crate::embedding::IndexFactOutcome;
+    use crate::surfaces::memory_status::{CapabilityReason as Reason, CapabilityState as State};
+    use omegon_memory::EmbeddingIndexingReason as IndexReason;
+    let mut observation = EmbeddingObservation {
+        root,
+        settled: false,
     };
-    match generated {
-        Ok(Ok(embedding)) => {
-            if let Err(error) = binding
-                .invoke(crate::memory_service::MemoryRequestV1::ApplyMutation {
-                    scope: crate::memory_service::MemoryScopeV1::Project,
-                    operation_id,
-                    mutation: MemoryMutation::StoreIdentifiedEmbedding {
-                        fact: fact.clone(),
-                        embedding,
-                    },
-                    cancellation,
-                })
-                .await
-            {
-                tracing::warn!(fact_id = %fact.id, ?error, "auto-embed store failed");
-            }
+    let (state, reason) = match crate::embedding::index_fact(
+        embed_svc.as_ref(),
+        binding,
+        fact,
+        &content,
+        &operation_id,
+        &cancellation,
+    )
+    .await
+    {
+        IndexFactOutcome::Indexed => (State::Ready, None),
+        IndexFactOutcome::Incomplete(IndexReason::Timeout) => {
+            (State::Degraded, Some(Reason::DeadlineExceeded))
         }
-        Ok(Err(error)) => {
-            tracing::debug!(fact_id = %fact.id, %error, "auto-embed generation failed");
+        IndexFactOutcome::Incomplete(IndexReason::Cancelled) => {
+            (State::Degraded, Some(Reason::Cancelled))
         }
-        Err(_) => tracing::warn!(fact_id = %fact.id, "auto-embed generation timed out"),
-    }
+        IndexFactOutcome::Incomplete(IndexReason::Unavailable) => {
+            (State::Unavailable, Some(Reason::ProviderUnavailable))
+        }
+        IndexFactOutcome::Incomplete(_) => (State::Degraded, Some(Reason::IndexIncomplete)),
+        IndexFactOutcome::StorageUnavailable => {
+            (State::Unavailable, Some(Reason::StorageUnavailable))
+        }
+    };
+    observation.settle(state, reason);
 }
 
+#[derive(Clone)]
 struct SessionEndPipelineInput {
     mind: String,
     memory_binding: crate::memory_service::MemoryBinding,
@@ -398,6 +443,21 @@ fn formation_episode_request(input: &SessionEndPipelineInput) -> (String, StoreE
         )
     );
     let mut evidence = input.evidence.clone();
+    let source_key = if let Some(coverage) = &evidence.coverage {
+        format!(
+            "{:x}",
+            Sha256::digest(
+                serde_json::to_vec(&(&source_key, coverage)).expect("coverage serialization")
+            )
+        )
+    } else {
+        source_key
+    };
+    let policy = if evidence.coverage.is_some() {
+        "formation-v3"
+    } else {
+        "formation-v2"
+    };
     evidence.candidates.clear();
     evidence.rejected_candidates = 0;
     evidence.extraction = omegon_memory::ExtractionOutcome::Disabled;
@@ -413,7 +473,7 @@ fn formation_episode_request(input: &SessionEndPipelineInput) -> (String, StoreE
         .and_then(|item| chrono::DateTime::parse_from_rfc3339(&item.recorded_at).ok())
         .map(|timestamp| timestamp.date_naive().to_string());
     (
-        format!("session:{session_key}:formation-v2:{source_key}"),
+        format!("session:{session_key}:{policy}:{source_key}"),
         StoreEpisode {
             mind: input.mind.clone(),
             title: format!("Session memory: {}", input.session_id),
@@ -422,7 +482,7 @@ fn formation_episode_request(input: &SessionEndPipelineInput) -> (String, StoreE
             affected_nodes: vec![],
             affected_changes: vec![],
             files_changed: vec![],
-            tags: vec!["auto".into(), "formation-v2".into()],
+            tags: vec!["auto".into(), policy.into()],
             tool_calls_count: None,
             formation: Some(Box::new(evidence)),
         },
@@ -431,7 +491,6 @@ fn formation_episode_request(input: &SessionEndPipelineInput) -> (String, StoreE
 
 async fn run_session_end_pipeline(input: SessionEndPipelineInput) {
     const EPISODE_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-    const VAULT_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
     tracing::debug!(
         turns = input.turns,
         tool_calls = input.tool_calls,
@@ -445,6 +504,7 @@ async fn run_session_end_pipeline(input: SessionEndPipelineInput) {
         .expect("formation request")
         .clone();
     let episode_cancellation = tokio_util::sync::CancellationToken::new();
+    let _cancel_episode_on_drop = episode_cancellation.clone().drop_guard();
     let episode =
         input
             .memory_binding
@@ -473,12 +533,32 @@ async fn run_session_end_pipeline(input: SessionEndPipelineInput) {
     let Some(stored) = stored else {
         return;
     };
+    finish_session_episode(input, operation_id, evidence, stored).await;
+}
+
+async fn finish_session_episode(
+    input: SessionEndPipelineInput,
+    operation_id: String,
+    evidence: omegon_memory::EpisodeFormation,
+    stored: omegon_memory::MemoryMutationOutcome,
+) {
+    const EPISODE_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+    tracing::debug!(
+        turns = input.turns,
+        tool_calls = input.tool_calls,
+        duration_secs = input.duration_secs,
+        "advisory session statistics for memory capture"
+    );
     if !stored.replayed
         && input.extractor.is_some()
-        && let MemoryMutationEffect::EpisodeStored { episode_id } = stored.effect
+        && let MemoryMutationEffect::EpisodeStored { episode_id }
+        | MemoryMutationEffect::CoverageStored { episode_id, .. } = stored.effect
     {
-        let completed = formation::extract_candidates(evidence, input.extractor.as_ref()).await;
+        let completed =
+            formation::extract_observed(evidence, input.extractor.as_ref(), &input.status_root)
+                .await;
         let cancellation = tokio_util::sync::CancellationToken::new();
+        let _cancel_completion_on_drop = cancellation.clone().drop_guard();
         let completion =
             input
                 .memory_binding
@@ -504,7 +584,13 @@ async fn run_session_end_pipeline(input: SessionEndPipelineInput) {
         }
     }
 
+    sync_session_end(&input).await;
+}
+
+async fn sync_session_end(input: &SessionEndPipelineInput) {
+    const VAULT_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
     let vault_cancellation = tokio_util::sync::CancellationToken::new();
+    let _cancel_vault_on_drop = vault_cancellation.clone().drop_guard();
     match tokio::time::timeout(
         VAULT_PHASE_TIMEOUT,
         input
@@ -867,6 +953,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         content.clone(),
                         self.tool_operation_id(call_id, &format!("embedding:{fact_id}"))?,
                         cancel.clone(),
+                        &self.status_root,
                     )
                     .await;
                 }
@@ -908,12 +995,42 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 };
 
                 let query_vector = if let Some(ref embed_svc) = self.embed_service {
-                    tokio::select! {
-                        _ = cancel.cancelled() => return Err(MemoryFeatureInvokeError(ManagedServiceCallError::Cancelled).into()),
-                        result = tokio::time::timeout(std::time::Duration::from_secs(30), embed_svc.embed_identified(&query)) => match result {
-                            Ok(Ok(query_embedding)) => Some(query_embedding),
-                            _ => None,
-                        },
+                    use crate::embedding::BoundedEmbeddingError;
+                    use crate::surfaces::memory_status::{
+                        CapabilityReason as Reason, CapabilityState as State,
+                    };
+                    let mut observation = EmbeddingObservation {
+                        root: &self.status_root,
+                        settled: false,
+                    };
+                    match crate::embedding::generate_identified(
+                        embed_svc.as_ref(),
+                        &query,
+                        std::time::Duration::from_secs(30),
+                        &cancel,
+                    )
+                    .await
+                    {
+                        Ok(embedding) => {
+                            observation.settle(State::Ready, None);
+                            Some(embedding)
+                        }
+                        Err(BoundedEmbeddingError::Cancelled) => {
+                            observation.settle(State::Degraded, Some(Reason::Cancelled));
+                            return Err(MemoryFeatureInvokeError(
+                                ManagedServiceCallError::Cancelled,
+                            )
+                            .into());
+                        }
+                        Err(BoundedEmbeddingError::DeadlineExceeded) => {
+                            observation.settle(State::Degraded, Some(Reason::DeadlineExceeded));
+                            None
+                        }
+                        Err(BoundedEmbeddingError::Generation(_)) => {
+                            observation
+                                .settle(State::Unavailable, Some(Reason::ProviderUnavailable));
+                            None
+                        }
                     }
                 } else {
                     None
@@ -1009,7 +1126,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         content: vec![ContentBlock::Text {
                             text: "No facts in memory.".into(),
                         }],
-                        details: serde_json::json!({ "count": 0, "formation_recovery": {"enabled":self.extractor.is_some(),"mind":self.mind,"status":self.recovery_status.borrow().clone()}, "evidence_checkpoint":checkpoint::status(self) }),
+                        details: serde_json::json!({ "count": 0, "memory_capabilities": crate::status::memory_capabilities_snapshot_for(&self.status_root), "formation_recovery": {"enabled":self.extractor.is_some(),"mind":self.mind,"status":self.recovery_status.borrow().clone()}, "evidence_checkpoint":checkpoint::status(self) }),
                     });
                 }
 
@@ -1067,7 +1184,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     content: vec![ContentBlock::Text {
                         text: lines.join("\n"),
                     }],
-                    details: serde_json::json!({ "count": facts.len(), "sections": sections.len(), "inventory_only": facts.len() > large_store_threshold, "formation_recovery": {"enabled":self.extractor.is_some(),"mind":self.mind,"status":self.recovery_status.borrow().clone()}, "evidence_checkpoint":checkpoint::status(self) }),
+                    details: serde_json::json!({ "count": facts.len(), "sections": sections.len(), "inventory_only": facts.len() > large_store_threshold, "memory_capabilities": crate::status::memory_capabilities_snapshot_for(&self.status_root), "formation_recovery": {"enabled":self.extractor.is_some(),"mind":self.mind,"status":self.recovery_status.borrow().clone()}, "evidence_checkpoint":checkpoint::status(self) }),
                 })
             }
             crate::tool_registry::memory::MEMORY_ARCHIVE => {
@@ -1154,6 +1271,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         content,
                         self.tool_operation_id(call_id, &format!("embedding:{}", new_fact.id))?,
                         cancel.clone(),
+                        &self.status_root,
                     )
                     .await;
                 }
@@ -1695,6 +1813,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         content.clone(),
                         self.tool_operation_id(call_id, &format!("embedding:{fact_id}"))?,
                         cancel.clone(),
+                        &self.status_root,
                     )
                     .await;
                 }
@@ -1727,6 +1846,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
             BusEvent::SessionStart { session_id, .. } => {
                 *self.session_id.lock().unwrap() = Some(session_id.clone());
                 self.checkpoint_turns = 0;
+                checkpoint::on_start(self);
                 if !self.recovery_started
                     && self.memory_binding.available()
                     && let Some(extractor) = self.extractor.clone()
@@ -1738,6 +1858,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         let cancellation = tokio_util::sync::CancellationToken::new();
                         let worker = cancellation.clone();
                         let status = self.recovery_status.clone();
+                        let root = self.status_root.clone();
                         match std::thread::Builder::new()
                             .name("memory-formation-recovery".into())
                             .spawn(move || {
@@ -1746,7 +1867,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                                     .build()
                                     .map_err(|error| error.to_string())?;
                                 runtime.block_on(recovery::run(
-                                    binding, mind, extractor, worker, status,
+                                    binding, mind, extractor, worker, status, root,
                                 ));
                                 Ok(())
                             }) {
@@ -1810,61 +1931,25 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         .push("session-end event had no stable session identity".into());
                     return vec![];
                 };
-                let status_root = self.status_root.clone();
-                let (t, tc, dur) = (*turns, *tool_calls, *duration_secs);
-                let cancellation = tokio_util::sync::CancellationToken::new();
-                let worker_cancellation = cancellation.clone();
-                let handle = std::thread::Builder::new()
-                    .name(format!("memory-session-end-{session_id}"))
-                    .spawn(move || {
-                        let runtime = tokio::runtime::Builder::new_current_thread()
-                            .enable_all()
-                            .build()
-                            .map_err(|error| error.to_string())?;
-                        runtime.block_on(async {
-                            tokio::select! {
-                                _ = worker_cancellation.cancelled() => {}
-                                _ = async {
-                                    run_session_end_pipeline(SessionEndPipelineInput {
-                                        mind,
-                                        memory_binding,
-                                        extractor,
-                                        evidence: formation::capture(session_binding.as_ref(), target.as_ref(), &session_id),
-                                        session_id,
-                                        status_root,
-                                        turns: t,
-                                        tool_calls: tc,
-                                        duration_secs: dur,
-                                    })
-                                    .await;
-                                } => {}
-                            }
-                        });
-                        Ok(())
-                    });
-                let mut tasks = self.session_end_tasks.lock().unwrap();
-                if !tasks.accepting {
-                    cancellation.cancel();
-                    if let Ok(handle) = handle {
-                        tasks.tasks.push(SessionEndTask {
-                            cancellation,
-                            handle,
-                        });
-                    }
-                    tasks
-                        .failures
-                        .push("session-end work arrived after shutdown admission closed".into());
-                } else {
-                    match handle {
-                        Ok(handle) => tasks.tasks.push(SessionEndTask {
-                            cancellation,
-                            handle,
-                        }),
-                        Err(error) => tasks
-                            .failures
-                            .push(format!("failed to spawn session-end task: {error}")),
-                    }
-                }
+                let input = SessionEndPipelineInput {
+                    mind,
+                    memory_binding,
+                    extractor,
+                    evidence: formation::unavailable(
+                        &session_id,
+                        if target.is_some() {
+                            "capture_pending"
+                        } else {
+                            "sessionless"
+                        },
+                    ),
+                    session_id,
+                    status_root: self.status_root.clone(),
+                    turns: *turns,
+                    tool_calls: *tool_calls,
+                    duration_secs: *duration_secs,
+                };
+                finalization::enqueue(self, input, target);
                 vec![]
             }
 
@@ -2011,16 +2096,21 @@ mod tests {
 
     async fn managed_feature() -> (MemoryFeature, crate::bus::EventBus, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
+        let (feature, bus) = managed_feature_at(dir.path()).await;
+        (feature, bus, dir)
+    }
+
+    async fn managed_feature_at(root: &std::path::Path) -> (MemoryFeature, crate::bus::EventBus) {
         let binding = crate::memory_service::MemoryBinding::default();
         let mut bus = crate::bus::EventBus::new();
         bus.register(Box::new(crate::memory_service::MemoryDeclarationFeature));
         let candidate =
             crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
-                workspace_root: Some(dir.path().to_path_buf()),
+                workspace_root: Some(root.to_path_buf()),
                 memory_token_cap: None,
-                project_memory_root: dir.path().to_path_buf(),
-                project_db_path: dir.path().join("facts.db"),
-                project_jsonl_path: dir.path().join("facts.jsonl"),
+                project_memory_root: root.to_path_buf(),
+                project_db_path: root.join("facts.db"),
+                project_jsonl_path: root.join("facts.jsonl"),
                 global_db_path: None,
                 vault: None,
                 startup_sync_enabled: false,
@@ -2031,12 +2121,12 @@ mod tests {
         bus.try_finalize_managed().await.unwrap();
         binding.capture(&bus).unwrap();
         let mut feature =
-            MemoryFeature::new(binding, "test".into()).with_status_root(dir.path().to_path_buf());
+            MemoryFeature::new(binding, "test".into()).with_status_root(root.to_path_buf());
         feature.on_event(&BusEvent::SessionStart {
             session_id: "fixture-session".into(),
-            cwd: dir.path().to_path_buf(),
+            cwd: root.to_path_buf(),
         });
-        (feature, bus, dir)
+        (feature, bus)
     }
 
     #[tokio::test]
@@ -2481,6 +2571,339 @@ mod tests {
         use omegon_memory::MemoryBackend;
         let store = omegon_memory::SqliteBackend::open(&dir.path().join("facts.db")).unwrap();
         assert_eq!(store.list_episodes("test", 8).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn incremental_capture_resumes_bounded_backlog_after_reopen_without_skipping_evidence() {
+        use omegon_memory::MemoryBackend;
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        let (mut authority, _, _, _) = crate::session_replay::test_open_joined_request(&dir);
+        for index in 0..600 {
+            authority
+                .admit_prompt(
+                    uuid::Uuid::new_v4(),
+                    "2026-09-21T00:00:00Z",
+                    crate::session_authority::PromptAdmitted {
+                        submission_id: uuid::Uuid::new_v4(),
+                        prompt_id: uuid::Uuid::new_v4(),
+                        principal: "operator".into(),
+                        ingress: "fixture".into(),
+                        queue_mode: crate::session_authority::QueueMode::UntilReady,
+                        content: crate::session_authority::PromptContent {
+                            text: format!("capture-{index:04} {}", "🧠".repeat(300)),
+                            attachments: vec![],
+                        },
+                        metadata: serde_json::json!({}),
+                    },
+                )
+                .unwrap();
+        }
+        let binding = crate::session_consumers::DeferredSessionViewBinding::default();
+        binding.bind(crate::session_consumers::SessionViewBinding::new(
+            dir.path().join("session.json"),
+            "fixture-session".into(),
+        ));
+        let target = binding.snapshot().unwrap();
+        let input = SessionEndPipelineInput {
+            mind: "test".into(),
+            memory_binding: feature.memory_binding.clone(),
+            extractor: None,
+            evidence: formation::capture(Some(&binding), Some(&target), "fixture-session"),
+            session_id: "fixture-session".into(),
+            status_root: dir.path().into(),
+            turns: 0,
+            tool_calls: 0,
+            duration_secs: 0.0,
+        };
+        assert_eq!(
+            checkpoint::capture_pass(&binding, &target, input, &CancellationToken::new())
+                .await
+                .err()
+                .as_deref(),
+            Some("capture_backlog")
+        );
+        feature.prepare_managed_shutdown().await.unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        {
+            let store = omegon_memory::SqliteBackend::open(&dir.path().join("facts.db")).unwrap();
+            assert_eq!(store.list_episodes("test", 100).await.unwrap().len(), 8);
+        }
+        let (mut restarted, mut bus) = managed_feature_at(dir.path()).await;
+        restarted = restarted.with_session_binding(binding);
+        restarted.on_event(&BusEvent::SessionStart {
+            session_id: "fixture-session".into(),
+            cwd: dir.path().into(),
+        });
+        let task = restarted
+            .checkpoint_task
+            .take()
+            .expect("startup capture recovery");
+        tokio::task::spawn_blocking(move || task.handle.join())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        // Finalization of an already-covered source must not duplicate its pages.
+        restarted.on_event(&BusEvent::SessionEnd {
+            turns: 1,
+            tool_calls: 0,
+            duration_secs: 0.0,
+            initial_prompt: None,
+            outcome_summary: None,
+        });
+        finalization::flush(&restarted).await;
+        restarted.prepare_managed_shutdown().await.unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        let store = omegon_memory::SqliteBackend::open(&dir.path().join("facts.db")).unwrap();
+        let episodes = store.list_episodes("test", 100).await.unwrap();
+        let mut evidence = episodes
+            .iter()
+            .flat_map(|episode| &episode.formation.as_ref().unwrap().evidence)
+            .filter(|item| item.excerpt.starts_with("capture-"))
+            .collect::<Vec<_>>();
+        evidence.sort_by_key(|item| item.sequence);
+        assert_eq!(evidence.len(), 600);
+        for (index, item) in evidence.iter().enumerate() {
+            assert!(item.excerpt.starts_with(&format!("capture-{index:04} ")));
+        }
+        assert!(
+            episodes
+                .iter()
+                .all(|episode| episode.formation.as_ref().unwrap().coverage.is_some())
+        );
+    }
+
+    #[tokio::test]
+    async fn finalization_queue_preserves_rebound_source_and_bounds_workers() {
+        struct WaitingFirst {
+            entered: tokio::sync::Notify,
+            release: tokio::sync::Notify,
+            calls: std::sync::atomic::AtomicUsize,
+        }
+        #[async_trait::async_trait]
+        impl formation::Extractor for WaitingFirst {
+            fn model(&self) -> &str {
+                "queued-extractor"
+            }
+            async fn extract(&self, _: &str) -> anyhow::Result<String> {
+                if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    self.entered.notify_one();
+                    self.release.notified().await;
+                }
+                Ok("[]".into())
+            }
+        }
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        let (_a, _, _, _) = crate::session_replay::test_open_joined_request(&dir);
+        let second = tempfile::tempdir().unwrap();
+        let (_b, _, _, _) = crate::session_replay::test_open_joined_request(&second);
+        let binding = crate::session_consumers::DeferredSessionViewBinding::default();
+        binding.bind(crate::session_consumers::SessionViewBinding::new(
+            dir.path().join("session.json"),
+            "fixture-session".into(),
+        ));
+        feature = feature.with_session_binding(binding.clone());
+        let extractor = Arc::new(WaitingFirst {
+            entered: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+            calls: Default::default(),
+        });
+        feature.extractor = Some(extractor.clone());
+        let event = BusEvent::SessionEnd {
+            turns: 1,
+            tool_calls: 0,
+            duration_secs: 0.0,
+            initial_prompt: None,
+            outcome_summary: None,
+        };
+        feature.on_event(&event);
+        extractor.entered.notified().await;
+        binding.bind(crate::session_consumers::SessionViewBinding::new(
+            second.path().join("session.json"),
+            "fixture-session".into(),
+        ));
+        for _ in 0..100 {
+            feature.on_event(&event);
+        }
+        assert_eq!(feature.session_end_tasks.lock().unwrap().tasks.len(), 1);
+        assert_eq!(finalization::queued(&feature), 8);
+        assert_eq!(checkpoint::status(&feature)["finalization_running"], true);
+        assert_eq!(
+            checkpoint::status(&feature)["backpressure"],
+            "finalization_queue_full"
+        );
+        extractor.release.notify_one();
+        finalization::flush(&feature).await;
+        assert_eq!(extractor.calls.load(Ordering::SeqCst), 2);
+        feature.prepare_managed_shutdown().await.unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        use omegon_memory::MemoryBackend;
+        let store = omegon_memory::SqliteBackend::open(&dir.path().join("facts.db")).unwrap();
+        let episodes = store.list_episodes("test", 100).await.unwrap();
+        assert_eq!(
+            episodes.len(),
+            2,
+            "both ended sources must complete exactly once"
+        );
+        assert!(episodes.iter().all(|episode| matches!(
+            episode.formation.as_ref().unwrap().extraction,
+            omegon_memory::ExtractionOutcome::Complete { .. }
+        )));
+    }
+
+    #[tokio::test]
+    async fn cancelled_finalization_does_not_complete_a_queued_batch() {
+        use std::future::Future;
+        struct Ready;
+        #[async_trait::async_trait]
+        impl formation::Extractor for Ready {
+            fn model(&self) -> &str {
+                "ready-fixture"
+            }
+            async fn extract(&self, _: &str) -> anyhow::Result<String> {
+                Ok("[]".into())
+            }
+        }
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        let mut input = adversarial_input();
+        input.mind = "test".into();
+        input.memory_binding = feature.memory_binding.clone();
+        input.status_root = dir.path().into();
+        input.extractor = Some(Arc::new(Ready));
+        let (id, request) = formation_episode_request(&input);
+        let evidence = request.formation.as_deref().unwrap().clone();
+        let stored = feature
+            .apply_mutation(
+                id.clone(),
+                MemoryMutation::StoreEpisode { request },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let release = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        let (started, started_rx) = std::sync::mpsc::sync_channel(1);
+        let blocking = tokio::spawn({
+            let binding = feature.memory_binding.clone();
+            let release = release.clone();
+            async move {
+                binding
+                    .invoke(crate::memory_service::MemoryRequestV1::TestBlock {
+                        started,
+                        release,
+                        cancellation: CancellationToken::new(),
+                    })
+                    .await
+            }
+        });
+        tokio::task::spawn_blocking(move || started_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let mut completing = Box::pin(finish_session_episode(input, id, evidence, stored));
+        let was_pending = std::future::poll_fn(|cx| {
+            std::task::Poll::Ready(completing.as_mut().poll(cx).is_pending())
+        })
+        .await;
+        drop(completing);
+        *release.0.lock().unwrap() = true;
+        release.1.notify_all();
+        blocking.await.unwrap().unwrap();
+        assert!(
+            was_pending,
+            "completion must wait behind the blocked service request"
+        );
+        let payload = feature
+            .invoke(crate::memory_service::MemoryRequestV1::ListEpisodes {
+                scope: crate::memory_service::MemoryScopeV1::Project,
+                mind: "test".into(),
+                limit: 1,
+                cancellation: CancellationToken::new(),
+            })
+            .await
+            .unwrap();
+        let crate::memory_service::MemoryPayloadV1::Episodes(episodes) = payload else {
+            panic!("episodes");
+        };
+        assert!(matches!(
+            episodes[0].formation.as_ref().unwrap().extraction,
+            omegon_memory::ExtractionOutcome::Pending { .. }
+        ));
+        feature.prepare_managed_shutdown().await.unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+    }
+
+    #[tokio::test]
+    async fn readiness_query_reports_extraction_outage_without_running_inference() {
+        struct Failing(std::sync::atomic::AtomicUsize);
+        #[async_trait::async_trait]
+        impl formation::Extractor for Failing {
+            fn model(&self) -> &str {
+                "readiness-fixture"
+            }
+            async fn extract(&self, _: &str) -> anyhow::Result<String> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                anyhow::bail!("private diagnostic must not escape")
+            }
+        }
+        let (mut feature, mut bus, dir) = managed_feature().await;
+        let failing = Arc::new(Failing(Default::default()));
+        let extractor: Arc<dyn formation::Extractor> = failing.clone();
+        formation::extract_observed(formation::sample_evidence(), Some(&extractor), dir.path())
+            .await;
+        feature.extractor = Some(extractor);
+        feature
+            .execute(
+                "memory_store",
+                "readiness-store",
+                serde_json::json!({"content":"keyword evidence remains available"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        for _ in 0..2 {
+            let report = feature
+                .execute(
+                    "memory_query",
+                    "readiness-query",
+                    serde_json::json!({}),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                report.details["memory_capabilities"]["extraction"]["state"],
+                "unavailable"
+            );
+            assert_eq!(
+                report.details["memory_capabilities"]["extraction"]["reason"],
+                "provider_unavailable"
+            );
+            assert_eq!(report.details["count"], 1);
+            assert!(!report.details.to_string().contains("private diagnostic"));
+        }
+        assert_eq!(failing.0.load(Ordering::SeqCst), 1);
+        feature.prepare_managed_shutdown().await.unwrap();
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
     }
 
     #[tokio::test]

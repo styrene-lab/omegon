@@ -19,6 +19,22 @@ pub struct LocalEmbeddingService {
     revision: String,
 }
 
+/// The async caller owns this guard; the blocking worker owns cloned handles.
+/// Dropping a timed-out request signals both queued and in-flight native work.
+struct InferenceCancellation {
+    options: Arc<ort::session::RunOptions>,
+    cancelled: tokio_util::sync::CancellationToken,
+}
+
+impl Drop for InferenceCancellation {
+    fn drop(&mut self) {
+        self.cancelled.cancel();
+        if self.options.terminate().is_err() {
+            tracing::warn!("local embedding termination request failed");
+        }
+    }
+}
+
 impl LocalEmbeddingService {
     pub fn load(model_dir: &Path, model_name: &str) -> Result<Self, EmbedError> {
         let model_path = model_dir.join("model.onnx");
@@ -62,11 +78,25 @@ impl LocalEmbeddingService {
         Self::load(&model_dir, &model_name)
     }
 
-    fn embed_sync(&self, text: &str) -> Result<Vec<f32>, EmbedError> {
+    fn embed_sync(
+        &self,
+        text: &str,
+        options: &ort::session::RunOptions,
+        cancelled: &tokio_util::sync::CancellationToken,
+    ) -> Result<Vec<f32>, EmbedError> {
+        let check_cancelled = || {
+            if cancelled.is_cancelled() {
+                Err(EmbedError::Unavailable("local embedding cancelled".into()))
+            } else {
+                Ok(())
+            }
+        };
+        check_cancelled()?;
         let encoding = self
             .tokenizer
             .encode(text, true)
             .map_err(|e| EmbedError::RequestFailed(format!("tokenization failed: {e}")))?;
+        check_cancelled()?;
 
         let input_ids: Vec<i64> = encoding.get_ids().iter().map(|&id| id as i64).collect();
         let attention_mask: Vec<i64> = encoding
@@ -95,8 +125,9 @@ impl LocalEmbeddingService {
             .session
             .lock()
             .map_err(|e| EmbedError::RequestFailed(format!("session lock: {e}")))?;
+        check_cancelled()?;
         let outputs = session
-            .run(ort::inputs![ids_tensor, mask_tensor, type_tensor])
+            .run_with_options(ort::inputs![ids_tensor, mask_tensor, type_tensor], options)
             .map_err(|e| EmbedError::RequestFailed(format!("inference failed: {e}")))?;
 
         if outputs.len() == 0 {
@@ -116,6 +147,7 @@ impl LocalEmbeddingService {
         let mut mask_sum = 0.0f32;
 
         for (tok_idx, &mask_val) in attention_mask.iter().enumerate() {
+            check_cancelled()?;
             let mask_f = mask_val as f32;
             mask_sum += mask_f;
             for dim in 0..hidden_size {
@@ -143,6 +175,14 @@ impl LocalEmbeddingService {
 #[async_trait]
 impl EmbeddingService for LocalEmbeddingService {
     async fn embed(&self, text: &str) -> Result<Vec<f32>, EmbedError> {
+        let options = Arc::new(ort::session::RunOptions::new().map_err(|_| {
+            EmbedError::Unavailable("local embedding run options unavailable".into())
+        })?);
+        let cancelled = tokio_util::sync::CancellationToken::new();
+        let _cancel_on_drop = InferenceCancellation {
+            options: options.clone(),
+            cancelled: cancelled.clone(),
+        };
         let svc = LocalEmbeddingService {
             session: self.session.clone(),
             tokenizer: self.tokenizer.clone(),
@@ -151,7 +191,7 @@ impl EmbeddingService for LocalEmbeddingService {
         };
         let text = text.to_string();
 
-        tokio::task::spawn_blocking(move || svc.embed_sync(&text))
+        tokio::task::spawn_blocking(move || svc.embed_sync(&text, &options, &cancelled))
             .await
             .map_err(|e| EmbedError::RequestFailed(format!("spawn_blocking failed: {e}")))?
     }
@@ -263,6 +303,21 @@ pub fn model_dir_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wave5_local_request_drop_signals_the_blocking_worker() {
+        let options = Arc::new(ort::session::RunOptions::new().unwrap());
+        let worker_cancelled = tokio_util::sync::CancellationToken::new();
+        let guard = InferenceCancellation {
+            options: options.clone(),
+            cancelled: worker_cancelled.clone(),
+        };
+        assert!(!worker_cancelled.is_cancelled());
+        drop(guard);
+        assert!(worker_cancelled.is_cancelled());
+        // The worker's shared native options remain valid after async-owner drop.
+        options.terminate().unwrap();
+    }
 
     #[test]
     fn wave4_artifact_identity_covers_model_and_tokenizer_bytes() {

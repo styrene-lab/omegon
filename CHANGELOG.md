@@ -18,7 +18,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
-- Memory formation envelopes now support explicit versioned evidence-coverage ranges. Storage validates range bounds and preserves coverage through extraction completion, replay, SQLite reopen, and JSONL transport. Legacy snapshots retain unknown coverage; hosted incremental capture remains follow-up work.
+- Memory status now reports storage, extraction, embedding, and indexing readiness independently without provider probes. Schema v14 preserves version- and attempt-bound indexing failures across restart, completes compatible vector writes atomically, and supports bounded repair without reinforcing facts.
+
+- Memory evaluation now provides time-filtered synthetic cases, stage-attributed paired policy reports, and an opt-in live runner with one aggregate token/deadline budget. Reports retain unknown costs, incomplete provider execution, and frozen smoke thresholds instead of treating unavailable runs as quality success.
+
+- Memory checkpoints now retain successive bounded evidence ranges with atomic local resume receipts. Capture resumes across restart, drains overflow in bounded passes, rejects replaced source cursors, and reports capture backpressure. Session finalization shares the range contract and bounds concurrent workers.
+
+- Memory formation envelopes now support explicit versioned evidence-coverage ranges. Storage validates range bounds and preserves coverage through extraction completion, replay, SQLite reopen, and JSONL transport. Legacy snapshots retain unknown coverage.
 
 - Compaction and aggressive decay now await optional, published feature checkpoint hooks under a shared deadline. Memory acknowledges a durable bounded snapshot or reports unavailable capture, reusing its owned worker and receipts; optional memory failure does not block compaction.
 

@@ -59,9 +59,10 @@ pub(super) async fn run(
     extractor: Arc<dyn formation::Extractor>,
     cancellation: CancellationToken,
     status: watch::Sender<Status>,
+    root: std::path::PathBuf,
 ) {
     run_loop(cancellation, status, || {
-        recover(&binding, &mind, &extractor)
+        recover(&binding, &mind, &extractor, &root)
     })
     .await;
 }
@@ -163,6 +164,7 @@ async fn recover(
     binding: &crate::memory_service::MemoryBinding,
     mind: &str,
     extractor: &Arc<dyn formation::Extractor>,
+    root: &std::path::Path,
 ) -> anyhow::Result<usize> {
     use crate::memory_service::{MemoryRequestV1, MemoryScopeV1};
     let cancellation = CancellationToken::new();
@@ -173,7 +175,7 @@ async fn recover(
             .formation
             .ok_or_else(|| anyhow::anyhow!("missing pending formation"))?;
         evidence.validate()?;
-        let completed = formation::extract_candidates(*evidence, Some(extractor)).await;
+        let completed = formation::extract_observed(*evidence, Some(extractor), root).await;
         // Atomic completion rejects changed evidence and a concurrent terminal winner.
         binding
             .invoke(MemoryRequestV1::ApplyMutation {

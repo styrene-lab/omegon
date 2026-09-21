@@ -2,7 +2,9 @@
 use crate::session_authority::{AssistantContentKind, SessionFactPayload, ToolResultDisposition};
 use crate::session_blob_store::{ContentRef, ProjectionClass};
 use crate::session_consumers::{DeferredSessionViewBinding, SessionViewTarget};
-use crate::session_replay::{ReplayEnd, SessionReplay};
+#[cfg(test)]
+use crate::session_replay::ReplayEnd;
+use crate::session_replay::{ReplayLimits, SessionReplay};
 use async_trait::async_trait;
 use omegon_memory::formation::{MAX_EVIDENCE_BYTES, MAX_EVIDENCE_ITEMS, MAX_EXCERPT_BYTES};
 use omegon_memory::{
@@ -36,7 +38,7 @@ impl Extractor for ModelExtractor {
     }
 }
 
-fn unavailable(session_id: &str, reason: &str) -> EpisodeFormation {
+pub(super) fn unavailable(session_id: &str, reason: &str) -> EpisodeFormation {
     EpisodeFormation {
         version: 1,
         coverage: None,
@@ -62,6 +64,82 @@ fn read_text(replay: &SessionReplay, reference: &ContentRef) -> Result<String, (
     String::from_utf8(bytes).map_err(|_| ())
 }
 
+pub(super) struct CaptureSnapshot {
+    binding: DeferredSessionViewBinding,
+    target: SessionViewTarget,
+    replay: SessionReplay,
+    cancellation: tokio_util::sync::CancellationToken,
+}
+
+impl CaptureSnapshot {
+    pub(super) fn load(
+        binding: &DeferredSessionViewBinding,
+        target: &SessionViewTarget,
+        session_id: &str,
+        cancellation: &tokio_util::sync::CancellationToken,
+    ) -> Result<Self, String> {
+        if target.session_id != session_id
+            || !crate::session_advisory::generation_is_current(binding, target)
+        {
+            return Err("generation_changed".into());
+        }
+        let replay = SessionReplay::replay_bounded(
+            &target.snapshot,
+            session_id,
+            target.stream_id,
+            ReplayLimits {
+                max_records: 50_000,
+                max_log_bytes: 32 * 1024 * 1024,
+                max_record_bytes: 1024 * 1024,
+                max_file_bytes: 8 * 1024 * 1024,
+                max_total_bytes: 64 * 1024 * 1024,
+                deadline: std::time::Instant::now() + std::time::Duration::from_secs(5),
+            },
+            &|| cancellation.is_cancelled(),
+        )
+        .map_err(|_| {
+            if cancellation.is_cancelled() {
+                "cancelled"
+            } else {
+                "replay_unavailable"
+            }
+            .to_string()
+        })?;
+        let snapshot = Self {
+            binding: binding.clone(),
+            target: target.clone(),
+            replay,
+            cancellation: cancellation.clone(),
+        };
+        snapshot.check()?;
+        Ok(snapshot)
+    }
+
+    pub(super) fn check(&self) -> Result<(), String> {
+        if self.cancellation.is_cancelled() {
+            return Err("cancelled".into());
+        }
+        if !crate::session_advisory::generation_is_current(&self.binding, &self.target) {
+            return Err("generation_changed".into());
+        }
+        Ok(())
+    }
+
+    pub(super) fn page(
+        &self,
+        cursor: Option<&omegon_memory::FormationCursor>,
+    ) -> Result<Option<EpisodeFormation>, String> {
+        let page = capture_range(self, true, cursor)?;
+        if matches!((&page.source, cursor), (FormationSource::Available { sequence, .. }, Some(cursor)) if *sequence == cursor.sequence)
+        {
+            Ok(None)
+        } else {
+            Ok(Some(page))
+        }
+    }
+}
+
+#[cfg(test)]
 pub(super) fn capture(
     binding: Option<&DeferredSessionViewBinding>,
     target: Option<&SessionViewTarget>,
@@ -70,31 +148,75 @@ pub(super) fn capture(
     let (Some(binding), Some(target)) = (binding, target) else {
         return unavailable(session_id, "sessionless");
     };
-    if target.session_id != session_id
-        || !crate::session_advisory::generation_is_current(binding, target)
+    CaptureSnapshot::load(
+        binding,
+        target,
+        session_id,
+        &tokio_util::sync::CancellationToken::new(),
+    )
+    .and_then(|snapshot| capture_range(&snapshot, false, None))
+    .unwrap_or_else(|reason| unavailable(session_id, &reason))
+}
+
+#[cfg(test)]
+pub(super) fn capture_page(
+    binding: &DeferredSessionViewBinding,
+    target: &SessionViewTarget,
+    session_id: &str,
+    cursor: Option<&omegon_memory::FormationCursor>,
+    expected_stream: Option<&str>,
+) -> Result<Option<EpisodeFormation>, String> {
+    let snapshot = CaptureSnapshot::load(
+        binding,
+        target,
+        session_id,
+        &tokio_util::sync::CancellationToken::new(),
+    )?;
+    let page = capture_range(&snapshot, true, cursor)?;
+    if let (Some(expected), FormationSource::Available { stream_id, .. }) =
+        (expected_stream, &page.source)
+        && expected != stream_id
     {
-        return unavailable(session_id, "generation_changed");
+        return Err("capture_stream_changed".into());
     }
-    let replay = match target.stream_id {
-        Some(stream) => SessionReplay::replay_prefix(
-            &target.snapshot,
-            session_id,
-            stream,
-            ReplayEnd::EndOfStream,
-        ),
-        None => SessionReplay::replay_session(&target.snapshot, session_id, ReplayEnd::EndOfStream),
-    };
-    let Ok(replay) = replay else {
-        return unavailable(session_id, "replay_unavailable");
-    };
+    if matches!((&page.source, cursor), (FormationSource::Available { sequence, .. }, Some(cursor)) if *sequence == cursor.sequence)
+    {
+        Ok(None)
+    } else {
+        Ok(Some(page))
+    }
+}
+
+fn capture_range(
+    snapshot: &CaptureSnapshot,
+    incremental: bool,
+    cursor: Option<&omegon_memory::FormationCursor>,
+) -> Result<EpisodeFormation, String> {
+    snapshot.check()?;
+    let replay = &snapshot.replay;
+    let session_id = snapshot.target.session_id.as_str();
     let Some(boundary) = replay.first_full_spine_boundary() else {
-        return unavailable(session_id, "legacy_source");
+        return Err("legacy_source".into());
     };
     let mixed = replay.lineage_level() == crate::session_authority::AuthorityLineageLevel::Mixed;
+    if let Some(cursor) = cursor
+        && !replay.records().iter().any(|record| {
+            record.frontier().sequence() == cursor.sequence
+                && record.frontier().event_id().to_string() == cursor.event_id
+        })
+    {
+        return Err("capture_cursor_source_changed".into());
+    }
     let minimum_sequence = if mixed { boundary.sequence() } else { 1 };
+    let minimum_sequence = cursor.map_or(minimum_sequence, |cursor| {
+        cursor.sequence.saturating_add(1).max(minimum_sequence)
+    });
     let mut formation = EpisodeFormation {
-        version: 1,
-        coverage: None,
+        version: if incremental { 2 } else { 1 },
+        coverage: incremental.then_some(omegon_memory::FormationCoverage {
+            first_sequence: minimum_sequence,
+            policy_version: 1,
+        }),
         source: FormationSource::Available {
             session_id: session_id.into(),
             stream_id: replay.frontier().stream_id().to_string(),
@@ -107,12 +229,18 @@ pub(super) fn capture(
         truncated: mixed,
         rejected_candidates: 0,
     };
+    if cursor.is_some_and(|cursor| cursor.sequence == replay.frontier().sequence()) {
+        snapshot.check()?;
+        return Ok(formation);
+    }
     // Keep the first goal and a bounded recent suffix. Full content stays in the session log.
     for record in replay
         .records()
         .iter()
         .filter(|record| record.frontier().sequence() >= minimum_sequence)
+        .take(if incremental { 128 } else { usize::MAX })
     {
+        snapshot.check()?;
         let mut omitted = false;
         let (kind, text, outcome) = match record.payload() {
             SessionFactPayload::PromptAdmitted(prompt) => (
@@ -122,7 +250,7 @@ pub(super) fn capture(
             ),
             SessionFactPayload::AssistantMessageCommitted(message) => {
                 let (text, truncated) =
-                    assistant_excerpt(message, |reference| read_text(&replay, reference));
+                    assistant_excerpt(message, |reference| read_text(replay, reference));
                 omitted = truncated;
                 (EvidenceKind::AssistantReport, text, None)
             }
@@ -134,7 +262,7 @@ pub(super) fn capture(
                     ToolResultDisposition::NotDispatched => EvidenceOutcome::NotDispatched,
                     ToolResultDisposition::UnknownCompletion => EvidenceOutcome::Unknown,
                 };
-                let text = match read_text(&replay, &result.content_ref) {
+                let text = match read_text(replay, &result.content_ref) {
                     Ok(text) => text,
                     Err(_) => {
                         omitted = true;
@@ -143,13 +271,44 @@ pub(super) fn capture(
                 };
                 (EvidenceKind::ToolResult, text, Some(outcome))
             }
-            _ => continue,
+            _ => {
+                if incremental {
+                    formation.source = FormationSource::Available {
+                        session_id: session_id.into(),
+                        stream_id: replay.frontier().stream_id().to_string(),
+                        sequence: record.frontier().sequence(),
+                        event_id: record.frontier().event_id().to_string(),
+                    };
+                }
+                continue;
+            }
         };
         let mut end = text.len().min(MAX_EXCERPT_BYTES);
         while !text.is_char_boundary(end) {
             end -= 1;
         }
         omitted |= end < text.len();
+        if incremental
+            && !text.is_empty()
+            && (formation.evidence.len() == MAX_EVIDENCE_ITEMS
+                || formation
+                    .evidence
+                    .iter()
+                    .map(|item| item.excerpt.len())
+                    .sum::<usize>()
+                    + end
+                    > MAX_EVIDENCE_BYTES)
+        {
+            break;
+        }
+        if incremental {
+            formation.source = FormationSource::Available {
+                session_id: session_id.into(),
+                stream_id: replay.frontier().stream_id().to_string(),
+                sequence: record.frontier().sequence(),
+                event_id: record.frontier().event_id().to_string(),
+            };
+        }
         formation.truncated |= omitted;
         if text.is_empty() {
             continue;
@@ -179,10 +338,8 @@ pub(super) fn capture(
             formation.truncated = true;
         }
     }
-    if !crate::session_advisory::generation_is_current(binding, target) {
-        return unavailable(session_id, "generation_changed");
-    }
-    formation
+    snapshot.check()?;
+    Ok(formation)
 }
 
 fn assistant_excerpt(
@@ -216,6 +373,63 @@ fn assistant_excerpt(
         }
     }
     (text, false)
+}
+
+pub(super) async fn extract_observed(
+    formation: EpisodeFormation,
+    extractor: Option<&Arc<dyn Extractor>>,
+    root: &std::path::Path,
+) -> EpisodeFormation {
+    use crate::surfaces::memory_status::{CapabilityReason, CapabilityState, ComponentReadiness};
+    if extractor.is_none() || formation.evidence.is_empty() {
+        return extract_candidates(formation, extractor).await;
+    }
+    struct Observation<'a> {
+        root: &'a std::path::Path,
+        settled: bool,
+    }
+    impl Drop for Observation<'_> {
+        fn drop(&mut self) {
+            if !self.settled {
+                crate::status::update_memory_capabilities(self.root, |status| {
+                    status.extraction = ComponentReadiness {
+                        state: CapabilityState::Degraded,
+                        reason: Some(CapabilityReason::Cancelled),
+                    }
+                });
+            }
+        }
+    }
+    let mut observation = Observation {
+        root,
+        settled: false,
+    };
+    let result = extract_candidates(formation, extractor).await;
+    let readiness = match &result.extraction {
+        ExtractionOutcome::Complete { .. } => ComponentReadiness {
+            state: CapabilityState::Ready,
+            reason: None,
+        },
+        ExtractionOutcome::Unavailable { reason, .. } if reason == "timed_out" => {
+            ComponentReadiness {
+                state: CapabilityState::Degraded,
+                reason: Some(CapabilityReason::DeadlineExceeded),
+            }
+        }
+        ExtractionOutcome::Unavailable { reason, .. } if reason == "request_failed" => {
+            ComponentReadiness {
+                state: CapabilityState::Unavailable,
+                reason: Some(CapabilityReason::ProviderUnavailable),
+            }
+        }
+        _ => ComponentReadiness {
+            state: CapabilityState::Degraded,
+            reason: Some(CapabilityReason::ProviderUnverified),
+        },
+    };
+    crate::status::update_memory_capabilities(root, |status| status.extraction = readiness);
+    observation.settled = true;
+    result
 }
 
 pub(super) async fn extract_candidates(
@@ -405,9 +619,50 @@ mod tests {
             }
         }
         let extractor: Arc<dyn Extractor> = Arc::new(Hanging);
-        let result = extract_candidates(sample_evidence(), Some(&extractor)).await;
+        let directory = tempfile::tempdir().unwrap();
+        let result = extract_observed(sample_evidence(), Some(&extractor), directory.path()).await;
         assert!(
             matches!(result.extraction, ExtractionOutcome::Unavailable { reason, .. } if reason == "timed_out")
+        );
+        assert_eq!(
+            crate::status::memory_capabilities_snapshot_for(directory.path())
+                .extraction
+                .reason,
+            Some(crate::surfaces::memory_status::CapabilityReason::DeadlineExceeded)
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelled_extraction_publishes_content_free_observation() {
+        use std::future::Future;
+        struct Hanging;
+        #[async_trait]
+        impl Extractor for Hanging {
+            fn model(&self) -> &str {
+                "cancelled-extractor"
+            }
+            async fn extract(&self, _: &str) -> anyhow::Result<String> {
+                std::future::pending().await
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let extractor: Arc<dyn Extractor> = Arc::new(Hanging);
+        let mut inference = Box::pin(extract_observed(
+            sample_evidence(),
+            Some(&extractor),
+            directory.path(),
+        ));
+        std::future::poll_fn(|cx| {
+            assert!(inference.as_mut().poll(cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        drop(inference);
+        assert_eq!(
+            crate::status::memory_capabilities_snapshot_for(directory.path())
+                .extraction
+                .reason,
+            Some(crate::surfaces::memory_status::CapabilityReason::Cancelled)
         );
     }
 
@@ -649,6 +904,61 @@ mod tests {
                 <= MAX_EVIDENCE_BYTES
         );
         assert_eq!(bounded.evidence[0].excerpt, "fixture request");
+        let mut cursor = None;
+        let mut retained = Vec::new();
+        while let Some(page) =
+            capture_page(&binding, &target, "fixture-session", cursor.as_ref(), None).unwrap()
+        {
+            page.validate().unwrap();
+            if let Some(cursor) = &cursor {
+                assert_eq!(
+                    page.coverage.as_ref().unwrap().first_sequence,
+                    cursor.sequence + 1
+                );
+            }
+            let FormationSource::Available {
+                sequence, event_id, ..
+            } = &page.source
+            else {
+                panic!("available page");
+            };
+            cursor = Some(omegon_memory::FormationCursor {
+                sequence: *sequence,
+                event_id: event_id.clone(),
+            });
+            retained.extend(page.evidence);
+        }
+        assert_eq!(
+            retained
+                .iter()
+                .filter(|item| item.excerpt.starts_with('🧠'))
+                .count(),
+            70,
+            "no middle evidence may be dropped between pages"
+        );
+        assert!(
+            retained
+                .iter()
+                .any(|item| item.excerpt.starts_with("Correction:"))
+        );
+        assert!(
+            retained
+                .windows(2)
+                .all(|items| items[0].sequence < items[1].sequence)
+        );
+        let mut forged = cursor.unwrap();
+        forged.event_id = "replaced-event".into();
+        assert!(capture_page(&binding, &target, "fixture-session", Some(&forged), None).is_err());
+        assert!(
+            capture_page(
+                &binding,
+                &target,
+                "fixture-session",
+                None,
+                Some("replaced-stream")
+            )
+            .is_err()
+        );
         std::fs::remove_file(
             directory
                 .path()

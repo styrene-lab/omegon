@@ -3268,6 +3268,7 @@ fn publish_session_view_binding(
     agent
         .session_view_binding
         .replace(crate::session_consumers::SessionViewTarget {
+            binding_id: uuid::Uuid::new_v4(),
             snapshot,
             session_id: outcome.session_id.clone(),
             stream_id: (outcome.projection.stream_id != uuid::Uuid::nil())

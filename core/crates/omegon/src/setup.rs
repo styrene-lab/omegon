@@ -770,6 +770,70 @@ impl AgentSetup {
             is_child,
             embed_service.clone(),
         );
+        {
+            use crate::surfaces::memory_status::{
+                CapabilityReason, CapabilityState, ComponentReadiness,
+            };
+            let profile = crate::settings::Profile::load(&cwd);
+            let extraction = if is_child {
+                ComponentReadiness {
+                    state: CapabilityState::Disabled,
+                    reason: Some(CapabilityReason::ChildSession),
+                }
+            } else if profile.memory_extraction_enabled == Some(false) {
+                ComponentReadiness {
+                    state: CapabilityState::Disabled,
+                    reason: Some(CapabilityReason::OperatorDisabled),
+                }
+            } else if profile
+                .memory_extraction_model
+                .as_deref()
+                .is_some_and(|model| {
+                    let model = model.trim();
+                    model.is_empty()
+                        || model.len() > omegon_memory::formation::MAX_IDENTIFIER_BYTES
+                        || model.chars().any(char::is_control)
+                })
+            {
+                ComponentReadiness {
+                    state: CapabilityState::Unavailable,
+                    reason: Some(CapabilityReason::InvalidConfiguration),
+                }
+            } else {
+                ComponentReadiness {
+                    state: CapabilityState::Configured,
+                    reason: None,
+                }
+            };
+            let embeddings = if embed_service.is_some() {
+                ComponentReadiness {
+                    state: CapabilityState::Configured,
+                    reason: None,
+                }
+            } else if !is_child && db_path.is_none() {
+                // Discovery was skipped, so this is not evidence of a provider outage.
+                ComponentReadiness::default()
+            } else {
+                ComponentReadiness {
+                    state: if is_child {
+                        CapabilityState::Disabled
+                    } else {
+                        CapabilityState::Unavailable
+                    },
+                    reason: Some(if is_child {
+                        CapabilityReason::ChildSession
+                    } else {
+                        CapabilityReason::ProviderUnavailable
+                    }),
+                }
+            };
+            crate::status::update_memory_capabilities(&project_root, |status| {
+                status.extraction = extraction;
+                status.embeddings = embeddings;
+                status.pending_indexing = None;
+                status.indexing = None;
+            });
+        }
         bus.register(Box::new(memory_feature));
         bus.register_internal_tool(crate::tool_registry::memory::MEMORY_STORE, "memory");
         bus.register_internal_tool(
@@ -1272,6 +1336,11 @@ impl AgentSetup {
                 }) => {
                     let authority = status.authority.clone();
                     let index_state = status.index_state;
+                    crate::status::update_memory_capabilities(&project_root, |observed| {
+                        observed.pending_indexing =
+                            Some(status.indexing.pending + status.indexing.untracked);
+                        observed.indexing = Some(status.indexing.clone());
+                    });
                     initial_memory_status = status.into();
                     crate::status::update_managed_memory_status(
                         crate::status::ManagedMemoryStatusSnapshot {

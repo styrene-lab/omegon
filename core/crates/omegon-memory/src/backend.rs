@@ -91,8 +91,16 @@ fn validate_mutation(mutation: &MemoryMutation) -> Result<()> {
     if let MemoryMutation::StoreEmbedding { embedding, .. } = mutation {
         validate_embedding(embedding)?;
     }
-    if let MemoryMutation::StoreIdentifiedEmbedding { embedding, .. } = mutation {
+    if let MemoryMutation::StoreIdentifiedEmbedding { embedding, .. }
+    | MemoryMutation::CompleteEmbeddingIndexing { embedding, .. } = mutation
+    {
         embedding.validate()?;
+    }
+    if let MemoryMutation::RecordEmbeddingIndexing { record } = mutation {
+        crate::indexing::validate_record(record)?;
+    }
+    if let MemoryMutation::CompleteEmbeddingIndexing { attempt_id, .. } = mutation {
+        crate::indexing::validate_attempt(attempt_id)?;
     }
     Ok(())
 }
@@ -337,6 +345,23 @@ pub trait MemoryBackend: Send + Sync {
         Err(MemoryError::EmbeddingIdentityRequired)
     }
 
+    async fn embedding_indexing_record(
+        &self,
+        fact_id: &str,
+    ) -> Result<Option<EmbeddingIndexingRecord>> {
+        let _ = fact_id;
+        Err(MemoryError::InvalidMutation(
+            "indexing attempts unsupported".into(),
+        ))
+    }
+
+    async fn embedding_indexing_summary(&self, mind: &str) -> Result<EmbeddingIndexingSummary> {
+        let _ = mind;
+        Err(MemoryError::InvalidMutation(
+            "indexing attempts unsupported".into(),
+        ))
+    }
+
     async fn get_fact_filtered(
         &self,
         mind: &str,
@@ -420,6 +445,16 @@ pub trait MemoryBackend: Send + Sync {
 
     /// List the most recent episodes for a mind.
     async fn list_episodes(&self, mind: &str, k: usize) -> Result<Vec<Episode>>;
+
+    /// Local, receipt-backed capture frontier; imported declarations are excluded.
+    async fn formation_cursor(
+        &self,
+        _key: &FormationCaptureKey,
+    ) -> Result<Option<FormationCursor>> {
+        Err(MemoryError::InvalidMutation(
+            "formation cursor is unsupported".into(),
+        ))
+    }
 
     /// Bounded pending extraction inventory, filtered before the limit. Implementors
     /// without recovery support return an error rather than claiming an empty queue.

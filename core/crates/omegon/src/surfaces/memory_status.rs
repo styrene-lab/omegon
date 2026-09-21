@@ -5,6 +5,106 @@
 
 use std::path::{Path, PathBuf};
 
+/// Observed state, not a provider probe. `Configured` deliberately does not claim
+/// credentials, model identity, or a successful inference request.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityState {
+    #[default]
+    Unknown,
+    Disabled,
+    Configured,
+    Ready,
+    Unavailable,
+    Degraded,
+}
+
+/// Content-free reasons suitable for every status consumer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityReason {
+    OperatorDisabled,
+    ChildSession,
+    InvalidConfiguration,
+    StorageUnavailable,
+    ProviderUnavailable,
+    DeadlineExceeded,
+    Cancelled,
+    IndexIncomplete,
+    IndexUnobserved,
+    ProviderUnverified,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ComponentReadiness {
+    pub state: CapabilityState,
+    pub reason: Option<CapabilityReason>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MemoryCapabilityReadiness {
+    pub storage: ComponentReadiness,
+    pub extraction: ComponentReadiness,
+    pub embeddings: ComponentReadiness,
+    pub keyword_retrieval: ComponentReadiness,
+    pub semantic_retrieval: ComponentReadiness,
+    /// None means the owner has not supplied an index observation, not zero work.
+    pub pending_indexing: Option<usize>,
+    #[serde(default)]
+    pub indexing: Option<omegon_memory::EmbeddingIndexingSummary>,
+}
+
+/// Pure projection: callers supply observations from normal managed operations.
+/// There are intentionally no service handles, paths, or inference callbacks here.
+pub fn project_memory_capabilities(
+    storage_available: bool,
+    extraction: ComponentReadiness,
+    embeddings: ComponentReadiness,
+    pending_indexing: Option<usize>,
+) -> MemoryCapabilityReadiness {
+    let storage = if storage_available {
+        ComponentReadiness {
+            state: CapabilityState::Ready,
+            reason: None,
+        }
+    } else {
+        ComponentReadiness {
+            state: CapabilityState::Unavailable,
+            reason: Some(CapabilityReason::StorageUnavailable),
+        }
+    };
+    let semantic_retrieval = if !storage_available {
+        storage
+    } else if pending_indexing.is_some_and(|pending| pending > 0) {
+        ComponentReadiness {
+            state: CapabilityState::Degraded,
+            reason: Some(CapabilityReason::IndexIncomplete),
+        }
+    } else if embeddings.state == CapabilityState::Ready && pending_indexing == Some(0) {
+        embeddings
+    } else {
+        ComponentReadiness {
+            state: CapabilityState::Degraded,
+            reason: embeddings
+                .reason
+                .or(Some(if embeddings.state == CapabilityState::Ready {
+                    CapabilityReason::IndexUnobserved
+                } else {
+                    CapabilityReason::ProviderUnverified
+                })),
+        }
+    };
+    MemoryCapabilityReadiness {
+        storage,
+        extraction,
+        embeddings,
+        keyword_retrieval: storage,
+        semantic_retrieval,
+        pending_indexing,
+        indexing: None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoordinationMode {
     OneOff,
@@ -135,6 +235,105 @@ fn recommendation(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wave5_capability_matrix_keeps_optional_components_independent() {
+        for storage in [false, true] {
+            for extraction_ready in [false, true] {
+                for embeddings_ready in [false, true] {
+                    let component = |ready| ComponentReadiness {
+                        state: if ready {
+                            CapabilityState::Ready
+                        } else {
+                            CapabilityState::Unavailable
+                        },
+                        reason: (!ready).then_some(CapabilityReason::ProviderUnavailable),
+                    };
+                    let extraction = component(extraction_ready);
+                    let embeddings = component(embeddings_ready);
+                    let result =
+                        project_memory_capabilities(storage, extraction, embeddings, Some(0));
+                    assert_eq!(result.extraction, extraction);
+                    assert_eq!(result.embeddings, embeddings);
+                    assert_eq!(
+                        result.keyword_retrieval.state == CapabilityState::Ready,
+                        storage
+                    );
+                    assert_eq!(
+                        result.semantic_retrieval.state == CapabilityState::Ready,
+                        storage && embeddings_ready
+                    );
+                }
+            }
+        }
+        let embeddings_only = project_memory_capabilities(
+            true,
+            ComponentReadiness {
+                state: CapabilityState::Disabled,
+                reason: Some(CapabilityReason::OperatorDisabled),
+            },
+            ComponentReadiness {
+                state: CapabilityState::Ready,
+                reason: None,
+            },
+            Some(0),
+        );
+        assert_eq!(embeddings_only.extraction.state, CapabilityState::Disabled);
+        assert_eq!(
+            embeddings_only.semantic_retrieval.state,
+            CapabilityState::Ready
+        );
+    }
+
+    #[test]
+    fn wave5_outage_and_pending_repair_are_independent_read_only_observations() {
+        let extraction = ComponentReadiness {
+            state: CapabilityState::Unavailable,
+            reason: Some(CapabilityReason::ProviderUnavailable),
+        };
+        let embeddings = ComponentReadiness {
+            state: CapabilityState::Degraded,
+            reason: Some(CapabilityReason::DeadlineExceeded),
+        };
+        let before = project_memory_capabilities(true, extraction, embeddings, Some(3));
+        let encoded = serde_json::to_value(&before).unwrap();
+        for _ in 0..3 {
+            assert_eq!(
+                serde_json::to_value(project_memory_capabilities(
+                    true,
+                    extraction,
+                    embeddings,
+                    Some(3)
+                ))
+                .unwrap(),
+                encoded
+            );
+        }
+        assert_eq!(
+            before.extraction.reason,
+            Some(CapabilityReason::ProviderUnavailable)
+        );
+        assert_eq!(
+            before.embeddings.reason,
+            Some(CapabilityReason::DeadlineExceeded)
+        );
+        assert_eq!(
+            before.semantic_retrieval.reason,
+            Some(CapabilityReason::IndexIncomplete)
+        );
+    }
+
+    #[test]
+    fn wave5_configuration_and_unknown_index_do_not_claim_semantic_readiness() {
+        let configured = ComponentReadiness {
+            state: CapabilityState::Configured,
+            reason: None,
+        };
+        let result = project_memory_capabilities(true, configured, configured, None);
+        assert_eq!(result.pending_indexing, None);
+        assert_eq!(result.extraction.state, CapabilityState::Configured);
+        assert_eq!(result.semantic_retrieval.state, CapabilityState::Degraded);
+    }
     fn observation(
         git: bool,
         lifecycle: bool,

@@ -10,10 +10,17 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-pub const MEMORY_SCHEMA_VERSION: i64 = 13;
+pub const MEMORY_SCHEMA_VERSION: i64 = 14;
 pub const PRIMENSUS_MIND: &str = "primensus";
 pub const LEGACY_MIND: &str = "legacy";
-pub const LEGACY_MEMORY_SCHEMA_VERSIONS: std::ops::RangeInclusive<i64> = 5..=12;
+pub const LEGACY_MEMORY_SCHEMA_VERSIONS: std::ops::RangeInclusive<i64> = 5..=13;
+
+const CREATE_INDEXING_ATTEMPTS: &str = "CREATE TABLE IF NOT EXISTS embedding_indexing (
+    fact_id TEXT PRIMARY KEY REFERENCES facts(id) ON DELETE CASCADE,
+    fact_version INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    record_json TEXT NOT NULL
+);";
 use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -457,6 +464,7 @@ impl SqliteBackend {
             Self::add_column_if_missing(&transaction, "facts_vec", "source_hash", "TEXT")?;
             Self::add_column_if_missing(&transaction, "facts", "lifecycle_inference", "TEXT")?;
             Self::add_column_if_missing(&transaction, "facts", "applicability", "TEXT")?;
+            transaction.execute_batch(CREATE_INDEXING_ATTEMPTS)?;
             transaction.execute_batch(
                 "CREATE TABLE IF NOT EXISTS memory_operation_receipts (
                     operation_id TEXT PRIMARY KEY,
@@ -885,6 +893,7 @@ impl SqliteBackend {
             );
         ")?;
 
+        conn.execute_batch(CREATE_INDEXING_ATTEMPTS)?;
         let current: i64 = conn.query_row(
             "SELECT COALESCE(MAX(version), 0) FROM schema_version",
             [],
@@ -903,6 +912,24 @@ impl SqliteBackend {
         }
 
         Ok(())
+    }
+
+    fn indexing_record(
+        conn: &Connection,
+        fact_id: &str,
+    ) -> Result<Option<EmbeddingIndexingRecord>> {
+        let json: Option<String> = conn
+            .query_row(
+                "SELECT record_json FROM embedding_indexing WHERE fact_id = ?1",
+                params![fact_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        json.map(|json| {
+            serde_json::from_str(&json).map_err(|error| MemoryError::Storage(error.into()))
+        })
+        .transpose()
     }
 
     fn ensure_mind(&self, conn: &Connection, mind: &str) -> rusqlite::Result<()> {
@@ -1035,6 +1062,45 @@ impl SqliteBackend {
                 .transpose()?,
             jj_change_id: row.get("jj_change_id")?,
         })
+    }
+
+    fn capture_cursor(
+        conn: &Connection,
+        key: &FormationCaptureKey,
+    ) -> Result<Option<FormationCursor>> {
+        let receipt: Option<String> = conn
+            .query_row(
+                "SELECT effect_json FROM memory_operation_receipts
+             WHERE json_extract(effect_json,'$.kind')='coverage_stored'
+               AND json_extract(effect_json,'$.key.mind')=?1
+               AND json_extract(effect_json,'$.key.session_id')=?2
+               AND json_extract(effect_json,'$.key.stream_id')=?3
+               AND json_extract(effect_json,'$.key.policy_version')=?4
+               AND json_extract(effect_json,'$.key.model') IS ?5
+             ORDER BY json_extract(effect_json,'$.cursor.sequence') DESC LIMIT 1",
+                params![
+                    key.mind,
+                    key.session_id,
+                    key.stream_id,
+                    key.policy_version,
+                    key.model
+                ],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        receipt
+            .map(|receipt| {
+                match serde_json::from_str::<MemoryMutationEffect>(&receipt)
+                    .map_err(|error| MemoryError::Storage(error.into()))?
+                {
+                    MemoryMutationEffect::CoverageStored { cursor, .. } => Ok(cursor),
+                    _ => Err(MemoryError::InvalidMutation(
+                        "invalid capture receipt".into(),
+                    )),
+                }
+            })
+            .transpose()
     }
 
     fn check_fact_precondition(conn: &Connection, fact: &FactPrecondition) -> Result<Fact> {
@@ -1412,6 +1478,30 @@ impl MemoryBackend for SqliteBackend {
         }
 
         let mutation = crate::lifecycle::lower(mutation)?;
+        let completing_index =
+            matches!(&mutation, MemoryMutation::CompleteEmbeddingIndexing { .. });
+        if let MemoryMutation::CompleteEmbeddingIndexing {
+            fact,
+            attempt_id,
+            embedding,
+        } = &mutation
+        {
+            crate::indexing::admit_completion(
+                Self::indexing_record(&transaction, &fact.id)?.as_ref(),
+                fact,
+                embedding,
+                Some(attempt_id),
+            )?;
+        }
+        let capture = if let MemoryMutation::StoreCoveragePage { request, expected } = &mutation {
+            let key = crate::formation::capture_key(request)?;
+            let actual = Self::capture_cursor(&transaction, &key)?;
+            let cursor =
+                crate::formation::advance_capture(request, expected.as_ref(), actual.as_ref())?;
+            Some((key, cursor))
+        } else {
+            None
+        };
         let applicability = match &mutation {
             MemoryMutation::StoreApplicableFact { constraints, .. } => {
                 Some(Box::new(RecordedApplicability::new(*constraints.clone())?))
@@ -1795,9 +1885,41 @@ impl MemoryBackend for SqliteBackend {
                     dims,
                 }
             }
-            MemoryMutation::StoreIdentifiedEmbedding { fact, embedding } => {
+            MemoryMutation::RecordEmbeddingIndexing { record } => {
+                let source = Self::check_fact_precondition(&transaction, &record.fact)?;
+                if source.status != FactStatus::Active {
+                    return Err(MemoryError::InvalidMutation(
+                        "embedding source must be active".into(),
+                    ));
+                }
+                crate::indexing::admit_record(
+                    Self::indexing_record(&transaction, &record.fact.id)?.as_ref(),
+                    &record,
+                )?;
+                let json = serde_json::to_string(&record)
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                let reason = serde_json::to_string(&record.reason)
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                transaction.execute("INSERT OR REPLACE INTO embedding_indexing (fact_id,fact_version,reason,record_json) VALUES (?1,?2,?3,?4)",
+                    params![record.fact.id, record.fact.expected_version, reason, json])
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                MemoryMutationEffect::EmbeddingIndexingRecorded {
+                    fact: record.fact,
+                    attempt_id: record.attempt_id,
+                }
+            }
+            MemoryMutation::StoreIdentifiedEmbedding { fact, embedding }
+            | MemoryMutation::CompleteEmbeddingIndexing {
+                fact, embedding, ..
+            } => {
                 embedding.validate()?;
                 let source = Self::check_fact_precondition(&transaction, &fact)?;
+                crate::indexing::admit_completion(
+                    Self::indexing_record(&transaction, &fact.id)?.as_ref(),
+                    &fact,
+                    &embedding,
+                    None,
+                )?;
                 if source.status != FactStatus::Active {
                     return Err(MemoryError::InvalidMutation(
                         "embedding source must be active".into(),
@@ -1807,10 +1929,23 @@ impl MemoryBackend for SqliteBackend {
                     .map_err(|error| MemoryError::Storage(error.into()))?;
                 let source_hash = crate::retrieval::raw_content_hash(&source.content);
                 let timestamp = now_iso();
-                transaction.execute("INSERT OR REPLACE INTO facts_vec (fact_id,embedding,model_name,dims,created_at,space,source_hash) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                let unchanged = completing_index && transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM facts_vec WHERE fact_id=?1 AND space=?2 AND source_hash=?3 AND model_name=?4 AND dims=?5 AND embedding=?6)",
+                    params![fact.id, space, source_hash, embedding.space.model, embedding.space.dimensions, vectors::vector_to_blob(&embedding.values)],
+                    |row| row.get::<_, bool>(0),
+                ).map_err(|error| MemoryError::Storage(error.into()))?;
+                if !unchanged {
+                    transaction.execute("INSERT OR REPLACE INTO facts_vec (fact_id,embedding,model_name,dims,created_at,space,source_hash) VALUES (?1,?2,?3,?4,?5,?6,?7)",
                     params![fact.id, vectors::vector_to_blob(&embedding.values), embedding.space.model, embedding.space.dimensions, timestamp, space, source_hash])
                     .map_err(|error| MemoryError::Storage(error.into()))?;
+                }
                 transaction.execute("INSERT OR IGNORE INTO embedding_metadata (model_name,dims,inserted_at) VALUES (?1,?2,?3)", params![embedding.space.model,embedding.space.dimensions,timestamp])
+                    .map_err(|error| MemoryError::Storage(error.into()))?;
+                transaction
+                    .execute(
+                        "DELETE FROM embedding_indexing WHERE fact_id = ?1",
+                        params![fact.id],
+                    )
                     .map_err(|error| MemoryError::Storage(error.into()))?;
                 MemoryMutationEffect::EmbeddingStored {
                     fact_id: fact.id,
@@ -1844,7 +1979,8 @@ impl MemoryBackend for SqliteBackend {
                 ).map_err(|error| MemoryError::Storage(error.into()))?;
                 MemoryMutationEffect::EdgeCreated { edge_id }
             }
-            MemoryMutation::StoreEpisode { request } => {
+            MemoryMutation::StoreEpisode { request }
+            | MemoryMutation::StoreCoveragePage { request, .. } => {
                 if let Some(formation) = &request.formation {
                     formation.validate()?;
                 }
@@ -1862,7 +1998,14 @@ impl MemoryBackend for SqliteBackend {
                         serde_json::to_string(&request.tags).unwrap_or_else(|_| "[]".into()),
                         request.tool_calls_count, request.formation.as_ref().map(serde_json::to_string).transpose().map_err(|error| MemoryError::Storage(error.into()))?],
                 ).map_err(|error| MemoryError::Storage(error.into()))?;
-                MemoryMutationEffect::EpisodeStored { episode_id }
+                match capture {
+                    Some((key, cursor)) => MemoryMutationEffect::CoverageStored {
+                        episode_id,
+                        key,
+                        cursor,
+                    },
+                    None => MemoryMutationEffect::EpisodeStored { episode_id },
+                }
             }
             MemoryMutation::CompleteFormation {
                 episode_id,
@@ -2632,6 +2775,41 @@ impl MemoryBackend for SqliteBackend {
         Ok(top.finish())
     }
 
+    async fn embedding_indexing_record(
+        &self,
+        fact_id: &str,
+    ) -> Result<Option<EmbeddingIndexingRecord>> {
+        Self::indexing_record(&self.conn.lock().unwrap(), fact_id)
+    }
+
+    async fn embedding_indexing_summary(&self, mind: &str) -> Result<EmbeddingIndexingSummary> {
+        let conn = self.conn.lock().unwrap();
+        let mut summary = EmbeddingIndexingSummary::default();
+        let mut stmt = conn.prepare("SELECT i.reason, f.version != i.fact_version AS stale, COUNT(*) FROM embedding_indexing i JOIN facts f ON f.id = i.fact_id WHERE f.mind = ?1 AND f.status = 'active' GROUP BY i.reason, stale")
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        let rows = stmt
+            .query_map(params![mind], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, bool>(1)?,
+                    row.get::<_, usize>(2)?,
+                ))
+            })
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        for row in rows {
+            let (reason, stale, count) = row.map_err(|error| MemoryError::Storage(error.into()))?;
+            let reason = if stale {
+                EmbeddingIndexingReason::SourceChanged
+            } else {
+                serde_json::from_str(&reason).map_err(|error| MemoryError::Storage(error.into()))?
+            };
+            summary.observe(reason, count);
+        }
+        summary.untracked = conn.query_row("SELECT COUNT(*) FROM facts f LEFT JOIN embedding_indexing i ON i.fact_id = f.id LEFT JOIN facts_vec v ON v.fact_id = f.id WHERE f.mind = ?1 AND f.status = 'active' AND i.fact_id IS NULL AND (v.fact_id IS NULL OR v.space IS NULL)", params![mind], |row| row.get(0))
+            .map_err(|error| MemoryError::Storage(error.into()))?;
+        Ok(summary)
+    }
+
     async fn embedding_index_state(
         &self,
         id: &str,
@@ -2884,6 +3062,10 @@ impl MemoryBackend for SqliteBackend {
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|error| MemoryError::Storage(error.into()))?;
         Ok(episodes)
+    }
+
+    async fn formation_cursor(&self, key: &FormationCaptureKey) -> Result<Option<FormationCursor>> {
+        Self::capture_cursor(&self.conn.lock().unwrap(), key)
     }
 
     async fn pending_formations(

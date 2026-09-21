@@ -42,6 +42,39 @@ async fn backfill_repairs_legacy_vectors_and_skips_ready_facts_without_reinforce
         .store_embedding(&fact.id, "unverified-old-model", &[1.0, 0.0])
         .await
         .unwrap();
+    let mut pending = omegon_memory::EmbeddingIndexingRecord {
+        fact: omegon_memory::FactPrecondition {
+            id: fact.id.clone(),
+            expected_version: fact.version,
+        },
+        attempt_id: "prior-outage".into(),
+        space: Some(EmbeddingSpace {
+            model: "retired-model".into(),
+            revision: "retired-revision".into(),
+            preprocessing: "raw-v1".into(),
+            dimensions: 2,
+        }),
+        reason: omegon_memory::EmbeddingIndexingReason::Pending,
+    };
+    backend
+        .apply_mutation(
+            "old-begin",
+            omegon_memory::MemoryMutation::RecordEmbeddingIndexing {
+                record: pending.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    pending.reason = omegon_memory::EmbeddingIndexingReason::Timeout;
+    backend
+        .apply_mutation(
+            "old-timeout",
+            omegon_memory::MemoryMutation::RecordEmbeddingIndexing {
+                record: pending.clone(),
+            },
+        )
+        .await
+        .unwrap();
     drop(backend);
     for run in 0..2 {
         let output = tokio::time::timeout(
@@ -65,6 +98,41 @@ async fn backfill_repairs_legacy_vectors_and_skips_ready_facts_without_reinforce
         );
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("Backfill complete"), "{stdout}");
+        if run == 0 {
+            let backend = SqliteBackend::open(&path).unwrap();
+            assert!(
+                backend
+                    .embedding_indexing_record(&fact.id)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            pending.attempt_id = "ready-but-cancelled".into();
+            pending.space = None;
+            pending.reason = omegon_memory::EmbeddingIndexingReason::Pending;
+            backend
+                .apply_mutation(
+                    "ready-begin",
+                    omegon_memory::MemoryMutation::RecordEmbeddingIndexing {
+                        record: pending.clone(),
+                    },
+                )
+                .await
+                .unwrap();
+            pending.reason = omegon_memory::EmbeddingIndexingReason::Cancelled;
+            backend
+                .apply_mutation(
+                    "ready-cancel",
+                    omegon_memory::MemoryMutation::RecordEmbeddingIndexing {
+                        record: pending.clone(),
+                    },
+                )
+                .await
+                .unwrap();
+            drop(backend);
+            let db = rusqlite::Connection::open(&path).unwrap();
+            db.execute_batch("CREATE TRIGGER reject_ready_vector_rewrite BEFORE INSERT ON facts_vec BEGIN SELECT RAISE(ABORT, 'ready vector rewritten'); END;").unwrap();
+        }
         if run == 1 {
             assert!(
                 stdout.contains("succeeded=0, failed=0, skipped=1"),
@@ -87,6 +155,13 @@ async fn backfill_repairs_legacy_vectors_and_skips_ready_facts_without_reinforce
         EmbeddingIndexState::Ready
     );
     let after = backend.get_fact(&fact.id).await.unwrap().unwrap();
+    assert!(
+        backend
+            .embedding_indexing_record(&fact.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(after.version, fact.version);
     assert_eq!(after.reinforcement_count, fact.reinforcement_count);
     server.abort();

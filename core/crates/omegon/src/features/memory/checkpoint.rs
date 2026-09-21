@@ -5,8 +5,33 @@ use tokio::sync::oneshot;
 
 const TURN_INTERVAL: u32 = 8;
 
+pub(super) fn on_start(feature: &mut MemoryFeature) {
+    reap(feature);
+    if feature.session_binding.is_some()
+        && feature.memory_binding.available()
+        && feature.checkpoint_task.is_none()
+        && feature.session_end_tasks.lock().unwrap().accepting
+    {
+        let _ = spawn(feature);
+    }
+}
+
 pub(super) fn status(feature: &MemoryFeature) -> serde_json::Value {
-    serde_json::json!({"interval_turns":TURN_INTERVAL,"turns_since_request":feature.checkpoint_turns,"capture_due":feature.checkpoint_turns>=TURN_INTERVAL,"worker_running":feature.checkpoint_task.as_ref().is_some_and(|task|!task.handle.is_finished()),"last_pre_eviction":feature.last_pre_eviction})
+    let running = feature
+        .checkpoint_task
+        .as_ref()
+        .is_some_and(|task| !task.handle.is_finished());
+    let finalizing = feature.finalization_running.load(Ordering::SeqCst);
+    let backpressure = if finalization::queued(feature) == 8 {
+        Some("finalization_queue_full")
+    } else if feature.checkpoint_backlog.load(Ordering::SeqCst) {
+        Some("capture_backlog")
+    } else if feature.checkpoint_turns >= TURN_INTERVAL && (running || finalizing) {
+        Some("capture_busy")
+    } else {
+        None
+    };
+    serde_json::json!({"interval_turns":TURN_INTERVAL,"pages_per_pass":8,"turns_since_request":feature.checkpoint_turns,"capture_due":feature.checkpoint_turns>=TURN_INTERVAL,"worker_running":running,"finalization_running":finalizing,"finalization_queued":finalization::queued(feature),"backpressure":backpressure,"last_pre_eviction":feature.last_pre_eviction})
 }
 
 fn reap(feature: &mut MemoryFeature) {
@@ -100,6 +125,7 @@ fn spawn(feature: &mut MemoryFeature) -> Result<oneshot::Receiver<Outcome>, Stri
     let status_root = feature.status_root.clone();
     let cancellation = tokio_util::sync::CancellationToken::new();
     let worker = cancellation.clone();
+    let backlog = feature.checkpoint_backlog.clone();
     let (send, receive) = oneshot::channel();
     let handle=std::thread::Builder::new().name("memory-checkpoint".into()).spawn(move|| {
         let runtime=tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|_|"checkpoint_runtime_failed".to_string())?;
@@ -107,13 +133,10 @@ fn spawn(feature: &mut MemoryFeature) -> Result<oneshot::Receiver<Outcome>, Stri
             tokio::select! {
                 biased;
                 _=worker.cancelled()=>Err("cancelled".into()),
-                result=tokio::time::timeout(std::time::Duration::from_secs(10),async {
-                    let evidence=formation::capture(Some(&binding),Some(&target),&session_id);
-                    if !matches!(evidence.source,omegon_memory::FormationSource::Available {..}) {return Err("checkpoint_source_unavailable".into());}
-                    if evidence.evidence.is_empty() {return Ok(false);}
-                    persist(SessionEndPipelineInput {mind,memory_binding,extractor,evidence,session_id,status_root,turns:0,tool_calls:0,duration_secs:0.0}).await?;
+                result=async {
+                    drain(&binding, &target, SessionEndPipelineInput {mind,memory_binding,extractor,evidence:formation::unavailable(&session_id,"capture_pending"),session_id,status_root,turns:0,tool_calls:0,duration_secs:0.0}, Some(backlog), worker.clone()).await?;
                     Ok(true)
-                })=>result.unwrap_or_else(|_|Err("checkpoint_store_timed_out".into())),
+                }=>result,
             }
         });
         let outcome=match &result {Ok(true)=>Outcome::Persisted,Ok(false)=>Outcome::NotApplicable,Err(reason)=>Outcome::Unavailable {reason:reason.clone()}};
@@ -129,25 +152,134 @@ fn spawn(feature: &mut MemoryFeature) -> Result<oneshot::Receiver<Outcome>, Stri
     Ok(receive)
 }
 
-async fn persist(input: SessionEndPipelineInput) -> Result<(), String> {
-    let (operation_id, request) = formation_episode_request(&input);
+type CapturedPage = (
+    SessionEndPipelineInput,
+    String,
+    omegon_memory::EpisodeFormation,
+    omegon_memory::MemoryMutationOutcome,
+);
+
+pub(super) async fn drain(
+    binding: &crate::session_consumers::DeferredSessionViewBinding,
+    target: &crate::session_consumers::SessionViewTarget,
+    input: SessionEndPipelineInput,
+    backlog: Option<Arc<AtomicBool>>,
+    cancellation: tokio_util::sync::CancellationToken,
+) -> Result<Vec<CapturedPage>, String> {
+    struct ResetBacklog(Option<Arc<AtomicBool>>);
+    impl Drop for ResetBacklog {
+        fn drop(&mut self) {
+            if let Some(backlog) = &self.0 {
+                backlog.store(false, Ordering::SeqCst);
+            }
+        }
+    }
+    let backlog = ResetBacklog(backlog);
+    let mut write_retries = 0;
+    loop {
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            capture_pass(binding, target, input.clone(), &cancellation),
+        )
+        .await
+        {
+            Ok(Err(reason)) if reason == "capture_backlog" => {
+                if let Some(backlog) = &backlog.0 {
+                    backlog.store(true, Ordering::SeqCst);
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await
+            }
+            Ok(Err(reason)) if reason == "checkpoint_store_failed" && write_retries < 3 => {
+                // A concurrent capture can win the cursor CAS. Reread the durable
+                // cursor on retry; bounded retries also cover transient storage failure.
+                write_retries += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            Ok(result) => return result,
+            Err(_) => return Err("checkpoint_store_timed_out".into()),
+        }
+    }
+}
+
+pub(super) async fn capture_pass(
+    binding: &crate::session_consumers::DeferredSessionViewBinding,
+    target: &crate::session_consumers::SessionViewTarget,
+    mut input: SessionEndPipelineInput,
+    cancellation: &tokio_util::sync::CancellationToken,
+) -> Result<Vec<CapturedPage>, String> {
+    let snapshot =
+        formation::CaptureSnapshot::load(binding, target, &input.session_id, cancellation)?;
+    let first = snapshot
+        .page(None)?
+        .ok_or("checkpoint_source_unavailable")?;
+    input.evidence = first;
+    let (_, request) = formation_episode_request(&input);
+    let key =
+        omegon_memory::formation::capture_key(&request).map_err(|_| "checkpoint_source_invalid")?;
+    let cancellation = tokio_util::sync::CancellationToken::new();
+    let _cancel_on_drop = cancellation.clone().drop_guard();
+    let response = input
+        .memory_binding
+        .invoke(crate::memory_service::MemoryRequestV1::FormationCursor {
+            scope: crate::memory_service::MemoryScopeV1::Project,
+            key,
+            cancellation,
+        })
+        .await
+        .map_err(|_| "checkpoint_cursor_unavailable")?;
+    let crate::memory_service::MemoryPayloadV1::FormationCursor(mut cursor) = response.payload
+    else {
+        return Err("checkpoint_response_invalid".into());
+    };
+    let mut pages = Vec::new();
+    for _ in 0..8 {
+        let Some(page) = snapshot.page(cursor.as_ref())? else {
+            return Ok(pages);
+        };
+        input.evidence = page;
+        let (next, captured) = persist(&input, cursor).await?;
+        cursor = Some(next);
+        pages.push(captured);
+    }
+    if snapshot.page(cursor.as_ref())?.is_none() {
+        Ok(pages)
+    } else {
+        Err("capture_backlog".into())
+    }
+}
+
+async fn persist(
+    input: &SessionEndPipelineInput,
+    expected: Option<omegon_memory::FormationCursor>,
+) -> Result<(omegon_memory::FormationCursor, CapturedPage), String> {
+    let (operation_id, request) = formation_episode_request(input);
+    let evidence = request
+        .formation
+        .as_deref()
+        .ok_or("checkpoint_source_invalid")?
+        .clone();
     let cancellation = tokio_util::sync::CancellationToken::new();
     let _cancel_on_drop = cancellation.clone().drop_guard();
     let response = input
         .memory_binding
         .invoke(crate::memory_service::MemoryRequestV1::ApplyMutation {
             scope: crate::memory_service::MemoryScopeV1::Project,
-            operation_id,
-            mutation: MemoryMutation::StoreEpisode { request },
+            operation_id: operation_id.clone(),
+            mutation: MemoryMutation::StoreCoveragePage { request, expected },
             cancellation,
         })
         .await
         .map_err(|_| "checkpoint_store_failed".to_string())?;
-    if !matches!(
-        response.payload,
-        crate::memory_service::MemoryPayloadV1::Mutation(_)
-    ) {
-        return Err("checkpoint_response_invalid".into());
+    match response.payload {
+        crate::memory_service::MemoryPayloadV1::Mutation(stored) => {
+            let MemoryMutationEffect::CoverageStored { cursor, .. } = &stored.effect else {
+                return Err("checkpoint_response_invalid".into());
+            };
+            Ok((
+                cursor.clone(),
+                (input.clone(), operation_id, evidence, stored),
+            ))
+        }
+        _ => Err("checkpoint_response_invalid".into()),
     }
-    Ok(())
 }

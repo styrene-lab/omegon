@@ -962,6 +962,7 @@ fn exercise_exact_scenario(scenario: &Scenario) -> DispositionV1 {
                 .unwrap();
             assert!(
                 SemanticSessionView::load(&SessionViewTarget {
+                    binding_id: uuid::Uuid::new_v4(),
                     snapshot: snapshot.clone(),
                     session_id: SESSION_ID.into(),
                     stream_id: Some(STREAM_ID),
@@ -1195,6 +1196,7 @@ fn semantic_target(sandbox: &RecoverySandbox, lineage: Lineage) -> SessionViewTa
         .publish(&replay, &ALL_SHADOW_PROJECTORS);
     SessionViewTarget {
         snapshot,
+        binding_id: uuid::Uuid::new_v4(),
         session_id: SESSION_ID.into(),
         stream_id: Some(STREAM_ID),
         generation: 7,

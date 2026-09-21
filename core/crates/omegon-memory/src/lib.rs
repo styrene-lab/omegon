@@ -24,6 +24,7 @@ pub mod decay;
 pub mod embedding;
 pub mod formation;
 pub mod hash;
+mod indexing;
 pub mod inmemory;
 pub mod inspection;
 pub mod lifecycle;

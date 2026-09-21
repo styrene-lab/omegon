@@ -12,6 +12,167 @@ use serde::Deserialize;
 const DEFAULT_EMBED_URL: &str = "http://localhost:11434";
 const DEFAULT_EMBED_MODEL: &str = "nomic-embed-text";
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum BoundedEmbeddingError {
+    #[error("embedding generation cancelled")]
+    Cancelled,
+    #[error("embedding generation deadline exceeded")]
+    DeadlineExceeded,
+    #[error("embedding generation failed")]
+    Generation(#[source] EmbedError),
+}
+
+/// One bounded identified request. Dropping the owned inference future releases
+/// its HTTP request; no detached inference task is spawned by this boundary.
+pub(crate) async fn generate_identified(
+    service: &dyn EmbeddingService,
+    content: &str,
+    budget: std::time::Duration,
+    cancellation: &tokio_util::sync::CancellationToken,
+) -> Result<omegon_memory::IdentifiedEmbedding, BoundedEmbeddingError> {
+    tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => Err(BoundedEmbeddingError::Cancelled),
+        result = tokio::time::timeout(budget, service.embed_identified(content)) => {
+            result.map_err(|_| BoundedEmbeddingError::DeadlineExceeded)?
+                .map_err(BoundedEmbeddingError::Generation)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IndexFactOutcome {
+    Indexed,
+    Incomplete(omegon_memory::EmbeddingIndexingReason),
+    StorageUnavailable,
+}
+
+/// Persist pending state before optional inference. Settlement uses a fresh,
+/// bounded token so cancellation of inference cannot cancel its durable reason.
+pub(crate) async fn index_fact(
+    service: &dyn EmbeddingService,
+    binding: &crate::memory_service::MemoryBinding,
+    fact: omegon_memory::FactPrecondition,
+    content: &str,
+    operation_id: &str,
+    cancellation: &tokio_util::sync::CancellationToken,
+) -> IndexFactOutcome {
+    use crate::memory_service::MemoryServiceErrorCodeV1 as Code;
+    use omegon_memory::{EmbeddingIndexingReason as Reason, MemoryMutation};
+    let mut record = omegon_memory::EmbeddingIndexingRecord {
+        fact: fact.clone(),
+        attempt_id: omegon_memory::retrieval::raw_content_hash(operation_id),
+        space: None,
+        reason: Reason::Pending,
+    };
+    if let Err(error) = apply_index_mutation_result(
+        binding,
+        format!("{operation_id}:pending"),
+        MemoryMutation::RecordEmbeddingIndexing {
+            record: record.clone(),
+        },
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    {
+        return if error == Code::FactVersionConflict {
+            IndexFactOutcome::Incomplete(Reason::SourceChanged)
+        } else {
+            IndexFactOutcome::StorageUnavailable
+        };
+    }
+    let reason = match generate_identified(
+        service,
+        content,
+        std::time::Duration::from_secs(30),
+        cancellation,
+    )
+    .await
+    {
+        Ok(embedding) => {
+            let result = apply_index_mutation_result(
+                binding,
+                format!("{operation_id}:complete"),
+                MemoryMutation::CompleteEmbeddingIndexing {
+                    fact,
+                    attempt_id: record.attempt_id.clone(),
+                    embedding,
+                },
+                cancellation.child_token(),
+            )
+            .await;
+            match result {
+                Ok(()) => return IndexFactOutcome::Indexed,
+                Err(Code::FactVersionConflict) => {
+                    return IndexFactOutcome::Incomplete(Reason::SourceChanged);
+                }
+                Err(Code::InvalidMutation) => {
+                    return IndexFactOutcome::Incomplete(Reason::Incompatible);
+                }
+                Err(_) if cancellation.is_cancelled() => Reason::Cancelled,
+                Err(_) => Reason::WriteFailed,
+            }
+        }
+        Err(BoundedEmbeddingError::Cancelled) => Reason::Cancelled,
+        Err(BoundedEmbeddingError::DeadlineExceeded) => Reason::Timeout,
+        Err(BoundedEmbeddingError::Generation(EmbedError::Unavailable(_))) => Reason::Unavailable,
+        Err(BoundedEmbeddingError::Generation(EmbedError::RequestFailed(_))) => {
+            Reason::GenerationFailed
+        }
+    };
+    record.reason = reason;
+    if apply_index_mutation(
+        binding,
+        format!("{operation_id}:failure:{reason:?}"),
+        MemoryMutation::RecordEmbeddingIndexing { record },
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    {
+        IndexFactOutcome::Incomplete(reason)
+    } else {
+        IndexFactOutcome::StorageUnavailable
+    }
+}
+
+pub(crate) async fn apply_index_mutation(
+    binding: &crate::memory_service::MemoryBinding,
+    operation_id: String,
+    mutation: omegon_memory::MemoryMutation,
+    cancellation: tokio_util::sync::CancellationToken,
+) -> bool {
+    apply_index_mutation_result(binding, operation_id, mutation, cancellation)
+        .await
+        .is_ok()
+}
+
+async fn apply_index_mutation_result(
+    binding: &crate::memory_service::MemoryBinding,
+    operation_id: String,
+    mutation: omegon_memory::MemoryMutation,
+    cancellation: tokio_util::sync::CancellationToken,
+) -> Result<(), crate::memory_service::MemoryServiceErrorCodeV1> {
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        binding.invoke(crate::memory_service::MemoryRequestV1::ApplyMutation {
+            scope: crate::memory_service::MemoryScopeV1::Project,
+            operation_id,
+            mutation,
+            cancellation: cancellation.clone(),
+        }),
+    )
+    .await;
+    cancellation.cancel();
+    match result {
+        Ok(Ok(crate::memory_service::MemoryResponseV1 {
+            payload: crate::memory_service::MemoryPayloadV1::Mutation(_),
+            ..
+        })) => Ok(()),
+        Ok(Err(omegon_traits::ManagedServiceCallError::Operation(error))) => Err(error.code),
+        _ => Err(crate::memory_service::MemoryServiceErrorCodeV1::Unavailable),
+    }
+}
+
 /// Embedding service backed by Ollama's `/api/embed` endpoint.
 pub struct OllamaEmbeddingService {
     /// Lazy-initialized HTTP client. Deferred to avoid triggering macOS
@@ -222,6 +383,203 @@ impl EmbeddingService for OllamaEmbeddingService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct HangingEmbedding {
+        entered: tokio::sync::Notify,
+        dropped: std::sync::atomic::AtomicBool,
+    }
+
+    #[tokio::test]
+    async fn wave5_cancelled_indexing_persists_reason_after_commit_and_reopen() {
+        use omegon_memory::{EmbeddingIndexingReason, MemoryBackend, SqliteBackend};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("facts.db");
+        let backend = SqliteBackend::open(&path).unwrap();
+        let fact = backend
+            .store_fact(omegon_memory::StoreFact {
+                mind: "fixture".into(),
+                content: "committed cancellation evidence".into(),
+                section: omegon_memory::Section::Architecture,
+                source: None,
+                decay_profile: Default::default(),
+            })
+            .await
+            .unwrap()
+            .fact;
+        drop(backend);
+        let binding = crate::memory_service::MemoryBinding::default();
+        let mut bus = crate::bus::EventBus::new();
+        bus.register(Box::new(crate::memory_service::MemoryDeclarationFeature));
+        let candidate =
+            crate::memory_service::start_candidate(crate::memory_service::MemoryWorkerConfig {
+                workspace_root: Some(dir.path().into()),
+                memory_token_cap: None,
+                project_memory_root: dir.path().into(),
+                project_db_path: path.clone(),
+                project_jsonl_path: dir.path().join("facts.jsonl"),
+                global_db_path: None,
+                vault: None,
+                startup_sync_enabled: false,
+            })
+            .await
+            .unwrap();
+        bus.stage_managed_generation("memory", candidate).unwrap();
+        bus.try_finalize_managed().await.unwrap();
+        binding.capture(&bus).unwrap();
+        let service = HangingEmbedding {
+            entered: Default::default(),
+            dropped: false.into(),
+        };
+        let token = tokio_util::sync::CancellationToken::new();
+        let cancel = async {
+            service.entered.notified().await;
+            token.cancel();
+        };
+        let (outcome, ()) = tokio::join!(
+            index_fact(
+                &service,
+                &binding,
+                omegon_memory::FactPrecondition {
+                    id: fact.id.clone(),
+                    expected_version: fact.version
+                },
+                &fact.content,
+                "cancelled-fixture",
+                &token
+            ),
+            cancel
+        );
+        assert_eq!(
+            outcome,
+            IndexFactOutcome::Incomplete(EmbeddingIndexingReason::Cancelled)
+        );
+        assert!(service.dropped.load(std::sync::atomic::Ordering::SeqCst));
+        crate::status::refresh_managed_memory_status_for_mind(&binding, dir.path(), "fixture")
+            .await;
+        let status = crate::status::memory_capabilities_snapshot_for(dir.path());
+        assert_eq!(status.pending_indexing, Some(1));
+        assert_eq!(
+            status.indexing.unwrap().reasons[&EmbeddingIndexingReason::Cancelled],
+            1
+        );
+        assert!(
+            bus.shutdown_managed_services()
+                .await
+                .all_resources_settled()
+        );
+        let reopened = SqliteBackend::open(&path).unwrap();
+        assert_eq!(
+            reopened
+                .embedding_indexing_record(&fact.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .reason,
+            EmbeddingIndexingReason::Cancelled
+        );
+        assert_eq!(
+            reopened
+                .fts_search("fixture", "committed", 5)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            serde_json::to_value(reopened.get_fact(&fact.id).await.unwrap().unwrap()).unwrap(),
+            serde_json::to_value(fact).unwrap()
+        );
+    }
+
+    #[async_trait]
+    impl EmbeddingService for HangingEmbedding {
+        async fn embed(&self, _: &str) -> Result<Vec<f32>, EmbedError> {
+            panic!("identified generation must not use the legacy API")
+        }
+
+        async fn embed_identified(
+            &self,
+            _: &str,
+        ) -> Result<omegon_memory::IdentifiedEmbedding, EmbedError> {
+            struct Guard<'a>(&'a std::sync::atomic::AtomicBool);
+            impl Drop for Guard<'_> {
+                fn drop(&mut self) {
+                    self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+            let _guard = Guard(&self.dropped);
+            self.entered.notify_one();
+            std::future::pending().await
+        }
+
+        fn model_name(&self) -> &str {
+            "hanging-fixture"
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wave5_embedding_deadline_drops_owned_inference() {
+        let service = HangingEmbedding {
+            entered: Default::default(),
+            dropped: false.into(),
+        };
+        let token = tokio_util::sync::CancellationToken::new();
+        let result = generate_identified(
+            &service,
+            "fixture",
+            std::time::Duration::from_secs(30),
+            &token,
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(BoundedEmbeddingError::DeadlineExceeded)
+        ));
+        assert!(service.dropped.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn wave5_embedding_cancellation_drops_owned_inference() {
+        let service = HangingEmbedding {
+            entered: Default::default(),
+            dropped: false.into(),
+        };
+        let token = tokio_util::sync::CancellationToken::new();
+        let cancel = async {
+            service.entered.notified().await;
+            token.cancel();
+        };
+        let (result, ()) = tokio::join!(
+            generate_identified(
+                &service,
+                "fixture",
+                std::time::Duration::from_secs(30),
+                &token
+            ),
+            cancel
+        );
+        assert!(matches!(result, Err(BoundedEmbeddingError::Cancelled)));
+        assert!(service.dropped.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn wave5_precancelled_embedding_never_starts_inference() {
+        let service = HangingEmbedding {
+            entered: Default::default(),
+            dropped: false.into(),
+        };
+        let token = tokio_util::sync::CancellationToken::new();
+        token.cancel();
+        let result = generate_identified(
+            &service,
+            "fixture",
+            std::time::Duration::from_secs(30),
+            &token,
+        )
+        .await;
+        assert!(matches!(result, Err(BoundedEmbeddingError::Cancelled)));
+        assert!(!service.dropped.load(std::sync::atomic::Ordering::SeqCst));
+    }
 
     #[tokio::test]
     async fn wave4_ollama_identity_is_checked_around_generation() {

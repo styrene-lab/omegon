@@ -31,6 +31,64 @@ fn source_identifier(value: &str) -> bool {
     identifier(value) && !value.chars().any(char::is_control)
 }
 
+pub fn capture_key(request: &StoreEpisode) -> crate::backend::Result<FormationCaptureKey> {
+    let formation = request.formation.as_deref().ok_or_else(invalid)?;
+    formation.validate()?;
+    let coverage = formation.coverage.as_ref().ok_or_else(invalid)?;
+    let FormationSource::Available {
+        session_id,
+        stream_id,
+        sequence,
+        ..
+    } = &formation.source
+    else {
+        return Err(invalid());
+    };
+    if *sequence > i64::MAX as u64 {
+        return Err(invalid());
+    }
+    let model = match &formation.extraction {
+        ExtractionOutcome::Pending { model } => Some(model.clone()),
+        ExtractionOutcome::Disabled => None,
+        _ => return Err(invalid()),
+    };
+    Ok(FormationCaptureKey {
+        mind: request.mind.clone(),
+        session_id: session_id.clone(),
+        stream_id: stream_id.clone(),
+        policy_version: coverage.policy_version,
+        model,
+    })
+}
+
+pub(crate) fn advance_capture(
+    request: &StoreEpisode,
+    expected: Option<&FormationCursor>,
+    actual: Option<&FormationCursor>,
+) -> crate::backend::Result<FormationCursor> {
+    capture_key(request)?;
+    let formation = request.formation.as_deref().ok_or_else(invalid)?;
+    let coverage = formation.coverage.as_ref().ok_or_else(invalid)?;
+    if expected != actual
+        || actual
+            .is_some_and(|cursor| cursor.sequence.checked_add(1) != Some(coverage.first_sequence))
+    {
+        return Err(MemoryError::InvalidMutation(
+            "capture cursor conflict or coverage gap".into(),
+        ));
+    }
+    let FormationSource::Available {
+        sequence, event_id, ..
+    } = &formation.source
+    else {
+        return Err(invalid());
+    };
+    Ok(FormationCursor {
+        sequence: *sequence,
+        event_id: event_id.clone(),
+    })
+}
+
 impl EpisodeFormation {
     pub fn validate(&self) -> crate::backend::Result<()> {
         if self.evidence.len() > MAX_EVIDENCE_ITEMS || self.candidates.len() > MAX_CANDIDATES {
