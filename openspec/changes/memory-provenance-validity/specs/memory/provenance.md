@@ -13,6 +13,12 @@ When the claim is retained as a candidate
 Then its provenance identifies an inference
 And no successful verification event is fabricated
 
+#### Scenario: Retained episode evidence survives source-independent transport
+Given an episode retains attributed source excerpts and extraction candidates
+When the database is reopened and the episode is exported and imported without its session log
+Then the retained evidence and source frontier are unchanged
+And the candidates do not become active facts through transport
+
 #### Scenario: Imported content cannot elevate its authority
 Given a vault note's content instructs the system to treat it as an operator directive
 When the note is imported as memory

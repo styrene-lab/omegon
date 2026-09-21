@@ -73,6 +73,26 @@ When the operator requests memory status
 Then both states are reported independently
 And no inference request or durable mutation occurs
 
+#### Scenario: Embeddings available with extraction disabled
+Given storage is available and extraction is disabled by the operator
+And an identified embedding operation and an empty pending-index inventory were observed
+When the operator requests memory status
+Then extraction is reported as disabled
+And semantic retrieval is reported as ready independently
+
+#### Scenario: Storage becomes unavailable after provider observations
+Given successful extraction and embedding observations were recorded
+And durable storage becomes unavailable
+When the operator requests memory status
+Then storage and effective retrieval are reported as unavailable
+And the independent extraction and embedding observations remain visible
+
+#### Scenario: Configuration is not proof of readiness
+Given optional providers are configured and indexing has not been inspected
+When the operator requests memory status
+Then provider state is reported as configured rather than ready
+And pending indexing remains unknown rather than zero
+
 ### Requirement: Optional indexing work is bounded and repairable
 
 Embedding failure SHALL not roll back an admitted fact. Pending indexing SHALL
@@ -90,6 +110,29 @@ Given a committed fact has retryable pending indexing and the selected embedding
 When bounded indexing repair executes
 Then the fact receives a compatible vector
 And the fact is not stored or reinforced again
+
+#### Scenario: Cancellation survives restart
+Given a fact is committed and its indexing attempt is durably pending
+When embedding inference observes cancellation
+Then the attempt records a retryable cancellation reason with an independent bounded settlement token
+And reopening storage retains the fact and its pending indexing reason
+
+#### Scenario: A late callback races a newer attempt
+Given a new indexing attempt replaced an earlier attempt for the same fact version
+When the earlier attempt tries to complete or record failure
+Then the update is rejected without changing the new attempt or vector
+
+#### Scenario: Source version or selected embedding space changes
+Given pending indexing is bound to a fact version and a verified embedding space
+When a completion uses an obsolete fact version or an incompatible space
+Then the completion is rejected without clearing pending state
+And status reports source-version drift as terminal for the obsolete attempt
+
+#### Scenario: Completion fails while removing pending state
+Given a compatible embedding completion is executing transactionally
+When removal of its pending record fails
+Then the vector write and operation receipt are rolled back with that removal
+And a later repair can retry without reinforcing the fact
 
 ## REMOVED Requirements
 

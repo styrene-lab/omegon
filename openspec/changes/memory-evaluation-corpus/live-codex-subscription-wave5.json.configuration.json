@@ -1,0 +1,122 @@
+{
+  "accounting": "conservative_utf8_bytes",
+  "auth_status": "existing subscription OAuth ready",
+  "call_timeout_seconds": 45,
+  "candidate_cap": 256,
+  "codex_subscription": {
+    "catalog_client_version": "0.153.3",
+    "catalog_etag": "W/\"cae35b560d08debee3c4a1f570a7cef3\"",
+    "model": "openai-codex:gpt-5.6-luna",
+    "paid_api_fallback": false,
+    "reasoning": "low",
+    "registered_full_output_ceiling": 65536,
+    "selection": "registry grade D, corroborated by existing Codex subscription models_cache",
+    "unsupported_request_fields": []
+  },
+  "configured_model_output_ceiling": 65536,
+  "corpus_sha256": "478fcfeb26d4a0bb946cac7439075ff2dfe780c8c61c7dca96b79cb171c3673a",
+  "cost_note": "Extraction is shared once per case and attributed in full to each memory arm; sum calls, not arm costs, for actual spend. File curation labor is unmeasured. USD pricing unavailable.",
+  "credential_source": "opencode-existing-oauth-access-only-via-CHATGPT_OAUTH_TOKEN",
+  "current_cap": 1024,
+  "development_offline_summary": [
+    {
+      "adapter": "no_memory",
+      "budgets": [
+        1024
+      ],
+      "cases": 4,
+      "completed": 4,
+      "evidence_recall": 0.0,
+      "incomplete": 0,
+      "injected_tokens": 0,
+      "judge_uncertain": 0,
+      "latency_max_ms": null,
+      "latency_p50_ms": null,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 0.25
+    },
+    {
+      "adapter": "file_search",
+      "budgets": [
+        1024
+      ],
+      "cases": 4,
+      "completed": 4,
+      "evidence_recall": 1.0,
+      "incomplete": 0,
+      "injected_tokens": 154,
+      "judge_uncertain": 0,
+      "latency_max_ms": null,
+      "latency_p50_ms": null,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 1.0
+    },
+    {
+      "adapter": "current_memory",
+      "budgets": [
+        1024
+      ],
+      "cases": 4,
+      "completed": 4,
+      "evidence_recall": 1.0,
+      "incomplete": 0,
+      "injected_tokens": 358,
+      "judge_uncertain": 0,
+      "latency_max_ms": null,
+      "latency_p50_ms": null,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 1.0
+    },
+    {
+      "adapter": "candidate_policy",
+      "budgets": [
+        256
+      ],
+      "cases": 4,
+      "completed": 4,
+      "evidence_recall": 1.0,
+      "incomplete": 0,
+      "injected_tokens": 358,
+      "judge_uncertain": 0,
+      "latency_max_ms": null,
+      "latency_p50_ms": null,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 1.0
+    }
+  ],
+  "embedding": "disabled, lexical-only paired evaluation",
+  "extractor": "openai-codex:gpt-5.6-luna",
+  "extractor_selection": "existing Codex subscription; configured registry grade D and cached offering",
+  "labels_sha256": "846de4d22f5b5e380bb8bbb8b66739424e167c22dd133287ed4369b9e2004f9d",
+  "output_reservation": {
+    "extractor": 65536,
+    "reader": 65536
+  },
+  "prior_attempt": {
+    "basis": "carry prior aggregate charge and elapsed; no unproven reservation released",
+    "carried_charge": 0,
+    "carried_elapsed_ms": 1166,
+    "released_reservation": 0,
+    "report": "/Users/wilson/workspace/styrene-labs/omegon-quartus/openspec/changes/memory-evaluation-corpus/live-codex-wave5.json"
+  },
+  "prompt_revision": "memory-wave5d-v3",
+  "provider_defaults": {
+    "reasoning": "explicit low",
+    "temperature": "provider default",
+    "verbosity": "medium from native Responses bridge"
+  },
+  "reader": "openai-codex:gpt-5.6-luna",
+  "reader_selection": "existing Codex subscription; configured registry grade D and cached offering",
+  "reasoning": "low",
+  "revision": "memory-wave5d-v1",
+  "scorer_revision": "cutoff-grounded-verbatim-claims-v1",
+  "seed": null,
+  "seed_support": "not requested through existing routes",
+  "temperature": null,
+  "token_limit": 100000,
+  "wall_seconds": 600
+}

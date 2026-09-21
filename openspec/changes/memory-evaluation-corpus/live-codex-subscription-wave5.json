@@ -1,0 +1,2564 @@
+{
+  "acceptance": "smoke thresholds passed; synthetic sample does not establish general model quality",
+  "calls": [
+    {
+      "case": "dev-cutoff",
+      "cost": {
+        "input_tokens": 143,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 63,
+        "usd": null
+      },
+      "latency_ms": 4281,
+      "output": "[{\"content\":\"zircon requires atomic migration\",\"section\":\"Constraints\",\"evidence_ids\":[\"d1\"]}]",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70211,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "formation"
+    },
+    {
+      "case": "dev-cutoff",
+      "cost": {
+        "input_tokens": 121,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 7,
+        "usd": null
+      },
+      "latency_ms": 3888,
+      "output": "ABSTAIN",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70194,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "dev-cutoff",
+      "cost": {
+        "input_tokens": 129,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 51,
+        "usd": null
+      },
+      "latency_ms": 3232,
+      "output": "{\"claims\":[\"zircon requires atomic migration\"]}",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70232,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "dev-cutoff",
+      "cost": {
+        "input_tokens": 148,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 143,
+        "usd": null
+      },
+      "latency_ms": 6861,
+      "output": "{\"claims\":[\"zircon requires atomic migration\"]}",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70300,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "dev-cutoff",
+      "cost": {
+        "input_tokens": 148,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 69,
+        "usd": null
+      },
+      "latency_ms": 3983,
+      "output": "{\"claims\":[\"zircon requires atomic migration\"]}",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70300,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "dev-absent",
+      "cost": {
+        "input_tokens": 91,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 5,
+        "usd": null
+      },
+      "latency_ms": 1968,
+      "output": "[]",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70042,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "formation"
+    },
+    {
+      "case": "dev-absent",
+      "cost": {
+        "input_tokens": 121,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 24,
+        "usd": null
+      },
+      "latency_ms": 3274,
+      "output": "ABSTAIN",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70194,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "dev-absent",
+      "cost": {
+        "input_tokens": 121,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 24,
+        "usd": null
+      },
+      "latency_ms": 4953,
+      "output": "ABSTAIN",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70194,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "dev-absent",
+      "cost": {
+        "input_tokens": 121,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 24,
+        "usd": null
+      },
+      "latency_ms": 2764,
+      "output": "ABSTAIN",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70194,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "dev-absent",
+      "cost": {
+        "input_tokens": 121,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 25,
+        "usd": null
+      },
+      "latency_ms": 2635,
+      "output": "ABSTAIN",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70194,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "dev-failure",
+      "cost": {
+        "input_tokens": 198,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 69,
+        "usd": null
+      },
+      "latency_ms": 4692,
+      "output": "[{\"content\":\"cobalt migration failed; use transaction rollback before retry\",\"section\":\"Known Issues\",\"evidence_ids\":[\"d3\"]}]",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70404,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "formation"
+    },
+    {
+      "case": "dev-failure",
+      "cost": {
+        "input_tokens": 121,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 24,
+        "usd": null
+      },
+      "latency_ms": 2025,
+      "output": "ABSTAIN",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70194,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "dev-failure",
+      "cost": {
+        "input_tokens": 134,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 60,
+        "usd": null
+      },
+      "latency_ms": 3913,
+      "output": "{\"claims\":[\"cobalt migration failed; use transaction rollback before retry\"]}",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70262,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "dev-failure",
+      "cost": {
+        "input_tokens": 154,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 71,
+        "usd": null
+      },
+      "latency_ms": 5668,
+      "output": "{\"claims\":[\"cobalt migration failed; use transaction rollback before retry\"]}",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70331,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "dev-failure",
+      "cost": {
+        "input_tokens": 154,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 87,
+        "usd": null
+      },
+      "latency_ms": 5392,
+      "output": "{\"claims\":[\"cobalt migration failed; use transaction rollback before retry\"]}",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70331,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "dev-constraint",
+      "cost": {
+        "input_tokens": 194,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 53,
+        "usd": null
+      },
+      "latency_ms": 3533,
+      "output": "[{\"content\":\"amber requires Linux for native deployment\",\"section\":\"Constraints\",\"evidence_ids\":[\"d5\"]}]",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70395,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "formation"
+    },
+    {
+      "case": "dev-constraint",
+      "cost": {
+        "input_tokens": 121,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 7,
+        "usd": null
+      },
+      "latency_ms": 3991,
+      "output": "ABSTAIN",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70193,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "dev-constraint",
+      "cost": {
+        "input_tokens": 131,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 38,
+        "usd": null
+      },
+      "latency_ms": 4557,
+      "output": "{\"claims\":[\"amber requires Linux for native deployment\"]}",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70241,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "dev-constraint",
+      "cost": {
+        "input_tokens": 150,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 67,
+        "usd": null
+      },
+      "latency_ms": 4321,
+      "output": "{\"claims\":[\"amber requires Linux for native deployment\"]}",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70309,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "dev-constraint",
+      "cost": {
+        "input_tokens": 150,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 50,
+        "usd": null
+      },
+      "latency_ms": 2013,
+      "output": "{\"claims\":[\"amber requires Linux for native deployment\"]}",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70309,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "held-cutoff",
+      "cost": {
+        "input_tokens": 143,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 70,
+        "usd": null
+      },
+      "latency_ms": 6756,
+      "output": "[{\"content\":\"topaz requires serial installation\",\"section\":\"Constraints\",\"evidence_ids\":[\"h1\"]}]",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70213,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "formation"
+    },
+    {
+      "case": "held-cutoff",
+      "cost": {
+        "input_tokens": 122,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 25,
+        "usd": null
+      },
+      "latency_ms": 2310,
+      "output": "ABSTAIN",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70193,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "held-cutoff",
+      "cost": {
+        "input_tokens": 131,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 58,
+        "usd": null
+      },
+      "latency_ms": 4501,
+      "output": "{\"claims\":[\"topaz requires serial installation\"]}",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70233,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "held-cutoff",
+      "cost": {
+        "input_tokens": 150,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 48,
+        "usd": null
+      },
+      "latency_ms": 3468,
+      "output": "{\"claims\":[\"topaz requires serial installation\"]}",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70301,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "held-cutoff",
+      "cost": {
+        "input_tokens": 150,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 78,
+        "usd": null
+      },
+      "latency_ms": 2941,
+      "output": "{\"claims\":[\"topaz requires serial installation\"]}",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70301,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "held-absent",
+      "cost": {
+        "input_tokens": 142,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 5,
+        "usd": null
+      },
+      "latency_ms": 1727,
+      "output": "[]",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70205,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "formation"
+    },
+    {
+      "case": "held-absent",
+      "cost": {
+        "input_tokens": 122,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 24,
+        "usd": null
+      },
+      "latency_ms": 2727,
+      "output": "ABSTAIN",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70192,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "held-absent",
+      "cost": {
+        "input_tokens": 122,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 7,
+        "usd": null
+      },
+      "latency_ms": 1785,
+      "output": "ABSTAIN",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70192,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "held-absent",
+      "cost": {
+        "input_tokens": 122,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 24,
+        "usd": null
+      },
+      "latency_ms": 1780,
+      "output": "ABSTAIN",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70192,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "held-absent",
+      "cost": {
+        "input_tokens": 122,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 7,
+        "usd": null
+      },
+      "latency_ms": 1952,
+      "output": "ABSTAIN",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70192,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "held-failure",
+      "cost": {
+        "input_tokens": 148,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 101,
+        "usd": null
+      },
+      "latency_ms": 3136,
+      "output": "[{\"content\":\"beryl upgrade failed twice; disable cache before retry\",\"section\":\"Known Issues\",\"evidence_ids\":[\"h4\"]}]",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70230,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "formation"
+    },
+    {
+      "case": "held-failure",
+      "cost": {
+        "input_tokens": 122,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 24,
+        "usd": null
+      },
+      "latency_ms": 2115,
+      "output": "ABSTAIN",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70193,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "held-failure",
+      "cost": {
+        "input_tokens": 136,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 93,
+        "usd": null
+      },
+      "latency_ms": 3155,
+      "output": "{\"claims\":[\"beryl upgrade failed twice; disable cache before retry\"]}",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70253,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "held-failure",
+      "cost": {
+        "input_tokens": 156,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 84,
+        "usd": null
+      },
+      "latency_ms": 4420,
+      "output": "{\"claims\":[\"beryl upgrade failed twice; disable cache before retry\"]}",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70322,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "held-failure",
+      "cost": {
+        "input_tokens": 156,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 115,
+        "usd": null
+      },
+      "latency_ms": 3245,
+      "output": "{\"claims\":[\"beryl upgrade failed twice; disable cache before retry\"]}",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70322,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "held-constraint",
+      "cost": {
+        "input_tokens": 195,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 89,
+        "usd": null
+      },
+      "latency_ms": 5796,
+      "output": "[{\"content\":\"onyx requires macOS for signing\",\"section\":\"Constraints\",\"evidence_ids\":[\"h5\"]}]",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70378,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "formation"
+    },
+    {
+      "case": "held-constraint",
+      "cost": {
+        "input_tokens": 122,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 25,
+        "usd": null
+      },
+      "latency_ms": 2306,
+      "output": "ABSTAIN",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70192,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "held-constraint",
+      "cost": {
+        "input_tokens": 133,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 16,
+        "usd": null
+      },
+      "latency_ms": 9004,
+      "output": "{\"claims\":[\"onyx requires macOS for signing\"]}",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70229,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "held-constraint",
+      "cost": {
+        "input_tokens": 152,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 60,
+        "usd": null
+      },
+      "latency_ms": 3543,
+      "output": "{\"claims\":[\"onyx requires macOS for signing\"]}",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70297,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    },
+    {
+      "case": "held-constraint",
+      "cost": {
+        "input_tokens": 152,
+        "missing": [
+          "provider pricing not configured; USD unknown"
+        ],
+        "output_tokens": 58,
+        "usd": null
+      },
+      "latency_ms": 3619,
+      "output": "{\"claims\":[\"onyx requires macOS for signing\"]}",
+      "output_ceiling": 65536,
+      "requested_model": "openai-codex:gpt-5.6-luna",
+      "reserved_tokens": 70297,
+      "serving_model": "openai-codex:gpt-5.6-luna",
+      "stage": "task"
+    }
+  ],
+  "charged_or_reserved_tokens": 7541,
+  "elapsed_ms": 149616,
+  "heldout_summary": [
+    {
+      "adapter": "no_memory",
+      "budgets": [
+        1024
+      ],
+      "cases": 4,
+      "completed": 4,
+      "evidence_recall": 0.0,
+      "incomplete": 0,
+      "injected_tokens": 0,
+      "judge_uncertain": 0,
+      "latency_max_ms": 2730,
+      "latency_p50_ms": 2314,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 0.25
+    },
+    {
+      "adapter": "file_search",
+      "budgets": [
+        1024
+      ],
+      "cases": 4,
+      "completed": 4,
+      "evidence_recall": 1.0,
+      "incomplete": 0,
+      "injected_tokens": 137,
+      "judge_uncertain": 0,
+      "latency_max_ms": 9006,
+      "latency_p50_ms": 4505,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 1.0
+    },
+    {
+      "adapter": "current_memory",
+      "budgets": [
+        1024
+      ],
+      "cases": 4,
+      "completed": 4,
+      "evidence_recall": 1.0,
+      "incomplete": 0,
+      "injected_tokens": 342,
+      "judge_uncertain": 0,
+      "latency_max_ms": 4422,
+      "latency_p50_ms": 3549,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 1.0
+    },
+    {
+      "adapter": "candidate_policy",
+      "budgets": [
+        256
+      ],
+      "cases": 4,
+      "completed": 4,
+      "evidence_recall": 1.0,
+      "incomplete": 0,
+      "injected_tokens": 342,
+      "judge_uncertain": 0,
+      "latency_max_ms": 3624,
+      "latency_p50_ms": 3252,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 1.0
+    }
+  ],
+  "manifest": {
+    "accounting": "conservative_utf8_bytes",
+    "auth_status": "existing subscription OAuth ready",
+    "call_timeout_seconds": 45,
+    "candidate_cap": 256,
+    "codex_subscription": {
+      "catalog_client_version": "0.153.3",
+      "catalog_etag": "W/\"cae35b560d08debee3c4a1f570a7cef3\"",
+      "model": "openai-codex:gpt-5.6-luna",
+      "paid_api_fallback": false,
+      "reasoning": "low",
+      "registered_full_output_ceiling": 65536,
+      "selection": "registry grade D, corroborated by existing Codex subscription models_cache",
+      "unsupported_request_fields": []
+    },
+    "configured_model_output_ceiling": 65536,
+    "corpus_sha256": "478fcfeb26d4a0bb946cac7439075ff2dfe780c8c61c7dca96b79cb171c3673a",
+    "cost_note": "Extraction is shared once per case and attributed in full to each memory arm; sum calls, not arm costs, for actual spend. File curation labor is unmeasured. USD pricing unavailable.",
+    "credential_source": "opencode-existing-oauth-access-only-via-CHATGPT_OAUTH_TOKEN",
+    "current_cap": 1024,
+    "development_live_summary": [
+      {
+        "adapter": "no_memory",
+        "budgets": [
+          1024
+        ],
+        "cases": 4,
+        "completed": 4,
+        "evidence_recall": 0.0,
+        "incomplete": 0,
+        "injected_tokens": 0,
+        "judge_uncertain": 0,
+        "latency_max_ms": 3994,
+        "latency_p50_ms": 3891,
+        "repeated_error_rate": 0.0,
+        "stale_memory_usage": 0.0,
+        "task_success": 0.25
+      },
+      {
+        "adapter": "file_search",
+        "budgets": [
+          1024
+        ],
+        "cases": 4,
+        "completed": 4,
+        "evidence_recall": 1.0,
+        "incomplete": 0,
+        "injected_tokens": 154,
+        "judge_uncertain": 0,
+        "latency_max_ms": 4959,
+        "latency_p50_ms": 4562,
+        "repeated_error_rate": 0.0,
+        "stale_memory_usage": 0.0,
+        "task_success": 1.0
+      },
+      {
+        "adapter": "current_memory",
+        "budgets": [
+          1024
+        ],
+        "cases": 4,
+        "completed": 4,
+        "evidence_recall": 1.0,
+        "incomplete": 0,
+        "injected_tokens": 359,
+        "judge_uncertain": 0,
+        "latency_max_ms": 6868,
+        "latency_p50_ms": 5675,
+        "repeated_error_rate": 0.0,
+        "stale_memory_usage": 0.0,
+        "task_success": 1.0
+      },
+      {
+        "adapter": "candidate_policy",
+        "budgets": [
+          256
+        ],
+        "cases": 4,
+        "completed": 4,
+        "evidence_recall": 1.0,
+        "incomplete": 0,
+        "injected_tokens": 359,
+        "judge_uncertain": 0,
+        "latency_max_ms": 5397,
+        "latency_p50_ms": 3985,
+        "repeated_error_rate": 0.0,
+        "stale_memory_usage": 0.0,
+        "task_success": 1.0
+      }
+    ],
+    "development_offline_summary": [
+      {
+        "adapter": "no_memory",
+        "budgets": [
+          1024
+        ],
+        "cases": 4,
+        "completed": 4,
+        "evidence_recall": 0.0,
+        "incomplete": 0,
+        "injected_tokens": 0,
+        "judge_uncertain": 0,
+        "latency_max_ms": null,
+        "latency_p50_ms": null,
+        "repeated_error_rate": 0.0,
+        "stale_memory_usage": 0.0,
+        "task_success": 0.25
+      },
+      {
+        "adapter": "file_search",
+        "budgets": [
+          1024
+        ],
+        "cases": 4,
+        "completed": 4,
+        "evidence_recall": 1.0,
+        "incomplete": 0,
+        "injected_tokens": 154,
+        "judge_uncertain": 0,
+        "latency_max_ms": null,
+        "latency_p50_ms": null,
+        "repeated_error_rate": 0.0,
+        "stale_memory_usage": 0.0,
+        "task_success": 1.0
+      },
+      {
+        "adapter": "current_memory",
+        "budgets": [
+          1024
+        ],
+        "cases": 4,
+        "completed": 4,
+        "evidence_recall": 1.0,
+        "incomplete": 0,
+        "injected_tokens": 358,
+        "judge_uncertain": 0,
+        "latency_max_ms": null,
+        "latency_p50_ms": null,
+        "repeated_error_rate": 0.0,
+        "stale_memory_usage": 0.0,
+        "task_success": 1.0
+      },
+      {
+        "adapter": "candidate_policy",
+        "budgets": [
+          256
+        ],
+        "cases": 4,
+        "completed": 4,
+        "evidence_recall": 1.0,
+        "incomplete": 0,
+        "injected_tokens": 358,
+        "judge_uncertain": 0,
+        "latency_max_ms": null,
+        "latency_p50_ms": null,
+        "repeated_error_rate": 0.0,
+        "stale_memory_usage": 0.0,
+        "task_success": 1.0
+      }
+    ],
+    "embedding": "disabled, lexical-only paired evaluation",
+    "extractor": "openai-codex:gpt-5.6-luna",
+    "extractor_selection": "existing Codex subscription; configured registry grade D and cached offering",
+    "frozen_before_heldout": true,
+    "labels_sha256": "846de4d22f5b5e380bb8bbb8b66739424e167c22dd133287ed4369b9e2004f9d",
+    "output_reservation": {
+      "extractor": 65536,
+      "reader": 65536
+    },
+    "prior_attempt": {
+      "basis": "carry prior aggregate charge and elapsed; no unproven reservation released",
+      "carried_charge": 0,
+      "carried_elapsed_ms": 1166,
+      "released_reservation": 0,
+      "report": "/Users/wilson/workspace/styrene-labs/omegon-quartus/openspec/changes/memory-evaluation-corpus/live-codex-wave5.json"
+    },
+    "prompt_revision": "memory-wave5d-v3",
+    "provider_defaults": {
+      "reasoning": "explicit low",
+      "temperature": "provider default",
+      "verbosity": "medium from native Responses bridge"
+    },
+    "reader": "openai-codex:gpt-5.6-luna",
+    "reader_selection": "existing Codex subscription; configured registry grade D and cached offering",
+    "reasoning": "low",
+    "revision": "memory-wave5d-v1",
+    "scorer_revision": "cutoff-grounded-verbatim-claims-v1",
+    "seed": null,
+    "seed_support": "not requested through existing routes",
+    "temperature": null,
+    "thresholds": {
+      "basis": "measured deterministic development: memory arms 4/4; no model-quality claim if live incomplete",
+      "candidate_regression_tolerance": 0.0,
+      "max_repeated_error_rate": 0.0,
+      "max_request_latency_ms": 45000,
+      "max_stale_memory_usage": 0.0,
+      "minimum_evidence_recall": 1.0,
+      "minimum_task_success": 0.75,
+      "require_complete_paired_rows": true
+    },
+    "token_limit": 100000,
+    "wall_seconds": 600
+  },
+  "measured_tokens": 7541,
+  "rows": [
+    {
+      "case_id": "dev-cutoff",
+      "evidence_recall": 0.0,
+      "formation": "miss",
+      "latency_ms": 3891,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "miss",
+      "selection": "miss",
+      "stale_memory_used": false,
+      "task": "miss",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "no_memory",
+        "budget": 1024,
+        "context": "",
+        "cutoff": "2026-01-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 121,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 7,
+          "usd": null
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "dev-cutoff",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": 3234,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"zircon requires atomic migration\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "file_search",
+        "budget": 1024,
+        "context": "[d1] zircon requires atomic migration\n",
+        "cutoff": "2026-01-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 38,
+        "query_cost": {
+          "input_tokens": 129,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 51,
+          "usd": null
+        },
+        "retained": [
+          "d1"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "d1"
+        ],
+        "selected": [
+          "d1"
+        ],
+        "selected_claims": [
+          "zircon requires atomic migration"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "dev-cutoff",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": 6868,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"zircon requires atomic migration\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "current_memory",
+        "budget": 1024,
+        "context": "# Project Memory\n\n## Constraints\n- [eval-0] v0: zircon requires atomic migration _(applicability unknown)_",
+        "cutoff": "2026-01-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 143,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 63,
+          "usd": null
+        },
+        "injected_tokens": 106,
+        "query_cost": {
+          "input_tokens": 148,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 143,
+          "usd": null
+        },
+        "retained": [
+          "d1"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "d1"
+        ],
+        "selected": [
+          "d1"
+        ],
+        "selected_claims": [
+          "zircon requires atomic migration"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "dev-cutoff",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": 3985,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"zircon requires atomic migration\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "candidate_policy",
+        "budget": 256,
+        "context": "# Project Memory\n\n## Constraints\n- [eval-0] v0: zircon requires atomic migration _(applicability unknown)_",
+        "cutoff": "2026-01-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 143,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 63,
+          "usd": null
+        },
+        "injected_tokens": 106,
+        "query_cost": {
+          "input_tokens": 148,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 69,
+          "usd": null
+        },
+        "retained": [
+          "d1"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "d1"
+        ],
+        "selected": [
+          "d1"
+        ],
+        "selected_claims": [
+          "zircon requires atomic migration"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "dev-absent",
+      "evidence_recall": null,
+      "formation": "not_applicable",
+      "latency_ms": 3279,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "not_applicable",
+      "selection": "not_applicable",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "no_memory",
+        "budget": 1024,
+        "context": "",
+        "cutoff": "2026-01-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 121,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 24,
+          "usd": null
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "dev-absent",
+      "evidence_recall": null,
+      "formation": "not_applicable",
+      "latency_ms": 4959,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "not_applicable",
+      "selection": "not_applicable",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "file_search",
+        "budget": 1024,
+        "context": "",
+        "cutoff": "2026-01-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 121,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 24,
+          "usd": null
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "dev-absent",
+      "evidence_recall": null,
+      "formation": "not_applicable",
+      "latency_ms": 2768,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "not_applicable",
+      "selection": "not_applicable",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "current_memory",
+        "budget": 1024,
+        "context": "",
+        "cutoff": "2026-01-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 91,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 5,
+          "usd": null
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 121,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 24,
+          "usd": null
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "dev-absent",
+      "evidence_recall": null,
+      "formation": "not_applicable",
+      "latency_ms": 2641,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "not_applicable",
+      "selection": "not_applicable",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "candidate_policy",
+        "budget": 256,
+        "context": "",
+        "cutoff": "2026-01-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 91,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 5,
+          "usd": null
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 121,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 25,
+          "usd": null
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "dev-failure",
+      "evidence_recall": 0.0,
+      "formation": "miss",
+      "latency_ms": 2031,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "miss",
+      "selection": "miss",
+      "stale_memory_used": false,
+      "task": "miss",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "no_memory",
+        "budget": 1024,
+        "context": "",
+        "cutoff": "2026-01-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 121,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 24,
+          "usd": null
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "dev-failure",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": 3919,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"cobalt migration failed; use transaction rollback before retry\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "file_search",
+        "budget": 1024,
+        "context": "[d3] cobalt migration failed; use transaction rollback before retry\n",
+        "cutoff": "2026-01-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 68,
+        "query_cost": {
+          "input_tokens": 134,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 60,
+          "usd": null
+        },
+        "retained": [
+          "d3"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "d3"
+        ],
+        "selected": [
+          "d3"
+        ],
+        "selected_claims": [
+          "cobalt migration failed; use transaction rollback before retry"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "dev-failure",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": 5675,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"cobalt migration failed; use transaction rollback before retry\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "current_memory",
+        "budget": 1024,
+        "context": "# Project Memory\n\n## Known Issues\n- [eval-0] v0: cobalt migration failed; use transaction rollback before retry _(applicability unknown)_",
+        "cutoff": "2026-01-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 198,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 69,
+          "usd": null
+        },
+        "injected_tokens": 137,
+        "query_cost": {
+          "input_tokens": 154,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 71,
+          "usd": null
+        },
+        "retained": [
+          "d3"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "d3"
+        ],
+        "selected": [
+          "d3"
+        ],
+        "selected_claims": [
+          "cobalt migration failed; use transaction rollback before retry"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "dev-failure",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": 5397,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"cobalt migration failed; use transaction rollback before retry\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "candidate_policy",
+        "budget": 256,
+        "context": "# Project Memory\n\n## Known Issues\n- [eval-0] v0: cobalt migration failed; use transaction rollback before retry _(applicability unknown)_",
+        "cutoff": "2026-01-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 198,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 69,
+          "usd": null
+        },
+        "injected_tokens": 137,
+        "query_cost": {
+          "input_tokens": 154,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 87,
+          "usd": null
+        },
+        "retained": [
+          "d3"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "d3"
+        ],
+        "selected": [
+          "d3"
+        ],
+        "selected_claims": [
+          "cobalt migration failed; use transaction rollback before retry"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "dev-constraint",
+      "evidence_recall": 0.0,
+      "formation": "miss",
+      "latency_ms": 3994,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "miss",
+      "selection": "miss",
+      "stale_memory_used": false,
+      "task": "miss",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "no_memory",
+        "budget": 1024,
+        "context": "",
+        "cutoff": "2026-01-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 121,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 7,
+          "usd": null
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "dev-constraint",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": 4562,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"amber requires Linux for native deployment\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "file_search",
+        "budget": 1024,
+        "context": "[d5] amber requires Linux for native deployment\n",
+        "cutoff": "2026-01-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 48,
+        "query_cost": {
+          "input_tokens": 131,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 38,
+          "usd": null
+        },
+        "retained": [
+          "d5",
+          "d6"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "d5"
+        ],
+        "selected": [
+          "d5"
+        ],
+        "selected_claims": [
+          "amber requires Linux for native deployment"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "dev-constraint",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": 4326,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"amber requires Linux for native deployment\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "current_memory",
+        "budget": 1024,
+        "context": "# Project Memory\n\n## Constraints\n- [eval-0] v0: amber requires Linux for native deployment _(applicability unknown)_",
+        "cutoff": "2026-01-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 194,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 53,
+          "usd": null
+        },
+        "injected_tokens": 116,
+        "query_cost": {
+          "input_tokens": 150,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 67,
+          "usd": null
+        },
+        "retained": [
+          "d5"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "d5"
+        ],
+        "selected": [
+          "d5"
+        ],
+        "selected_claims": [
+          "amber requires Linux for native deployment"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "dev-constraint",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": 2019,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"amber requires Linux for native deployment\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "candidate_policy",
+        "budget": 256,
+        "context": "# Project Memory\n\n## Constraints\n- [eval-0] v0: amber requires Linux for native deployment _(applicability unknown)_",
+        "cutoff": "2026-01-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 194,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 53,
+          "usd": null
+        },
+        "injected_tokens": 116,
+        "query_cost": {
+          "input_tokens": 150,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 50,
+          "usd": null
+        },
+        "retained": [
+          "d5"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "d5"
+        ],
+        "selected": [
+          "d5"
+        ],
+        "selected_claims": [
+          "amber requires Linux for native deployment"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-cutoff",
+      "evidence_recall": 0.0,
+      "formation": "miss",
+      "latency_ms": 2314,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "miss",
+      "selection": "miss",
+      "stale_memory_used": false,
+      "task": "miss",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "no_memory",
+        "budget": 1024,
+        "context": "",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 122,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 25,
+          "usd": null
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-cutoff",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": 4505,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"topaz requires serial installation\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "file_search",
+        "budget": 1024,
+        "context": "[h1] topaz requires serial installation\n",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 40,
+        "query_cost": {
+          "input_tokens": 131,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 58,
+          "usd": null
+        },
+        "retained": [
+          "h1"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "h1"
+        ],
+        "selected": [
+          "h1"
+        ],
+        "selected_claims": [
+          "topaz requires serial installation"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-cutoff",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": 3475,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"topaz requires serial installation\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "current_memory",
+        "budget": 1024,
+        "context": "# Project Memory\n\n## Constraints\n- [eval-0] v0: topaz requires serial installation _(applicability unknown)_",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 143,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 70,
+          "usd": null
+        },
+        "injected_tokens": 108,
+        "query_cost": {
+          "input_tokens": 150,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 48,
+          "usd": null
+        },
+        "retained": [
+          "h1"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "h1"
+        ],
+        "selected": [
+          "h1"
+        ],
+        "selected_claims": [
+          "topaz requires serial installation"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-cutoff",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": 2946,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"topaz requires serial installation\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "candidate_policy",
+        "budget": 256,
+        "context": "# Project Memory\n\n## Constraints\n- [eval-0] v0: topaz requires serial installation _(applicability unknown)_",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 143,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 70,
+          "usd": null
+        },
+        "injected_tokens": 108,
+        "query_cost": {
+          "input_tokens": 150,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 78,
+          "usd": null
+        },
+        "retained": [
+          "h1"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "h1"
+        ],
+        "selected": [
+          "h1"
+        ],
+        "selected_claims": [
+          "topaz requires serial installation"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-absent",
+      "evidence_recall": null,
+      "formation": "not_applicable",
+      "latency_ms": 2730,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "not_applicable",
+      "selection": "not_applicable",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "no_memory",
+        "budget": 1024,
+        "context": "",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 122,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 24,
+          "usd": null
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-absent",
+      "evidence_recall": null,
+      "formation": "not_applicable",
+      "latency_ms": 1790,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "not_applicable",
+      "selection": "not_applicable",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "file_search",
+        "budget": 1024,
+        "context": "",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 122,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 7,
+          "usd": null
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-absent",
+      "evidence_recall": null,
+      "formation": "not_applicable",
+      "latency_ms": 1786,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "not_applicable",
+      "selection": "not_applicable",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "current_memory",
+        "budget": 1024,
+        "context": "",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 142,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 5,
+          "usd": null
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 122,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 24,
+          "usd": null
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-absent",
+      "evidence_recall": null,
+      "formation": "not_applicable",
+      "latency_ms": 1958,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "not_applicable",
+      "selection": "not_applicable",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "candidate_policy",
+        "budget": 256,
+        "context": "",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 142,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 5,
+          "usd": null
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 122,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 7,
+          "usd": null
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-failure",
+      "evidence_recall": 0.0,
+      "formation": "miss",
+      "latency_ms": 2118,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "miss",
+      "selection": "miss",
+      "stale_memory_used": false,
+      "task": "miss",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "no_memory",
+        "budget": 1024,
+        "context": "",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 122,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 24,
+          "usd": null
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-failure",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": 3160,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"beryl upgrade failed twice; disable cache before retry\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "file_search",
+        "budget": 1024,
+        "context": "[h4] beryl upgrade failed twice; disable cache before retry\n",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 60,
+        "query_cost": {
+          "input_tokens": 136,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 93,
+          "usd": null
+        },
+        "retained": [
+          "h4"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "h4"
+        ],
+        "selected": [
+          "h4"
+        ],
+        "selected_claims": [
+          "beryl upgrade failed twice; disable cache before retry"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-failure",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": 4422,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"beryl upgrade failed twice; disable cache before retry\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "current_memory",
+        "budget": 1024,
+        "context": "# Project Memory\n\n## Known Issues\n- [eval-0] v0: beryl upgrade failed twice; disable cache before retry _(applicability unknown)_",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 148,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 101,
+          "usd": null
+        },
+        "injected_tokens": 129,
+        "query_cost": {
+          "input_tokens": 156,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 84,
+          "usd": null
+        },
+        "retained": [
+          "h4"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "h4"
+        ],
+        "selected": [
+          "h4"
+        ],
+        "selected_claims": [
+          "beryl upgrade failed twice; disable cache before retry"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-failure",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": 3252,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"beryl upgrade failed twice; disable cache before retry\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "candidate_policy",
+        "budget": 256,
+        "context": "# Project Memory\n\n## Known Issues\n- [eval-0] v0: beryl upgrade failed twice; disable cache before retry _(applicability unknown)_",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 148,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 101,
+          "usd": null
+        },
+        "injected_tokens": 129,
+        "query_cost": {
+          "input_tokens": 156,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 115,
+          "usd": null
+        },
+        "retained": [
+          "h4"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "h4"
+        ],
+        "selected": [
+          "h4"
+        ],
+        "selected_claims": [
+          "beryl upgrade failed twice; disable cache before retry"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-constraint",
+      "evidence_recall": 0.0,
+      "formation": "miss",
+      "latency_ms": 2309,
+      "repeated_error": false,
+      "response": "ABSTAIN",
+      "retrieval": "miss",
+      "selection": "miss",
+      "stale_memory_used": false,
+      "task": "miss",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "no_memory",
+        "budget": 1024,
+        "context": "",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 0,
+        "query_cost": {
+          "input_tokens": 122,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 25,
+          "usd": null
+        },
+        "retained": [],
+        "retrieval_error": null,
+        "retrieved": [],
+        "selected": [],
+        "selected_claims": [],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-constraint",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": 9006,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"onyx requires macOS for signing\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "file_search",
+        "budget": 1024,
+        "context": "[h5] onyx requires macOS for signing\n",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 0,
+          "missing": [],
+          "output_tokens": 0,
+          "usd": 0.0
+        },
+        "injected_tokens": 37,
+        "query_cost": {
+          "input_tokens": 133,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 16,
+          "usd": null
+        },
+        "retained": [
+          "h5",
+          "h6"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "h5"
+        ],
+        "selected": [
+          "h5"
+        ],
+        "selected_claims": [
+          "onyx requires macOS for signing"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-constraint",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": 3549,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"onyx requires macOS for signing\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "current_memory",
+        "budget": 1024,
+        "context": "# Project Memory\n\n## Constraints\n- [eval-0] v0: onyx requires macOS for signing _(applicability unknown)_",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 195,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 89,
+          "usd": null
+        },
+        "injected_tokens": 105,
+        "query_cost": {
+          "input_tokens": 152,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 60,
+          "usd": null
+        },
+        "retained": [
+          "h5"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "h5"
+        ],
+        "selected": [
+          "h5"
+        ],
+        "selected_claims": [
+          "onyx requires macOS for signing"
+        ],
+        "selection_error": null
+      }
+    },
+    {
+      "case_id": "held-constraint",
+      "evidence_recall": 1.0,
+      "formation": "pass",
+      "latency_ms": 3624,
+      "repeated_error": false,
+      "response": "{\"claims\":[\"onyx requires macOS for signing\"]}",
+      "retrieval": "pass",
+      "selection": "pass",
+      "stale_memory_used": false,
+      "task": "pass",
+      "trace": {
+        "accounting": "conservative_utf8_bytes",
+        "adapter": "candidate_policy",
+        "budget": 256,
+        "context": "# Project Memory\n\n## Constraints\n- [eval-0] v0: onyx requires macOS for signing _(applicability unknown)_",
+        "cutoff": "2026-02-02T00:00:00Z",
+        "formation_error": null,
+        "ingestion_cost": {
+          "input_tokens": 195,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 89,
+          "usd": null
+        },
+        "injected_tokens": 105,
+        "query_cost": {
+          "input_tokens": 152,
+          "missing": [
+            "provider pricing not configured; USD unknown"
+          ],
+          "output_tokens": 58,
+          "usd": null
+        },
+        "retained": [
+          "h5"
+        ],
+        "retrieval_error": null,
+        "retrieved": [
+          "h5"
+        ],
+        "selected": [
+          "h5"
+        ],
+        "selected_claims": [
+          "onyx requires macOS for signing"
+        ],
+        "selection_error": null
+      }
+    }
+  ],
+  "stop_reason": null,
+  "summary": [
+    {
+      "adapter": "no_memory",
+      "budgets": [
+        1024
+      ],
+      "cases": 8,
+      "completed": 8,
+      "evidence_recall": 0.0,
+      "incomplete": 0,
+      "injected_tokens": 0,
+      "judge_uncertain": 0,
+      "latency_max_ms": 3994,
+      "latency_p50_ms": 2730,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 0.25
+    },
+    {
+      "adapter": "file_search",
+      "budgets": [
+        1024
+      ],
+      "cases": 8,
+      "completed": 8,
+      "evidence_recall": 1.0,
+      "incomplete": 0,
+      "injected_tokens": 291,
+      "judge_uncertain": 0,
+      "latency_max_ms": 9006,
+      "latency_p50_ms": 4505,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 1.0
+    },
+    {
+      "adapter": "current_memory",
+      "budgets": [
+        1024
+      ],
+      "cases": 8,
+      "completed": 8,
+      "evidence_recall": 1.0,
+      "incomplete": 0,
+      "injected_tokens": 701,
+      "judge_uncertain": 0,
+      "latency_max_ms": 6868,
+      "latency_p50_ms": 4326,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 1.0
+    },
+    {
+      "adapter": "candidate_policy",
+      "budgets": [
+        256
+      ],
+      "cases": 8,
+      "completed": 8,
+      "evidence_recall": 1.0,
+      "incomplete": 0,
+      "injected_tokens": 701,
+      "judge_uncertain": 0,
+      "latency_max_ms": 5397,
+      "latency_p50_ms": 3252,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 1.0
+    }
+  ]
+}

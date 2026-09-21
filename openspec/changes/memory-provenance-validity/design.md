@@ -13,10 +13,44 @@ describe workspace, platform, component, and revision constraints. Valid time
 describes when a claim applies; recorded time describes when memory learned it.
 Do not conflate either with the Lamport mutation version.
 
-Resolve the canonical revision descriptor and evidence retention policy before
-freezing wire fields. Reuse existing host evidence identities rather than creating
-a second session log. References whose source is missing become unavailable, not
-fabricated evidence and not deletion instructions.
+The applicability section defines the canonical revision descriptor. The retention
+contract below defines which evidence survives independently of its source. Reuse
+existing host evidence identities rather than creating a second session log.
+References whose source is missing become unavailable, not fabricated evidence
+and not deletion instructions.
+
+## Evidence retention contract
+
+Persist bounded episode evidence with the episode: source frontier, event identity,
+sequence, source kind, excerpt, truncation disclosure, and observed tool outcome
+where present. The formation validator bounds each snapshot to 64 evidence items,
+1,024 bytes per excerpt, and 32,768 excerpt bytes in total. These are retained
+excerpts, not a second full session log. Extraction completion cannot replace the
+captured source evidence. Database reopen and JSONL transport preserve it without
+requiring the original session log or rerunning the extractor.
+
+Lifecycle conclusions retain the admitted statement, repository-relative artifact
+reference, artifact snapshot hash, and statement hash. They do not retain the
+entire artifact. Declared inference references remain unverified; confirmation
+retains that inference classification and records the reviewed snapshot. Imported
+vault prose cannot supply operator confirmation or execution authority.
+
+Retained evidence has no automatic age-based expiry in the memory store. Context
+TTL, selection-cache expiry, confidence decay, and a missing or changed external
+source do not erase it. Inspection distinguishes unavailable, changed, and readable
+unverified sources while preserving durable state. Local source accessibility is
+not portable: transport preserves attribution, not a promise that another host
+can resolve a path. No cryptographic execution attestation is claimed.
+
+JSONL is the lossless record transport. Vault section pages are readable active-fact
+projections, with applicability metadata; they are not a lossless provenance codec.
+Reimport skips those generated pages and does not reinforce unchanged imported
+notes. Pending and historical records remain in database/JSONL, not section pages.
+
+Complete canonical event-range coverage, cursor advancement, and checkpoint
+recovery belong to `memory-evidence-capture`. A bounded retained snapshot alone
+does not prove that the runtime captured every eligible event. The closure audit
+must keep that separate prerequisite visible until its runtime gates pass.
 
 ## Admission and mutation
 

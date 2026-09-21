@@ -23,8 +23,8 @@
 
 - [x] RED/GREEN: Reproduce a task change with no matches retaining a live injection; emit an explicit empty replacement to retire it in the managed context path.
 - [x] GREEN: Implement semantic cache invalidation and bounded selection reuse.
-- [ ] Record scenario mappings and policy ablation results; verify runtime context and non-interactive inspection surfaces.
-- [x] Run applicable selection/cache landing gates from ../../memory-modernization.md and validate this change; comparative policy evaluation remains open above.
+- [x] Record scenario mappings and policy ablation results; verify runtime context and non-interactive inspection surfaces. See verification-wave-5-evaluation.md and the completed Codex subscription comparison.
+- [x] Run applicable selection/cache landing gates from ../../memory-modernization.md and validate this change; comparative policy evaluation is recorded in verification-wave-5-evaluation.md.
 - [x] Complete the Wave 2 scoped landing/adversarial gates in verification-wave-2.md; retain full token accounting, caching, and provenance work for Wave 5.
 
 ## 4. Wave 5 counted selection slice

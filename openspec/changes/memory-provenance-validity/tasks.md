@@ -4,17 +4,17 @@
 - [x] Introduce the minimal typed episode formation vocabulary: source frontier, attributed excerpts, observed tool outcomes, pending candidates, and extraction state.
 - [x] Preserve the source evidence across atomic completion; an assistant report cannot carry a tool outcome and generated candidates are not active facts.
 - [x] Resolve workspace identity and exact Git revision descriptors in the accepted applicability slice (section 9).
-- [ ] Finish the evidence-retention contract and reconcile its scenario coverage before closing the parent corpus.
-- [ ] RED: Add observed-versus-inferred, imported-authority, platform applicability, historical validity, and unavailable-source tests.
-- [ ] GREEN: Implement domain evidence/applicability types and retrieval inspection using host-owned source identities.
-- [ ] REFACTOR: Keep authority interpretation out of renderers and transport adapters.
+- [x] Finish the evidence-retention contract and reconcile its scenario coverage before closing the parent corpus.
+- [x] RED: Add observed-versus-inferred, imported-authority, platform applicability, historical validity, and unavailable-source tests.
+- [x] GREEN: Implement domain evidence/applicability types and retrieval inspection using host-owned source identities.
+- [x] REFACTOR: Keep authority interpretation out of renderers and transport adapters.
 
 ## 2. Lifecycle admission and atomic corrections
 <!-- specs: memory/lifecycle -->
 
-- [ ] RED: Exercise artifact retention, explicit constraints, archived specs, pending inferred summaries, replay, and version-conflict rollback via lifecycle ingestion.
-- [ ] GREEN: Persist authority and references, enforce the existing confirmation policy, and apply supersedes through atomic mutation contracts.
-- [ ] REFACTOR: Share admission semantics with ordinary domain callers without duplicating the lifecycle engine.
+- [x] RED: Exercise artifact retention, explicit constraints, archived specs, pending inferred summaries, replay, and version-conflict rollback via lifecycle ingestion.
+- [x] GREEN: Persist authority and references, enforce the existing confirmation policy, and apply supersedes through atomic mutation contracts.
+- [x] REFACTOR: Share admission semantics with ordinary domain callers without duplicating the lifecycle engine.
 
 ## 3. Persistence and verification
 <!-- specs: memory/provenance, memory/lifecycle -->
@@ -22,10 +22,15 @@
 - [x] Add nullable episode formation storage in schema v9, supported v5–v8 migration, legacy unknown preservation, and JSONL/reopen fixtures.
 - [x] Verify migration rollback and atomic completion of episode metadata, search index, vector invalidation, and receipts.
 - [x] Complete the scoped Wave 3 landing gate linked from ../memory-evidence-capture/verification-wave-3.md.
-- [ ] RED: Add supported legacy DB and JSONL fixtures plus failed-migration, reopen, and vault round-trip cases.
-- [ ] GREEN: Implement migration and schema-contract updates preserving legacy unknowns and operational metadata.
-- [ ] Verify vault idempotency/path boundaries and both backends; record scenario mappings and red/green outcomes.
-- [ ] Run applicable landing gates from ../../memory-modernization.md and validate this change.
+- [x] RED: Add supported legacy DB and JSONL fixtures plus failed-migration, reopen, and vault round-trip cases.
+- [x] GREEN: Implement migration and schema-contract updates preserving legacy unknowns and operational metadata.
+- [x] Verify vault idempotency/path boundaries and both backends; record scenario mappings and red/green outcomes.
+- [x] Run applicable landing gates from ../../memory-modernization.md and validate this change.
+
+The aggregate tasks above are reconciled against accepted slice evidence in
+`verification-wave-5-closure.md`. The new imported-authority regression passed
+against existing behavior; no historical RED result is invented for that test.
+The final combined landing gate remains owned by the parent executor.
 
 ## 4. Wave 5 transport prerequisite
 <!-- specs: memory/provenance -->

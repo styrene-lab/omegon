@@ -2,6 +2,64 @@
 
 ## ADDED Requirements
 
+### Requirement: Local capture progress is atomic and source-bound
+
+Incremental capture SHALL commit a bounded scanned range and its local resume
+cursor atomically. Resume SHALL validate the prior event identity against canonical
+replay. Imported coverage declarations SHALL NOT advance local capture progress.
+
+#### Scenario: A page write is interrupted
+Given a capture page and cursor update share an operation identity
+When receipt persistence fails
+Then neither the episode nor the cursor advances
+And retry can commit the same page once
+
+#### Scenario: Imported coverage claims a later frontier
+Given an imported episode declares coverage beyond locally captured evidence
+When the host resumes capture
+Then it resumes from local capture receipts rather than the imported frontier
+
+#### Scenario: Two capture workers race
+Given two workers read the same local cursor
+When they try to append different pages
+Then only a contiguous version-checked transition commits
+And the loser retains recoverable source evidence
+
+#### Scenario: Middle evidence exceeds one snapshot
+Given committed evidence exceeds the item or byte limit of one formation envelope
+When bounded incremental capture runs across restart and interval checkpoints
+Then successive pages retain eligible evidence without a middle-event gap
+And a replaced source frontier cannot be acknowledged as covered
+
+#### Scenario: Replay exceeds its declared resource budget
+Given a canonical source exceeds a record, byte, per-file, or replay-time limit
+When incremental capture validates its source snapshot
+Then it reports unavailable without advancing the capture cursor
+And it preserves previously committed pages and canonical source files
+
+#### Scenario: Cancellation during canonical replay
+Given a checkpoint worker is validating a canonical source
+When its owner cancels the worker
+Then replay observes cancellation between bounded read and validation operations
+And the worker does not acknowledge persistence of an incomplete snapshot
+
+#### Scenario: Binding is replaced without a generation increase
+Given a captured binding target and a replacement with the same session ID and generation
+When the old checkpoint attempts to acknowledge coverage
+Then its publication identity or snapshot-path mismatch rejects the acknowledgment
+
+#### Scenario: Another session ends during finalization
+Given a finalization worker is processing one ended source and its bounded queue has capacity
+When another ended source is queued and the active session binding changes
+Then the worker captures both source-bound requests without another turn event
+And it does not allocate another finalization worker
+
+#### Scenario: Cancelled finalization has queued completion work
+Given candidate completion is queued behind another managed storage request
+When the owning finalization future is cancelled before execution
+Then its service cancellation token is cancelled
+And the queued completion cannot later mark the pending episode complete
+
 ### Requirement: Incremental coverage is explicit and immutable
 
 Formation version 2 SHALL require an explicit capture-policy version and inclusive
@@ -98,6 +156,12 @@ When the episode records the work
 Then it identifies both outcomes and their tool evidence
 And the failed attempt is not described as a successful workflow
 
+#### Scenario: Workflow resumes in another session
+Given one session contains failed verification and a later session contains verified repair
+When episodes are reopened and transported
+Then each outcome retains its own session attribution
+And an assistant success assertion cannot replace the earlier failed tool outcome
+
 ### Requirement: Extraction emits classified evidence-backed candidates
 
 Extractors SHALL produce structured candidates with section/kind and valid source
@@ -138,11 +202,16 @@ When one startup recovery pass runs
 Then it considers at most eight checkpoints in creation-time and ID order
 And remaining checkpoints stay durable for a later pass
 
-#### Scenario: Crash after a partial candidate batch commit
-Given a persisted extraction batch whose first candidate committed before interruption
-When batch processing resumes
-Then the first candidate replays its prior outcome
-And remaining candidates are processed from the persisted extraction result
+#### Scenario: Crash during candidate batch persistence
+Given a pending source checkpoint and a selected extraction result containing multiple candidates
+When receipt persistence fails during the atomic candidate batch commit
+Then no candidate prefix becomes durable and the source checkpoint remains pending
+And retry can persist the selected batch atomically
+
+#### Scenario: Replay after candidate batch persistence
+Given a persisted extraction batch and its completion receipt
+When the same completion is retried after restart
+Then all candidates replay from the persisted batch without another extraction
 And reinforcement is not incremented by retry alone
 
 ### Requirement: Capture work is bounded and cancellation-aware

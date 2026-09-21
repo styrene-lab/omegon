@@ -1,0 +1,167 @@
+{
+  "accounting": "conservative_utf8_bytes",
+  "call_timeout_seconds": 45,
+  "candidate_cap": 256,
+  "corpus_sha256": "478fcfeb26d4a0bb946cac7439075ff2dfe780c8c61c7dca96b79cb171c3673a",
+  "cost_note": "Extraction is shared once per case and attributed in full to each memory arm; sum calls, not arm costs, for actual spend. File curation labor is unmeasured. USD pricing unavailable.",
+  "current_cap": 1024,
+  "development_live_summary": [
+    {
+      "adapter": "no_memory",
+      "budgets": [
+        1024
+      ],
+      "cases": 4,
+      "completed": 0,
+      "evidence_recall": 0.0,
+      "incomplete": 4,
+      "injected_tokens": 0,
+      "latency_max_ms": null,
+      "latency_p50_ms": null,
+      "repeated_error_rate": null,
+      "stale_memory_usage": null,
+      "task_success": null
+    },
+    {
+      "adapter": "file_search",
+      "budgets": [
+        1024
+      ],
+      "cases": 4,
+      "completed": 0,
+      "evidence_recall": 1.0,
+      "incomplete": 4,
+      "injected_tokens": 154,
+      "latency_max_ms": null,
+      "latency_p50_ms": null,
+      "repeated_error_rate": null,
+      "stale_memory_usage": null,
+      "task_success": null
+    },
+    {
+      "adapter": "current_memory",
+      "budgets": [
+        1024
+      ],
+      "cases": 4,
+      "completed": 0,
+      "evidence_recall": 0.0,
+      "incomplete": 4,
+      "injected_tokens": 0,
+      "latency_max_ms": null,
+      "latency_p50_ms": null,
+      "repeated_error_rate": null,
+      "stale_memory_usage": null,
+      "task_success": null
+    },
+    {
+      "adapter": "candidate_policy",
+      "budgets": [
+        256
+      ],
+      "cases": 4,
+      "completed": 0,
+      "evidence_recall": 0.0,
+      "incomplete": 4,
+      "injected_tokens": 0,
+      "latency_max_ms": null,
+      "latency_p50_ms": null,
+      "repeated_error_rate": null,
+      "stale_memory_usage": null,
+      "task_success": null
+    }
+  ],
+  "development_offline_summary": [
+    {
+      "adapter": "no_memory",
+      "budgets": [
+        1024
+      ],
+      "cases": 4,
+      "completed": 4,
+      "evidence_recall": 0.0,
+      "incomplete": 0,
+      "injected_tokens": 0,
+      "latency_max_ms": null,
+      "latency_p50_ms": null,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 0.25
+    },
+    {
+      "adapter": "file_search",
+      "budgets": [
+        1024
+      ],
+      "cases": 4,
+      "completed": 4,
+      "evidence_recall": 1.0,
+      "incomplete": 0,
+      "injected_tokens": 154,
+      "latency_max_ms": null,
+      "latency_p50_ms": null,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 1.0
+    },
+    {
+      "adapter": "current_memory",
+      "budgets": [
+        1024
+      ],
+      "cases": 4,
+      "completed": 4,
+      "evidence_recall": 1.0,
+      "incomplete": 0,
+      "injected_tokens": 358,
+      "latency_max_ms": null,
+      "latency_p50_ms": null,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 1.0
+    },
+    {
+      "adapter": "candidate_policy",
+      "budgets": [
+        256
+      ],
+      "cases": 4,
+      "completed": 4,
+      "evidence_recall": 1.0,
+      "incomplete": 0,
+      "injected_tokens": 358,
+      "latency_max_ms": null,
+      "latency_p50_ms": null,
+      "repeated_error_rate": 0.0,
+      "stale_memory_usage": 0.0,
+      "task_success": 1.0
+    }
+  ],
+  "embedding": "disabled, lexical-only paired evaluation",
+  "extractor": "anthropic:claude-haiku-4-5-20251001",
+  "extractor_selection": "Profile override or host default",
+  "frozen_before_heldout": true,
+  "labels_sha256": "846de4d22f5b5e380bb8bbb8b66739424e167c22dd133287ed4369b9e2004f9d",
+  "output_reservation": 16384,
+  "prompt_revision": "memory-wave5d-v1",
+  "provider_defaults": true,
+  "reader": "anthropic:claude-sonnet-4-6",
+  "reader_selection": "project merged Profile exact override or last-used model",
+  "reasoning": null,
+  "revision": "memory-wave5d-v1",
+  "seed": null,
+  "seed_support": "not requested through existing routes",
+  "temperature": null,
+  "thresholds": {
+    "basis": "measured deterministic development: memory arms 4/4; no model-quality claim if live incomplete",
+    "candidate_regression_tolerance": 0.0,
+    "max_repeated_error_rate": 0.0,
+    "max_request_latency_ms": 45000,
+    "max_stale_memory_usage": 0.0,
+    "minimum_evidence_recall": 1.0,
+    "minimum_task_success": 0.75,
+    "require_complete_paired_rows": true
+  },
+  "token_limit": 100000,
+  "wall_seconds": 600
+}

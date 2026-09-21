@@ -197,3 +197,51 @@ This domain slice does not assign coverage to existing first-goal/recent-suffix
 snapshots. Host range selection, stable page identities, durable cursor discovery,
 and bounded backlog progression require a subsequent integration slice. Transported
 range declarations are not independent proof of source authenticity.
+
+## Wave 5 completion: local capture receipts
+
+Use the existing local operation receipt table for capture cursors. A new
+StoreCoveragePage mutation commits the episode and a CoverageStored receipt under
+one transaction. The receipt records mind/session/stream/policy/model identity and
+the final sequence/event ID. Its expected cursor must match local state, and every
+subsequent page starts at the next sequence. Receipt replay precedes that check.
+JSONL transports episodes but does not transport these local scheduling receipts.
+
+Candidate batches use the existing all-or-nothing CompleteFormation transaction.
+The earlier partial-prefix crash scenario is replaced with rollback-during-batch
+and replay-after-batch scenarios: this implementation cannot acknowledge only a
+prefix of the selected candidate array. Candidates remain unadmitted inferences;
+semantic reconciliation and active-fact admission remain Wave 6 contracts.
+
+The host validates the cursor event against canonical replay before capturing the
+next bounded range. Per-page limits preserve complete event coverage with explicit
+excerpt truncation. Each worker pass admits at most eight pages under its deadline.
+Backlog, cancellation, or failure preserves committed pages and canonical remaining
+source. Interval, pre-eviction, and finalization use the same page contract.
+
+Startup starts source capture when a canonical binding is available. A single
+checkpoint worker drains eight-page passes, with a one-second yield between backlog
+passes and a ten-second deadline per pass. The pre-eviction waiter retains its shared
+ten-second limit and cancels its owned attempt on expiry. Finalization uses a bounded
+ten-second capture drain and leaves any remaining canonical source recoverable.
+One owned finalization worker consumes an eight-request queue. Accepted requests
+retain their ended path/session/stream target independently of later UI rebinding.
+Full or closed admission is reported as backpressure without a persistence
+acknowledgment. Canonical source remains available for explicit resume. Completion
+and vault-sync service calls carry cancellation drop guards, so dropping a finalizer
+also cancels its queued managed requests. Cursor-CAS races use bounded retries that
+reread the local frontier. Read-only status distinguishes active work, queued
+finalization, due pressure, and capture backlog.
+
+Capture validates one frozen replay snapshot per pass. It reads canonical facts
+once and caches validated content for all pages. Limits are 50,000 records, 32 MiB
+of log bytes, 1 MiB per record, 8 MiB per referenced file, 64 MiB total input, and
+five seconds of cooperative replay work. Exceeding a limit returns unavailable,
+not a partially validated snapshot. Cancellation and deadline checks occur between
+bounded reads and validation operations. This does not promise to interrupt a kernel
+filesystem syscall. Special files and final-component symlinks are rejected.
+
+Source fences include the snapshot path, session, optional stream, generation,
+and a fresh binding-publication ID. The resolved stream is fixed by the replay
+snapshot used for cursor lookup and every page in that pass. Fences are checked on
+the caught-up path as well as before and after page construction.
