@@ -22,8 +22,12 @@ Wave 5 is **implementing**, beginning with the
 [transport prerequisite](changes/memory-provenance-validity/verification-wave-5-transport.md).
 Provenance/applicability slices and shared counted selection are accepted. The
 [semantic cache gate](changes/memory-context-selection/verification-wave-5-cache.md)
-passed on 2026-09-16. Wave 5C durable recovery and Wave 5D comparative evaluation
-remain open; accepted slices do not imply completion of all parent contracts.
+passed on 2026-09-16. Wave 5C recovery scheduling, interval snapshots, and
+[awaited pre-compaction capture](changes/memory-evidence-capture/verification-wave-5-pre-eviction.md)
+are accepted. The [durable coverage contract](changes/memory-evidence-capture/verification-wave-5-coverage.md)
+is accepted. Host incremental capture, remaining queue/readiness contracts,
+and Wave 5D comparative evaluation remain open. Accepted slices do not imply
+completion of all parent contracts.
 Waves 6–8 remain **planned**.
 The [post-Wave-3 adversarial review](changes/memory-evidence-capture/adversarial-review-wave-3.md)
 is accepted at `987272da`; six reproduced findings were fixed before Wave 4.

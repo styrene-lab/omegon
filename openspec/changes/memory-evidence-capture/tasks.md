@@ -68,3 +68,12 @@
 - [x] Verify persistence acknowledgment, read-only outcome reporting, occupied-slot degradation, and unchanged interval behavior.
 - [x] Verify awaited ordering, published-feature admission, shared timeout/cancellation, optional absence, and outcome serialization.
 - [x] Complete shared-contract/reverse-dependent gates and same-executor review in verification-wave-5-pre-eviction.md.
+
+## 9. Wave 5C durable coverage contract
+<!-- specs: memory/formation -->
+
+- [x] RED: Demonstrate silent loss of legacy coverage declarations and rejection of version-2 coverage envelopes.
+- [x] GREEN: Add versioned explicit coverage with range validation and immutable completion semantics.
+- [x] Verify backend parity, receipt replay, SQLite reopen, JSONL completion, and legacy unknown coverage.
+- [x] Complete landing gates and same-executor review in verification-wave-5-coverage.md.
+- [ ] Integrate bounded incremental capture and durable watermark discovery in the host after the domain contract lands.

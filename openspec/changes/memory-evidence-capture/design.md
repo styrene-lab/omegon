@@ -170,3 +170,30 @@ Clear its prior observation before awaiting a new attempt, so a dropped/expired
 hook cannot retain an old Persisted label as the new result. A persisted snapshot
 still obeys bounded excerpt and explicit truncation semantics; complete incremental
 coverage remains open. No persisted schema or extraction authority changes are made.
+
+## Wave 5C durable coverage contract
+
+Introduce formation envelope version 2 with required `coverage` metadata. Its
+`first_sequence` and the available source frontier define an inclusive scanned
+range. `policy_version` identifies the evidence-selection rules (initially 1).
+The producer must inspect every canonical record in that range and retain eligible
+evidence, subject to explicit per-excerpt truncation. Sequence gaps in evidence
+can represent non-evidence records, so storage validates bounds rather than
+pretending it can verify canonical replay completeness.
+
+Version 1 retains unknown coverage and rejects a coverage declaration. Version 2
+requires an available source, a nonzero ordered range, a supported policy, and
+evidence within the range. Empty evidence is allowed for ranges containing only
+non-evidence records, but cannot represent completed extraction. Completion and
+completion import cannot change the envelope version or coverage.
+
+The existing JSON formation column carries the additive metadata without a SQL
+schema migration. The envelope version prevents older readers from accepting a
+new coverage envelope after silently discarding its metadata. Legacy serialization
+omits absent coverage and preserves existing v2 capture receipts (which refer to
+the host capture policy, not the formation envelope version).
+
+This domain slice does not assign coverage to existing first-goal/recent-suffix
+snapshots. Host range selection, stable page identities, durable cursor discovery,
+and bounded backlog progression require a subsequent integration slice. Transported
+range declarations are not independent proof of source authenticity.

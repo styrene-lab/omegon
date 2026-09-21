@@ -2,6 +2,33 @@
 
 ## ADDED Requirements
 
+### Requirement: Incremental coverage is explicit and immutable
+
+Formation version 2 SHALL require an explicit capture-policy version and inclusive
+first sequence. The available source frontier supplies the inclusive last sequence.
+Evidence SHALL remain within that range. Version 1 snapshots SHALL NOT imply coverage.
+Extraction completion and completion import SHALL preserve the version and coverage.
+
+#### Scenario: Legacy snapshot has a recent frontier
+Given a version 1 snapshot contains a first goal and a recent suffix
+When it is loaded or transported
+Then its incremental coverage remains unknown
+
+#### Scenario: Invalid coverage range
+Given a version 2 formation has a zero or reversed range, unsupported policy, or evidence outside its range
+When the formation is validated
+Then validation rejects it before persistence
+
+#### Scenario: Completion changes coverage
+Given a persisted pending formation with explicit coverage
+When extraction completion or completion import changes its range or version
+Then the operation is rejected and the pending formation remains unchanged
+
+#### Scenario: Coverage survives persistence and replay
+Given a valid version 2 formation is stored with an operation identity
+When its storage operation is replayed and the database is reopened or exported
+Then its range and policy remain identical without a duplicate episode
+
 ### Requirement: Extraction enforces stream limits and terminal completion
 
 Memory extraction SHALL stop accumulating provider text at its byte limit and
