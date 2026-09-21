@@ -5,6 +5,215 @@ fn episode_json() -> serde_json::Value {
     serde_json::from_str(include_str!("fixtures/formation.json")).unwrap()
 }
 
+fn covered_episode() -> serde_json::Value {
+    let mut row = episode_json();
+    for field in [
+        "affected_nodes",
+        "affected_changes",
+        "files_changed",
+        "tags",
+    ] {
+        row[field] = json!([]);
+    }
+    row["formation"]["version"] = json!(2);
+    row["formation"]["coverage"] = json!({"first_sequence":1,"policy_version":1});
+    row["formation"]["candidates"] = json!([]);
+    row["formation"]["extraction"] = json!({"state":"pending","model":"fixture-model"});
+    row
+}
+
+#[test]
+fn coverage_contract_validates_ranges_and_preserves_legacy_unknowns() {
+    let row = covered_episode();
+    let formation: omegon_memory::EpisodeFormation =
+        serde_json::from_value(row["formation"].clone()).unwrap();
+    formation.validate().expect("valid scanned range");
+    assert_eq!(serde_json::to_value(formation).unwrap(), row["formation"]);
+    let legacy = episode_json()["formation"].clone();
+    let formation: omegon_memory::EpisodeFormation =
+        serde_json::from_value(legacy.clone()).unwrap();
+    formation.validate().unwrap();
+    assert_eq!(serde_json::to_value(formation).unwrap(), legacy);
+
+    let mut boundary = row["formation"].clone();
+    boundary["coverage"]["first_sequence"] = json!(8);
+    boundary["evidence"][0]["sequence"] = json!(8);
+    boundary["evidence"][0]["event_id"] = json!("event-8");
+    serde_json::from_value::<omegon_memory::EpisodeFormation>(boundary.clone())
+        .unwrap()
+        .validate()
+        .expect("inclusive single-record range");
+    boundary["evidence"] = json!([]);
+    serde_json::from_value::<omegon_memory::EpisodeFormation>(boundary.clone())
+        .unwrap()
+        .validate()
+        .expect("scanned non-evidence range");
+    boundary["source"] = json!({"state":"unavailable","session_id":"fixture","reason":"missing"});
+    assert!(
+        serde_json::from_value::<omegon_memory::EpisodeFormation>(boundary)
+            .unwrap()
+            .validate()
+            .is_err(),
+        "unavailable source cannot declare coverage even without evidence"
+    );
+
+    for (field, value) in [
+        ("coverage", serde_json::Value::Null),
+        ("coverage", json!({"first_sequence":0,"policy_version":1})),
+        ("coverage", json!({"first_sequence":9,"policy_version":1})),
+        ("coverage", json!({"first_sequence":1,"policy_version":2})),
+        ("coverage", json!({"first_sequence":8,"policy_version":1})),
+        ("version", json!(1)),
+        ("version", json!(3)),
+        (
+            "source",
+            json!({"state":"unavailable","session_id":"fixture","reason":"missing"}),
+        ),
+    ] {
+        let mut invalid = row["formation"].clone();
+        invalid[field] = value;
+        let parsed = serde_json::from_value::<omegon_memory::EpisodeFormation>(invalid.clone());
+        assert!(
+            parsed.is_err() || parsed.unwrap().validate().is_err(),
+            "accepted {invalid}"
+        );
+    }
+}
+
+#[test]
+fn coverage_contract_does_not_silently_discard_legacy_declaration() {
+    let mut row = episode_json()["formation"].clone();
+    row["coverage"] = json!({"first_sequence":1,"policy_version":1});
+    let formation: omegon_memory::EpisodeFormation = serde_json::from_value(row).unwrap();
+    assert!(
+        formation.validate().is_err(),
+        "legacy snapshots must reject coverage rather than silently drop it"
+    );
+}
+
+async fn coverage_completion_case(backend: &dyn MemoryBackend) {
+    let pending = covered_episode();
+    backend.import_jsonl(&pending.to_string()).await.unwrap();
+    for downgrade in [false, true] {
+        let mut changed = pending.clone();
+        changed["formation"]["extraction"] = json!({"state":"complete","model":"fixture-model"});
+        if downgrade {
+            changed["formation"]["version"] = json!(1);
+            changed["formation"]
+                .as_object_mut()
+                .unwrap()
+                .remove("coverage");
+        } else {
+            changed["formation"]["coverage"]["first_sequence"] = json!(2);
+        }
+        let completion = serde_json::from_value(changed["formation"].clone()).unwrap();
+        assert!(
+            backend
+                .apply_mutation(
+                    "changed-coverage",
+                    omegon_memory::MemoryMutation::CompleteFormation {
+                        episode_id: "evidence-episode".into(),
+                        formation: Box::new(completion),
+                    }
+                )
+                .await
+                .is_err()
+        );
+        // Import may return rejected-row statistics rather than an operation error.
+        let _ = backend.import_jsonl(&changed.to_string()).await;
+        assert_eq!(
+            serde_json::to_value(
+                backend.list_episodes("wave3", 1).await.unwrap()[0]
+                    .formation
+                    .as_ref()
+                    .unwrap()
+            )
+            .unwrap(),
+            pending["formation"]
+        );
+    }
+    let mut complete = pending;
+    complete["formation"]["extraction"] = json!({"state":"complete","model":"fixture-model"});
+    backend.import_jsonl(&complete.to_string()).await.unwrap();
+    assert_eq!(
+        serde_json::to_value(
+            backend.list_episodes("wave3", 1).await.unwrap()[0]
+                .formation
+                .as_ref()
+                .unwrap()
+        )
+        .unwrap(),
+        complete["formation"]
+    );
+}
+
+#[tokio::test]
+async fn coverage_contract_completion_is_immutable_across_backends() {
+    coverage_completion_case(&omegon_memory::InMemoryBackend::new()).await;
+    coverage_completion_case(&SqliteBackend::in_memory().unwrap()).await;
+}
+
+#[tokio::test]
+async fn coverage_contract_survives_replay_reopen_and_transport() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("coverage.db");
+    let row = covered_episode();
+    let request: omegon_memory::StoreEpisode = serde_json::from_value(row.clone()).unwrap();
+    let mutation = omegon_memory::MemoryMutation::StoreEpisode { request };
+    for backend in [
+        Box::new(omegon_memory::InMemoryBackend::new()) as Box<dyn MemoryBackend>,
+        Box::new(SqliteBackend::open(&path).unwrap()),
+    ] {
+        assert!(
+            !backend
+                .apply_mutation("coverage-page", mutation.clone())
+                .await
+                .unwrap()
+                .replayed
+        );
+        assert!(
+            backend
+                .apply_mutation("coverage-page", mutation.clone())
+                .await
+                .unwrap()
+                .replayed
+        );
+        let episodes = backend.list_episodes("wave3", 10).await.unwrap();
+        assert_eq!(episodes.len(), 1);
+        assert_eq!(
+            serde_json::to_value(episodes[0].formation.as_ref().unwrap()).unwrap(),
+            row["formation"]
+        );
+        let mirror = omegon_memory::InMemoryBackend::new();
+        mirror
+            .import_jsonl(&backend.export_jsonl("wave3").await.unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            mirror.list_episodes("wave3", 10).await.unwrap()[0].formation,
+            episodes[0].formation
+        );
+    }
+    let reopened = SqliteBackend::open(&path).unwrap();
+    assert!(
+        reopened
+            .apply_mutation("coverage-page", mutation)
+            .await
+            .unwrap()
+            .replayed
+    );
+    assert_eq!(
+        serde_json::to_value(
+            reopened.list_episodes("wave3", 10).await.unwrap()[0]
+                .formation
+                .as_ref()
+                .unwrap()
+        )
+        .unwrap(),
+        row["formation"]
+    );
+}
+
 async fn recovery_inventory_case(backend: &dyn MemoryBackend) {
     for index in 0..20 {
         let mut row = episode_json();
@@ -428,15 +637,18 @@ async fn failed_completion_rolls_back_episode_index_vector_and_receipt() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("atomic.db");
     let backend = SqliteBackend::open(&path).unwrap();
-    let mut pending = episode_json();
+    let mut pending = covered_episode();
     pending["formation"]["candidates"] = json!([]);
     pending["formation"]["extraction"] = json!({"state":"pending","model":"fixture-model"});
     backend.import_jsonl(&pending.to_string()).await.unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute("INSERT INTO episodes_vec (episode_id,embedding,model_name,dims,created_at) VALUES ('evidence-episode',?1,'fixture',1,'fixture')", [vec![0u8,0,128,63]]).unwrap();
     db.execute_batch("CREATE TRIGGER reject_completion_receipt BEFORE INSERT ON memory_operation_receipts WHEN NEW.operation_id='failed-complete' BEGIN SELECT RAISE(ABORT,'fixture failure'); END;").unwrap();
-    let completion: omegon_memory::EpisodeFormation =
-        serde_json::from_value(episode_json()["formation"].clone()).unwrap();
+    let mut completion: omegon_memory::EpisodeFormation =
+        serde_json::from_value(pending["formation"].clone()).unwrap();
+    completion.extraction = omegon_memory::ExtractionOutcome::Complete {
+        model: "fixture-model".into(),
+    };
     let mutation = omegon_memory::MemoryMutation::CompleteFormation {
         episode_id: "evidence-episode".into(),
         formation: Box::new(completion),

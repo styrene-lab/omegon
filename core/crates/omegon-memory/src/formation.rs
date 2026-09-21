@@ -33,10 +33,7 @@ fn source_identifier(value: &str) -> bool {
 
 impl EpisodeFormation {
     pub fn validate(&self) -> crate::backend::Result<()> {
-        if self.version != 1
-            || self.evidence.len() > MAX_EVIDENCE_ITEMS
-            || self.candidates.len() > MAX_CANDIDATES
-        {
+        if self.evidence.len() > MAX_EVIDENCE_ITEMS || self.candidates.len() > MAX_CANDIDATES {
             return Err(invalid());
         }
         let frontier = match &self.source {
@@ -66,6 +63,17 @@ impl EpisodeFormation {
                 0
             }
         };
+        let first_sequence = match (self.version, &self.coverage) {
+            (1, None) => 1,
+            (2, Some(coverage))
+                if coverage.policy_version == 1
+                    && coverage.first_sequence > 0
+                    && coverage.first_sequence <= frontier =>
+            {
+                coverage.first_sequence
+            }
+            _ => return Err(invalid()),
+        };
         let mut ids = HashSet::new();
         let mut bytes = 0usize;
         let mut previous_sequence = 0;
@@ -74,6 +82,7 @@ impl EpisodeFormation {
             if !source_identifier(&item.event_id)
                 || !ids.insert(item.event_id.as_str())
                 || item.sequence <= previous_sequence
+                || item.sequence < first_sequence
                 || item.sequence > frontier
                 || matches!(&self.source, FormationSource::Available { event_id, sequence, .. }
                     if item.sequence == *sequence && item.event_id != *event_id)
@@ -111,6 +120,9 @@ impl EpisodeFormation {
             "Source: {:?}\nExtraction: {:?}\n",
             self.source, self.extraction
         );
+        if let Some(coverage) = &self.coverage {
+            text.push_str(&format!("Declared coverage: {coverage:?}\n"));
+        }
         if self.truncated {
             text.push_str(
                 "Evidence is a bounded excerpt; consult the source for omitted content.\n",
@@ -155,6 +167,8 @@ pub(crate) fn validate_completion(
         _ => return Err(invalid()),
     };
     if expected != model
+        || prior.version != next.version
+        || prior.coverage != next.coverage
         || prior.source != next.source
         || prior.evidence != next.evidence
         || prior.truncated != next.truncated

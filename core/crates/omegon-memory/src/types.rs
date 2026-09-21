@@ -464,9 +464,21 @@ pub enum ExtractionOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FormationCoverage {
+    /// Inclusive first scanned canonical sequence; the source frontier is the last.
+    pub first_sequence: u64,
+    /// Version of the producer's evidence-selection rules, not extraction policy.
+    pub policy_version: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EpisodeFormation {
     pub version: u16,
     pub source: FormationSource,
+    /// Explicit scanned range for version 2. Legacy snapshots have unknown coverage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<FormationCoverage>,
     pub evidence: Vec<FormationEvidence>,
     pub candidates: Vec<MemoryCandidate>,
     pub extraction: ExtractionOutcome,

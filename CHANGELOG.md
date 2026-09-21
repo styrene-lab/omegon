@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Memory formation envelopes now support explicit versioned evidence-coverage ranges. Storage validates range bounds and preserves coverage through extraction completion, replay, SQLite reopen, and JSONL transport. Legacy snapshots retain unknown coverage; hosted incremental capture remains follow-up work.
+
 - Compaction and aggressive decay now await optional, published feature checkpoint hooks under a shared deadline. Memory acknowledges a durable bounded snapshot or reports unavailable capture, reusing its owned worker and receipts; optional memory failure does not block compaction.
 
 - Hosted memory now captures bounded committed-evidence snapshots every eight turn-end notifications before session finalization. A single interval worker coalesces scheduling pressure, replays identical captures, and leaves extraction to background recovery; `memory_query` reports capture admission state.

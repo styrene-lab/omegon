@@ -39,6 +39,7 @@ impl Extractor for ModelExtractor {
 fn unavailable(session_id: &str, reason: &str) -> EpisodeFormation {
     EpisodeFormation {
         version: 1,
+        coverage: None,
         source: FormationSource::Unavailable {
             session_id: session_id.into(),
             reason: reason.into(),
@@ -93,6 +94,7 @@ pub(super) fn capture(
     let minimum_sequence = if mixed { boundary.sequence() } else { 1 };
     let mut formation = EpisodeFormation {
         version: 1,
+        coverage: None,
         source: FormationSource::Available {
             session_id: session_id.into(),
             stream_id: replay.frontier().stream_id().to_string(),
