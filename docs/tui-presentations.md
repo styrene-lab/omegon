@@ -50,8 +50,9 @@ automatic scrollback omits them as the plan changes.
 
 While the model streams, complete lines and stable wrapped rows publish in bounded
 batches. You can scroll back through the response before the turn finishes. Only
-the unfinished tail and composer remain in the small live area. Running and
-publication status sit in the composer frame, below the response. Returning
+the unfinished tail, transient action strip, and composer remain in the small live
+area. Activity follows the response tail; publication notices sit in the composer
+frame. Returning
 from Project catches up without replaying
 already published output. `/session-export scrollback` is an explicit snapshot and
 can intentionally repeat history; it does not reset automatic publication. After
@@ -81,3 +82,13 @@ labels, and quieter descriptions and hints. Connection/settings menus, selectors
 slash suggestions, and command panels share these styles. The composer and
 conversation retain the terminal's base background and input colors. These control
 roles are separate from Markdown styles and can be overridden by future themes.
+
+During a turn, a compact grey action strip identifies Working, Thinking, or
+Responding. A running tool adds its name and short argument summary; concurrent
+tools add a count. Inline places this strip after the visible response tail and
+before input. Fullscreen uses the same phase source alongside its tool evidence.
+Cancellation shows Canceling until the runtime acknowledges completion, and the
+strip clears when the turn ends. It does not publish status rows into scrollback.
+`/ui hide activity` hides the strip; inline retains the compact cancel hint in
+the composer border. Thinking is an activity label, not a display of hidden
+reasoning text.

@@ -70,11 +70,10 @@ pub fn plan_tui_layout(inputs: TuiLayoutInputs) -> TuiLayoutPlan {
     } else {
         0
     };
-    let mut tool_inspection_height = if is_slim {
-        inputs.tool_inspection_height
-    } else {
-        0
-    };
+    // The producer supplies the permitted activity content for this level.
+    // Full detail still needs its compact live action row even though tool
+    // evidence itself stays in the conversation.
+    let mut tool_inspection_height = inputs.tool_inspection_height;
     let mut workbench_height = inputs.workbench_height;
     let mut segment_detail_height = inputs.segment_detail_height;
 

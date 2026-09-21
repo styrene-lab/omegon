@@ -274,12 +274,13 @@ the retained-text limit uses the existing explicit text-limit degradation path.
 
 ## Activity status placement
 
-Keep transient working, cancellation, and publication guidance in the inline
-composer's bottom border. A standalone status row between native history and the
-live response tail interrupts the reader even when that row is never committed
-to history. The response area therefore contains only pending response/tool
-content. Active status takes precedence over context telemetry in the composer;
-idle restores context telemetry. Fullscreen composition keeps its existing policy.
+Keep transient activity after the live response tail, beside the composer. The
+`tui-live-activity` follow-up provides an explicit grey action strip there, shared
+with fullscreen; the prior compact Working/cancellation fallback remains in the
+composer when activity is hidden. Publication/degradation notices remain in the
+composer border. A status row between native history and the live response tail
+interrupts reading even if never committed to history; neither presentation may
+insert activity there or publish it as conversation.
 
 ## Physical insertion fidelity
 

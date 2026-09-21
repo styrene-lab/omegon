@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- A shared live action area now identifies thinking, response streaming, and running tools in inline and fullscreen. Inline activity stays below the response tail and above input, clears on authoritative completion, and honors the activity visibility setting.
+
 - TUI menus, selectors, command panels, and slash suggestions now use shared grey surface, selection, and text roles. Composer borders and hints are subdued while the conversation canvas retains terminal defaults.
 
 - Inline activity and publication status now sit in the composer frame, keeping working/cancellation hints out of the model response flow.

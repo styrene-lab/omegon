@@ -169,7 +169,6 @@ impl App {
                 self.slim_turn_state = SlimTurnState::RequestingProvider;
                 self.dashboard_handles.session().set_busy(true);
                 self.turn = turn;
-                self.working_verb = spinner::next_verb();
                 self.effects.start_spinner_glow();
                 self.effects.start_border_pulse();
             }
@@ -324,7 +323,6 @@ impl App {
                 provenance,
                 execution_origin,
             } => {
-                self.working_verb = spinner::next_verb();
                 self.instrument_panel.tool_started(&name);
                 self.slim_turn_state = SlimTurnState::Tool(name.replace('_', " "));
                 let args_summary = crate::invocation_batch::summarize_tool_args(&name, &args);
@@ -735,6 +733,14 @@ impl App {
                 text,
                 image_paths,
             } => {
+                if self.runtime_turn_id != Some(runtime_turn_id) {
+                    // Loop turn numbers restart at one for each runtime prompt.
+                    // Discard prior agent activity so a reused turn:N cannot
+                    // revive a lingering failure; durable conversation evidence
+                    // and separately owned operator-shell activity remain intact.
+                    self.activity_tools
+                        .retain(|tool| tool.episode_id.starts_with("operator-shell:"));
+                }
                 self.runtime_turn_id = Some(runtime_turn_id);
                 if image_paths.is_empty() {
                     self.conversation.push_user(&text);

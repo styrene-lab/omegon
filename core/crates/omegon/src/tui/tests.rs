@@ -463,8 +463,8 @@ fn compact_interaction_surfaces_remain_visible_during_publication() {
         "{rendered}"
     );
     assert!(
-        rendered.contains("active turn"),
-        "status line missing\n{rendered}"
+        rendered.contains("Responding") && rendered.contains("Ctrl+C cancel"),
+        "live action missing\n{rendered}"
     );
     assert!(
         rendered.contains("Ask anything"),
@@ -8441,6 +8441,28 @@ fn composer_preserves_the_actual_model_variant() {
 }
 
 #[test]
+fn live_action_visible_in_each_fullscreen_detail() {
+    for level in [UiPresentationLevel::Active, UiPresentationLevel::Full] {
+        let mut app = test_app();
+        app.inline_active = false;
+        app.apply_ui_presentation(UiPresentationPolicy::named(level));
+        app.agent_active = true;
+        app.slim_turn_state = SlimTurnState::Thinking;
+        let rendered = render_app_to_string(&mut app, 100, 24);
+        assert!(
+            rendered.contains("Thinking") && rendered.contains("Ctrl+C cancel"),
+            "{level:?}: {rendered}"
+        );
+        app.agent_active = false;
+        let rendered = render_app_to_string(&mut app, 100, 24);
+        assert!(
+            !rendered.contains("Ctrl+C cancel"),
+            "idle activity leaked: {rendered}"
+        );
+    }
+}
+
+#[test]
 fn active_turn_keeps_model_identity_and_separate_activity() {
     let mut settings = Settings::new("openai-codex:gpt-5.5");
     settings.thinking = ThinkingLevel::High;
@@ -8450,7 +8472,7 @@ fn active_turn_keeps_model_identity_and_separate_activity() {
     app.footer_data.context_window = 1_048_576;
     app.footer_data.context_percent = 5.0;
     app.agent_active = true;
-    app.working_verb = "thinking";
+    app.slim_turn_state = SlimTurnState::Thinking;
 
     let rendered = render_app_to_string(&mut app, 160, 20);
 
@@ -8459,8 +8481,8 @@ fn active_turn_keeps_model_identity_and_separate_activity() {
         "active turn must keep model identity visible: {rendered}"
     );
     assert!(
-        rendered.contains("⟳") && rendered.contains("· active turn"),
-        "spinner verb should move to shaded status row: {rendered}"
+        rendered.contains("Thinking") && rendered.contains("Ctrl+C cancel"),
+        "current action should occupy the shaded status row: {rendered}"
     );
 }
 

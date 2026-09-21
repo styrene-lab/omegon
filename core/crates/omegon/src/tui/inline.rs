@@ -142,12 +142,13 @@ impl App {
         }
         Some(if self.native_publication.automatic.is_degraded() {
             self.native_publication.automatic.degradation_message()
-        } else if self.agent_active {
+        } else if self.agent_active && !self.ui_surfaces.activity {
             "Working · Ctrl+C cancel"
-        } else if self
-            .native_publication
-            .automatic
-            .has_pending(self.publication_boundary)
+        } else if !self.agent_active
+            && self
+                .native_publication
+                .automatic
+                .has_pending(self.publication_boundary)
         {
             "Publishing completed output"
         } else {
@@ -160,38 +161,27 @@ impl App {
         let editor_rows = editor_height_for(&self.editor, area)
             .clamp(2, 4)
             .min(area.height);
+        let action_rows = self
+            .live_action_height()
+            .min(area.height.saturating_sub(editor_rows + 1));
+        let available = area.height.saturating_sub(editor_rows + 1 + action_rows);
         let mut lines = Vec::new();
         // Only the uncommitted physical row belongs in the live viewport.
         // Stable response rows are retained above it in native scrollback.
         if self.agent_active {
-            let preview = self.native_publication.automatic.preview(
-                area.width,
-                area.height.saturating_sub(editor_rows + 1) as usize,
-            );
+            let preview = self
+                .native_publication
+                .automatic
+                .preview(area.width, available as usize);
             let tail = self.native_publication.automatic.pending_text();
             if !preview.is_empty() {
                 lines.extend(preview);
             } else if !tail.is_empty() {
                 lines.push(Line::from(tail.to_owned()));
-            } else if let Some(segments::Segment {
-                content:
-                    SegmentContent::ToolCard {
-                        name,
-                        complete: false,
-                        ..
-                    },
-                ..
-            }) = self.conversation.segments().last()
-            {
-                let end = name.floor_char_boundary(name.len().min(512));
-                lines.push(Line::from(native_publication::safe_inline_text(
-                    &name[..end],
-                )));
             }
         }
         // Keep idle input beside the transcript. The reserved viewport remains
         // available below for streaming output and contextual controls.
-        let available = area.height.saturating_sub(editor_rows + 1);
         let live_rows = if self.editor.render_text().trim_start().starts_with('/') {
             // Autocomplete opens above the editor, inside the reserved viewport.
             available
@@ -199,13 +189,11 @@ impl App {
             (lines.len() as u16).min(available)
         };
         let live = Rect::new(area.x, area.y, area.width, live_rows);
-        let editor = Rect::new(
-            area.x,
-            area.y + live_rows + u16::from(area.height > editor_rows),
-            area.width,
-            editor_rows,
-        );
+        let action_y = area.y + live_rows + u16::from(area.height > editor_rows);
+        let action = Rect::new(area.x, action_y, area.width, action_rows);
+        let editor = Rect::new(area.x, action_y + action_rows, area.width, editor_rows);
         frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), live);
+        self.render_live_action(action, frame);
         self.render_shared_composer(frame, editor);
         self.render_operator_event_toast(frame);
     }
@@ -583,7 +571,7 @@ mod tests {
     }
 
     #[test]
-    fn inline_activity_status_stays_inside_composer_below_response_tail() {
+    fn inline_activity_follows_response_tail_above_composer() {
         use ratatui::backend::TestBackend;
         for width in [40, 80] {
             for level in [UiPresentationLevel::Active, UiPresentationLevel::Full] {
@@ -620,11 +608,13 @@ mod tests {
                 let editor = app.editor_area.unwrap();
                 assert!(rows[0].starts_with("Unfinished response"), "{rows:?}");
                 let status_row = rows.iter().position(|row| row.contains("Working")).unwrap();
-                assert_eq!(status_row, (editor.bottom() - 1) as usize, "{rows:?}");
+                assert_eq!(status_row + 1, editor.y as usize, "{rows:?}");
                 assert!(
-                    !rows[..editor.y as usize]
-                        .iter()
-                        .any(|row| row.contains("Ctrl+C") || row.contains("F2 Project")),
+                    status_row > 0,
+                    "activity cannot split response history from its tail"
+                );
+                assert!(
+                    !rows.iter().any(|row| row.contains("F2 Project")),
                     "{rows:?}"
                 );
                 app.agent_active = false;

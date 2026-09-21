@@ -119,6 +119,8 @@ def test_reply_readiness_rejects_active_placeholder_and_publication_overlap():
     idle = "Ask anything  / commands  ⏎ send"
     assert runner.reply_ready(idle, reply, reply, "inline", "active", runtime_idle=True)
     assert not runner.reply_ready(idle, reply, reply, "inline", "active", runtime_idle=False)
+    assert runner.reply_ready(idle, reply, reply, "fullscreen", "active", runtime_idle=True)
+    assert not runner.reply_ready(idle, reply, reply, "fullscreen", "active", runtime_idle=True, activity_visible=True)
     assert not runner.reply_ready("Working · Ctrl+C cancel\n" + idle, reply, reply, "inline", "active", runtime_idle=True)
     assert not runner.reply_ready("Publishing completed output\n" + idle, reply, reply, "inline", "active", runtime_idle=True)
     assert not runner.reply_ready(idle, reply + "\n" + reply, reply, "inline", "active", runtime_idle=True)
@@ -243,20 +245,20 @@ def test_markdown_capture_gate_rejects_raw_markup_broken_words_and_missing_style
             raise AssertionError("Markdown capture accepted unrendered, corrupted, unstyled, or stale-width output")
 
 
-def test_inline_working_status_rejects_response_interruption_and_missing_status():
-    clean = "Published answer\nLive answer tail\n╭ model ─╮\n│ Ask anything │\n╰ Working · Ctrl+C cancel ─╯"
-    runner.assert_inline_working_status(clean)
-    for invalid in (clean.replace("Live answer tail", "Working · Ctrl+C cancel · F2 Project\nLive answer tail"),
-                    clean.replace("Live answer tail", "Working · Ctrl+C cancel\nLive answer tail"),
-                    clean.replace("Working · Ctrl+C cancel", ""),
-                    clean + "\nF2 Project",
+def test_inline_activity_rejects_response_interruption_and_duplicate_footer():
+    clean = "Published answer\nLive answer tail\n\nResponding · Ctrl+C cancel\n╭ model ─╮\n│ Ask anything │\n╰────────╯"
+    runner.assert_inline_activity(clean, tail_marker="Live answer tail")
+    for invalid in (clean.replace("Live answer tail\n\nResponding · Ctrl+C cancel", "Responding · Ctrl+C cancel\nLive answer tail"),
+                    clean.replace("Responding · Ctrl+C cancel", ""),
+                    clean.replace("╰────────╯", "╰ Responding · Ctrl+C cancel ╯"),
+                    clean.replace("Responding · Ctrl+C cancel", "Responding · Ctrl+C cancel · F2 Project"),
                     clean.replace("╭", " ")):
         try:
-            runner.assert_inline_working_status(invalid)
+            runner.assert_inline_activity(invalid, tail_marker="Live answer tail")
         except AssertionError:
             pass
         else:
-            raise AssertionError("inline status accepted response interruption or missing composer status")
+            raise AssertionError("inline activity accepted response interruption, duplicate footer, or missing strip")
 
 
 def test_markdown_fixture_holds_all_blocks_before_completion():
@@ -337,6 +339,63 @@ def test_ansi_spans_preserves_grouped_and_split_color_state():
     assert canvas == {"row": 1, "text": "Canvas", "fg": None, "bg": None}
 
 
+def test_activity_fixture_holds_working_thinking_response_and_emits_bounded_tool():
+    import queue
+    import threading
+    events = queue.Queue()
+    with runner.fixture_provider() as server:
+        server.activity = True
+        def consume():
+            request = Request(server.url + "/v1/chat/completions", data=b'{"messages": []}', headers={"Content-Type": "application/json"})
+            with urlopen(request, timeout=5) as response:
+                for line in response:
+                    if line.startswith(b"data: "):
+                        events.put(line.decode())
+        reader = threading.Thread(target=consume)
+        reader.start()
+        try:
+            assert server.activity_stages[0].wait(2) and events.empty()
+            server.release_activity[0].set()
+            assert server.activity_stages[1].wait(2)
+            assert '"reasoning_content"' in events.get(timeout=2)
+            server.release_activity[1].set()
+            assert server.activity_stages[2].wait(2)
+            response = events.get(timeout=2)
+            assert "ACTIVITY_PREFIX_47" in response and "ACTIVITY_LIVE_TAIL" in response
+            assert reader.is_alive()
+            server.release_activity[2].set()
+            call = json.loads(events.get(timeout=2)[6:])["choices"][0]
+            assert call["finish_reason"] == "tool_calls"
+            tool = call["delta"]["tool_calls"][0]["function"]
+            assert tool["name"] == "bash"
+            args = json.loads(tool["arguments"])
+            assert args == {"command": "sleep 8; printf ACTIVITY_TOOL_DONE", "timeout_secs": 10}
+            assert "[DONE]" in events.get(timeout=2)
+        finally:
+            for release in server.release_activity:
+                release.set()
+            reader.join(5)
+        assert not reader.is_alive()
+
+
+def test_activity_fixture_continuation_cancel_and_recovery_avoid_legacy_permission_probe():
+    with runner.fixture_provider() as server:
+        server.activity = True
+        server.requests = 1
+        server.tool_path = "/fixture/denied.txt"
+        for release in server.release_activity:
+            release.set()
+        request = Request(server.url + "/v1/chat/completions", data=b'{"messages": []}', headers={"Content-Type": "application/json"})
+        bodies = []
+        for _ in range(3):
+            with urlopen(request, timeout=2) as response:
+                bodies.append(response.read().decode())
+        assert "ACTIVITY_CONTINUATION_TAIL" in bodies[0]
+        assert "CANCELLED_FIXTURE_MUST_NOT_PUBLISH" in bodies[1]
+        assert "TUI_FIXTURE_REPLY_4" in bodies[2]
+        assert not server.tool_waiting.is_set(), "activity cancellation request hit the unrelated permission fixture"
+
+
 if __name__ == "__main__":
     command = runner.tui_command(Path("/binary with spaces"), Path("/workspace"), Path("/log"), "inline", "full")
     assert "--tui" in command and "--ui" in command, "fixture must select both axes explicitly"
@@ -370,7 +429,10 @@ if __name__ == "__main__":
     test_markdown_capture_gate_rejects_raw_markup_broken_words_and_missing_style()
     test_markdown_fixture_holds_all_blocks_before_completion()
 
-    test_inline_working_status_rejects_response_interruption_and_missing_status()
+    test_inline_activity_rejects_response_interruption_and_duplicate_footer()
 
     test_control_palette_rejects_missing_roles_stale_selection_and_colored_draft()
     test_ansi_spans_preserves_grouped_and_split_color_state()
+
+    test_activity_fixture_holds_working_thinking_response_and_emits_bounded_tool()
+    test_activity_fixture_continuation_cancel_and_recovery_avoid_legacy_permission_probe()

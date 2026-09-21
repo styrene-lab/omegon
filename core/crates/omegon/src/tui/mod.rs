@@ -10,6 +10,7 @@
 //!   - user_input_tx → agent loop receives prompts
 //!   - AgentEvent broadcast → TUI receives streaming updates
 
+mod action_area;
 mod agent_events;
 mod auspex;
 mod auth_menu_projection;
@@ -514,7 +515,6 @@ struct App {
     /// Tool name that completed this frame — consumed by instrument telemetry
     completed_tool_name: Option<String>,
     /// Current spinner verb — rotates on each tool call.
-    working_verb: &'static str,
     /// When true, replay the splash animation.
     replay_splash: bool,
     /// Augment registry — manages active persona, tone, and memory layers.
@@ -738,41 +738,6 @@ impl App {
             .unwrap_or_else(|| fallback.to_string())
     }
 
-    fn render_engine_status_row(&self, area: Rect, frame: &mut Frame, t: &dyn theme::Theme) {
-        if area.width == 0 || area.height == 0 {
-            return;
-        }
-        let bg = t.card_bg();
-        let verb = if self.agent_active {
-            spinner::maybe_glitch(self.working_verb)
-                .unwrap_or_else(|| self.working_verb.to_string())
-        } else {
-            "ready".to_string()
-        };
-        let mut spans = vec![
-            Span::styled(" ", Style::default().bg(bg)),
-            Span::styled("⟳ ", Style::default().fg(t.accent_bright()).bg(bg)),
-            Span::styled(
-                verb,
-                Style::default()
-                    .fg(t.accent_muted())
-                    .bg(bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ];
-        if self.agent_active {
-            spans.push(Span::styled(
-                " · active turn",
-                Style::default().fg(t.dim()).bg(bg),
-            ));
-        } else {
-            spans.push(Span::styled(" · idle", Style::default().fg(t.dim()).bg(bg)));
-        }
-        Paragraph::new(Line::from(spans))
-            .style(Style::default().bg(bg))
-            .render(area, frame.buffer_mut());
-    }
-
     fn current_persona_state(&self) -> crate::settings::PersonaState {
         let persona_id = self
             .augment_registry
@@ -954,7 +919,6 @@ impl App {
             at_picker: None,
             last_tool_name: None,
             completed_tool_name: None,
-            working_verb: "Working",
             replay_splash: false,
             augment_registry: Some(crate::plugins::registry::AugmentRegistry::new(
                 crate::prompt::load_lex_imperialis(),

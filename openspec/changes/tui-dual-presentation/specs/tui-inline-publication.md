@@ -4,15 +4,16 @@
 
 ### Requirement: Activity guidance remains outside assistant response flow
 
-Inline running and publication status belongs in the composer frame, not between
-published assistant text and its unfinished live tail. Transient status yields
-to idle composer context when work ends and is never published as conversation.
+Inline activity belongs after the unfinished live tail, in an adjacent action
+strip or the composer frame, never between published assistant text and its tail.
+Publication status belongs in the composer frame. Transient status yields to idle
+composer context when work ends and is never published as conversation.
 
 #### Scenario: Streaming reply continues beside the composer
 Given inline Active or Full with published response text and an unfinished live tail
 When a running frame is rendered
 Then the live tail follows the published text without an intervening status or helper row
-And Working and cancellation guidance appear in the composer frame
+And activity and cancellation guidance appear after the live tail, beside the composer
 And completion removes the running indication
 
 #### Scenario: Completed output is still publishing

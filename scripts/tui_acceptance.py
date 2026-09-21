@@ -64,18 +64,22 @@ def assert_markdown_rendering(physical, styled, stage, width):
     assert_text_modifier(styled_block, "inline_code", modifier=4)
 
 
-def assert_inline_working_status(viewport):
+def assert_inline_activity(viewport, phase="Responding", tail_marker=None):
     rows = viewport.splitlines()
     tops = [index for index, row in enumerate(rows) if row.lstrip().startswith(("╭", "┌"))]
     assert tops, "inline composer frame is missing"
     top = tops[-1]
-    bottoms = [index for index in range(top + 1, len(rows))
-               if rows[index].lstrip().startswith(("╰", "└"))]
-    assert bottoms, "inline composer bottom frame is missing"
-    assert "Working" not in "\n".join(rows[:top]), "working status interrupts the answer above the composer"
-    frame = "\n".join(rows[top:bottoms[0] + 1])
-    assert "Working · Ctrl+C cancel" in frame, "working status is absent from the composer frame"
-    assert "F2 Project" not in viewport, "legacy project helper remains in the live response surface"
+    phase_rows = [index for index, row in enumerate(rows[:top]) if re.search(rf"\b{phase}\b", row)]
+    assert phase_rows, f"{phase} activity is absent above the composer"
+    phase_row = phase_rows[-1]
+    assert top - phase_row <= 3, "activity strip is separated from the composer"
+    assert "Ctrl+C cancel" in "\n".join(rows[phase_row:top]), "activity strip has no cancel hint"
+    assert phase not in "\n".join(rows[top:]), "composer duplicates the activity phase"
+    assert "F2 Project" not in "\n".join(rows[phase_row:top]), "legacy project helper remains in the action strip"
+    if tail_marker is not None:
+        tail_rows = [index for index, row in enumerate(rows) if tail_marker in row]
+        assert tail_rows and tail_rows[-1] < phase_row, "activity interrupts or appears before the live answer tail"
+    return phase_row
 
 
 def assert_text_modifier(styled, expected, modifier=1):
@@ -183,7 +187,7 @@ def tui_command(binary, workspace, log, presentation="fullscreen", detail="activ
 def ready_marker(presentation, detail):
     # Composer visibility alone does not prove idle: reply_ready combines this
     # marker with authority closure, live-status absence, and publication count.
-    return "Ask anything" if presentation == "inline" or detail == "full" else "ready · idle"
+    return "Ask anything"
 
 
 def authority_runtime_idle(records):
@@ -192,11 +196,11 @@ def authority_runtime_idle(records):
     return bool(started) and started <= closed
 
 
-def reply_ready(current, transcript, marker, presentation, detail, *, runtime_idle):
+def reply_ready(current, transcript, marker, presentation, detail, *, runtime_idle, activity_visible=False):
     # The empty composer placeholder is visible during streaming too. Require
     # durable terminalization and its rendered idle state, including publication.
-    return (runtime_idle and ready_marker(presentation, detail) in current
-            and "Working ·" not in current
+    return (runtime_idle and not activity_visible and ready_marker(presentation, detail) in current
+            and "Ctrl+C cancel" not in current
             and "Publishing completed output" not in current
             and transcript.count(marker) == 1)
 
@@ -235,7 +239,7 @@ def fixture_provider():
                 if not server.release_cancel.wait(timeout=60):
                     self.send_error(504)
                     return
-            tool_probe = not server.streaming and number == 3 and server.tool_path is not None
+            tool_probe = not server.streaming and not server.activity and number == 3 and server.tool_path is not None
             if tool_probe:
                 server.tool_waiting.set()
                 if not server.release_tool.wait(timeout=60):
@@ -244,6 +248,46 @@ def fixture_provider():
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
+            if server.activity:
+                def emit(delta, finish=None):
+                    event = {"choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+                    self.wfile.write(("data: " + json.dumps(event) + "\n\n").encode())
+                    self.wfile.flush()
+                def hold(stage):
+                    server.activity_stages[stage].set()
+                    return server.release_activity[stage].wait(timeout=60)
+                try:
+                    if number == 1:
+                        if not hold(0):
+                            return
+                        emit({"reasoning_content": "Considering the bounded local activity fixture."})
+                        if not hold(1):
+                            return
+                        prefix = "TUI_FIXTURE_REPLY_1\n\n" + "".join(f"ACTIVITY_PREFIX_{line:02} Stable answer content for native scrollback.\n" for line in range(48))
+                        emit({"content": prefix + "ACTIVITY_LIVE_TAIL unfinished response"})
+                        if not hold(2):
+                            return
+                        call = {"index": 0, "id": "activity-bash-probe", "type": "function",
+                                "function": {"name": "bash", "arguments": json.dumps({"command": "sleep 8; printf ACTIVITY_TOOL_DONE", "timeout_secs": 10})}}
+                        emit({"tool_calls": [call]}, "tool_calls")
+                    elif number == 2:
+                        emit({"content": "TUI_FIXTURE_REPLY_2\nAll done. The bounded shell command completed successfully and returned the expected local marker. This fixture has finished its tool check and will make no further tool calls. The operator can read the completed response or start another turn.\nACTIVITY_CONTINUATION_TAIL completed response"})
+                        if not hold(3):
+                            return
+                        emit({}, "stop")
+                    elif number == 3:
+                        if not hold(4):
+                            return
+                        emit({"content": "CANCELLED_FIXTURE_MUST_NOT_PUBLISH"}, "stop")
+                    elif number == 4:
+                        emit({"content": "TUI_FIXTURE_REPLY_4 All done. Activity fixture recovered after cancellation."}, "stop")
+                    else:
+                        raise AssertionError(f"unexpected activity request {number}")
+                    self.wfile.write(b"data: [DONE]\n\n")
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
             if server.markdown:
                 try:
                     for offset in range(0, len(MARKDOWN_LIVE_PREFIX), 7):
@@ -332,6 +376,9 @@ def fixture_provider():
     server.stress = False
     server.streaming = False
     server.markdown = False
+    server.activity = False
+    server.activity_stages = [threading.Event() for _ in range(5)]
+    server.release_activity = [threading.Event() for _ in range(5)]
     server.markdown_prefix_waiting = threading.Event()
     server.release_markdown_prefix = threading.Event()
     server.stream_stages = [threading.Event() for _ in range(5)]
@@ -353,7 +400,7 @@ def fixture_provider():
     try:
         yield server
     finally:
-        for release in server.release_stages:
+        for release in server.release_stages + server.release_activity:
             release.set()
         server.release_markdown_prefix.set()
         server.release_tool.set()
@@ -468,7 +515,9 @@ def assert_streaming_payload(transcript, markers):
         assert normalized.count(marker + body) == 1, f"streamed payload lost or altered nonwhitespace characters: {marker}"
 
 
-def run(binary: Path, output: Path, presentation="fullscreen", detail="active", entry=None, stress=False, fresh_install=False, unconfigured=False, streaming=False, markdown=False, controls=False):
+def run(binary: Path, output: Path, presentation="fullscreen", detail="active", entry=None, stress=False, fresh_install=False, unconfigured=False, streaming=False, markdown=False, controls=False, activity=False):
+    if activity and (unconfigured or stress or streaming or markdown or controls):
+        raise ValueError("activity acceptance requires a configured layout without another scenario")
     if controls and (unconfigured or stress or streaming or markdown):
         raise ValueError("controls acceptance requires a configured layout without another scenario")
     if markdown and (presentation != "inline" or unconfigured or stress or streaming):
@@ -487,7 +536,7 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
               "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=checkout, text=True).strip(),
               "dirty": subprocess.check_output(["git", "status", "--porcelain"], cwd=checkout, text=True),
               "captures": [], "passed": False, "tui": presentation, "ui": detail, "entry": entry, "stress": stress, "fresh_install": fresh_install,
-              "unconfigured": unconfigured, "streaming": streaming, "markdown": markdown, "controls": controls, "terminal_owner": "private-headless-tmux", "gui_windows_created": 0}
+              "unconfigured": unconfigured, "streaming": streaming, "markdown": markdown, "controls": controls, "activity": activity, "terminal_owner": "private-headless-tmux", "gui_windows_created": 0}
 
     diff = subprocess.check_output(["git", "diff", "HEAD", "--binary"], cwd=checkout)
     (output / "source.diff").write_bytes(diff)
@@ -535,7 +584,10 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
         provider.stress = stress
         provider.streaming = streaming
         provider.markdown = markdown
+        provider.activity = activity
         workspace = prepare_unconfigured_workspace(root) if unconfigured else prepare_fixture_workspace(root, provider)
+        if activity:
+            (workspace / ".omegon/profile.json").write_text(json.dumps({"permissions": {"tools": {"bash": "allow"}}}) + "\n")
         if fresh_install and not unconfigured:
             (workspace / ".omegon/profile.json").unlink()
         if streaming:
@@ -553,8 +605,12 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
                 if contents and not contents.endswith("\n"):
                     return False
                 records.extend(json.loads(line) for line in contents.splitlines() if line)
+            styled = tmux("capture-pane", "-e", "-p", "-t", "run:0.0")
+            activity_visible = any(span["fg"] == 255 and span["bg"] == 235
+                                   and span["text"].strip() in ("Working", "Thinking", "Responding", "Canceling")
+                                   for span in ansi_spans(styled))
             return reply_ready(screen(), history(), f"TUI_FIXTURE_REPLY_{number}", presentation, detail,
-                               runtime_idle=authority_runtime_idle(records))
+                               runtime_idle=authority_runtime_idle(records), activity_visible=activity_visible)
 
         executable = binary
         if entry:
@@ -564,7 +620,7 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
         command = tui_command(executable, workspace, log, None if entry else presentation, None if entry else detail, unconfigured=unconfigured)
         # Start with an explicit environment, so real credentials/plugins cannot leak into the fixture.
         environment = tui_environment(root, fresh_install=fresh_install, unconfigured=unconfigured)
-        if controls:
+        if controls or activity:
             environment.pop("NO_COLOR", None)
         if entry:
             environment["OMEGON_BIN"] = str(binary)
@@ -594,6 +650,91 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
             if "semantic frontend is unavailable" in screen():
                 raise AssertionError("startup exposed an unavailable session projection")
             capture("01-startup")
+            if activity:
+                def activity_snapshot(name, phase, tail_marker=None, tool=False):
+                    def phase_visible():
+                        current = screen()
+                        return phase in current and "Ctrl+C cancel" in current and (not tool or "sleep 8" in current)
+                    wait_for(phase_visible, f"{name} activity visible", seconds=12)
+                    capture(f"activity-{name}")
+                    capture(f"activity-{name}-primary", primary=True)
+                    styled = output / f"activity-{name}.ansi"
+                    styled.write_text(tmux("capture-pane", "-e", "-p", "-t", "run:0.0"))
+                    current = screen()
+                    if presentation == "inline":
+                        assert_inline_activity(current, phase, tail_marker)
+                        old = tmux("capture-pane", "-p", "-S", "-", "-E", "-1", "-t", "run:0.0")
+                        assert "Ctrl+C cancel" not in old, "transient activity was published into native scrollback"
+                    spans = ansi_spans(styled.read_text())
+                    assert any(phase in span["text"] and span["fg"] == 255 and span["bg"] == 235 for span in spans), "activity phase lacks neutral strip role"
+                    assert any("Ctrl+C cancel" in span["text"] and span["fg"] == 244 and span["bg"] == 235 for span in spans), "activity cancel hint lacks secondary strip role"
+                    if tool:
+                        assert any("bash" in span["text"] and span["fg"] == 248 and span["bg"] == 235 for span in spans), "running tool name is absent from activity details"
+                        assert "sleep 8" in current, "running tool summary is absent"
+                    ledger.setdefault("activity_checkpoints", []).append({"name": name, "phase": phase,
+                        "styled_file": styled.name, "sha256": digest(styled), "tool_running": tool})
+
+                def activity_idle_visible():
+                    styled = tmux("capture-pane", "-e", "-p", "-t", "run:0.0")
+                    return "Ctrl+C cancel" not in screen() and not any(
+                        span["fg"] == 255 and span["bg"] == 235
+                        and re.search(r"\b(?:Working|Thinking|Responding|Canceling)\b", span["text"])
+                        for span in ansi_spans(styled))
+
+                def idle_after_cancel():
+                    records = []
+                    for journal in root.rglob("*.authority.jsonl"):
+                        contents = journal.read_text()
+                        if contents and not contents.endswith("\n"):
+                            return False
+                        records.extend(json.loads(line) for line in contents.splitlines() if line)
+                    return authority_runtime_idle(records) and activity_idle_visible()
+
+                action("send-keys", "-t", "run:0.0", "-l", "exercise the local activity fixture")
+                action("send-keys", "-t", "run:0.0", "Enter")
+                wait_for(provider.activity_stages[0].is_set, "initial request held")
+                activity_snapshot("working", "Working")
+                provider.release_activity[0].set()
+                wait_for(provider.activity_stages[1].is_set, "reasoning delta held")
+                activity_snapshot("thinking", "Thinking")
+                provider.release_activity[1].set()
+                wait_for(provider.activity_stages[2].is_set, "response delta held")
+                activity_snapshot("responding", "Responding", "ACTIVITY_LIVE_TAIL")
+                provider.release_activity[2].set()
+                activity_snapshot("tool", "Working", tool=True)
+                wait_for(provider.activity_stages[3].is_set, "tool continuation held")
+                tool_messages = [message for message in provider.request_bodies[1]["messages"] if message.get("role") == "tool"]
+                assert any("ACTIVITY_TOOL_DONE" in json.dumps(message) for message in tool_messages), "real bounded bash result missing from continuation"
+                activity_snapshot("continuation", "Responding", "ACTIVITY_CONTINUATION_TAIL")
+                provider.release_activity[3].set()
+                wait_for(lambda: turn_settled(2) and activity_idle_visible(), "completed activity clears")
+                capture("activity-idle")
+                assert "Ctrl+C cancel" not in history(), "completed activity persisted in transcript"
+                action("send-keys", "-t", "run:0.0", "-l", "cancel the next local request")
+                action("send-keys", "-t", "run:0.0", "Enter")
+                wait_for(provider.activity_stages[4].is_set, "cancel request held")
+                activity_snapshot("before-cancel", "Working")
+                action("send-keys", "-t", "run:0.0", "C-c")
+                wait_for(idle_after_cancel, "cancel clears activity")
+                capture("activity-cancelled")
+                provider.release_activity[4].set()
+                action("send-keys", "-t", "run:0.0", "-l", "recover after cancellation")
+                action("send-keys", "-t", "run:0.0", "Enter")
+                wait_for(lambda: turn_settled(4) and activity_idle_visible(), "new turn works after cancellation")
+                capture("activity-recovered", primary=True)
+                assert "CANCELLED_FIXTURE_MUST_NOT_PUBLISH" not in history(), "cancelled response leaked after recovery"
+                assert "Ctrl+C cancel" not in history(), "transient phase was retained after recovery"
+                assert provider.requests == 4 and digest(binary) == ledger["binary_sha256"]
+                ledger["activity_checks"] = {"local_requests": 4, "paid_requests": 0, "live_checkpoints": 6,
+                    "real_bash_tool": True, "tool_summary": True, "idle_clears": True,
+                    "cancel_clears": True, "recovery_turn": True, "native_activity_not_published": True}
+                action("send-keys", "-t", "run:0.0", "-l", "/quit")
+                action("send-keys", "-t", "run:0.0", "Enter")
+                wait_for(lambda: "TUI_EXIT_0" in screen(), "activity clean TUI exit")
+                assert tmux("display-message", "-p", "-t", "run:0.0", "#{alternate_on}:#{mouse_any_flag}").strip() == "0:0"
+                capture("activity-shell-return")
+                ledger["passed"] = True
+                return
             if controls:
                 control_captures = {}
                 def control_capture(name):
@@ -675,7 +816,7 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
                          "unfinished Markdown paragraph reaches native scrollback", seconds=12)
                 capture("markdown-unfinished-paragraph-primary", primary=True)
                 capture("markdown-unfinished-paragraph-viewport")
-                assert_inline_working_status(screen())
+                assert_inline_activity(screen())
                 live_styled = output / "markdown-unfinished-paragraph-styled.ansi"
                 live_styled.write_text(tmux("capture-pane", "-e", "-p", "-S", "-", "-E", "-1", "-t", "run:0.0"))
                 assert "**live bold emphasis**" not in live_scrollback(), "completed inline span remained raw while paragraph was unfinished"
@@ -696,7 +837,7 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
                     wait_for(lambda: f"MD_{label}_END" in history(), f"Markdown stage {stage} published")
                     capture(f"markdown-{stage}-primary", primary=True)
                     capture(f"markdown-{stage}-viewport")
-                    assert_inline_working_status(screen())
+                    assert_inline_activity(screen())
                     styled = output / f"markdown-{stage}-styled.ansi"
                     styled.write_text(tmux("capture-pane", "-e", "-p", "-S", "-", "-t", "run:0.0"))
                     ledger.setdefault("markdown_checkpoints", []).append({"stage": stage, "width": width,
@@ -719,7 +860,7 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
                 capture("markdown-complete-primary", primary=True)
                 ledger["markdown_checks"] = {"live_checkpoints": 4, "widths": [120, 72, 160],
                     "word_wrapping": True, "terminal_styles": True, "code_indentation": True,
-                    "working_status_inside_composer": True,
+                    "activity_below_live_tail": True,
                     "local_requests": provider.requests, "paid_requests": 0}
                 action("send-keys", "-t", "run:0.0", "-l", "/quit")
                 action("send-keys", "-t", "run:0.0", "Enter")
@@ -1036,6 +1177,9 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
             raise
         finally:
             ledger["provider_requests"] = provider.requests
+            if activity:
+                ledger["activity_fixture"] = {"stages_sent": [event.is_set() for event in provider.activity_stages],
+                    "stages_released": [event.is_set() for event in provider.release_activity]}
             if streaming or markdown:
                 ledger["streaming_fixture"] = {"stages_sent": [event.is_set() for event in provider.stream_stages],
                     "stages_released": [event.is_set() for event in provider.release_stages]}
@@ -1078,6 +1222,7 @@ if __name__ == "__main__":
     parser.add_argument("--tui", choices=["inline", "fullscreen"], default="fullscreen")
     parser.add_argument("--ui", choices=["active", "full"], default="active")
     parser.add_argument("--entry", choices=["om", "omegon"], help="test the fixed-build launcher default without UI flags")
+    parser.add_argument("--activity", action="store_true", help="gate live phases, real bounded tool activity, cancel, and recovery")
     parser.add_argument("--controls", action="store_true", help="gate neutral control hierarchy and selection without inference")
     parser.add_argument("--markdown", action="store_true", help="gate live Markdown styles, word wrapping, code indentation, and resize")
     parser.add_argument("--streaming", action="store_true", help="gate stable streamed lines in primary scrollback before completion, resize, and interleave a read tool")
@@ -1085,4 +1230,4 @@ if __name__ == "__main__":
     parser.add_argument("--fresh-install", action="store_true", help="verify profile-free non-child startup without a posture wizard")
     parser.add_argument("--unconfigured", action="store_true", help="verify no-model, no-credential startup and draft preservation through connection cancellation")
     arguments = parser.parse_args()
-    run(arguments.binary, arguments.output.resolve(), arguments.tui, arguments.ui, arguments.entry, arguments.stress, arguments.fresh_install, arguments.unconfigured, arguments.streaming, arguments.markdown, arguments.controls)
+    run(arguments.binary, arguments.output.resolve(), arguments.tui, arguments.ui, arguments.entry, arguments.stress, arguments.fresh_install, arguments.unconfigured, arguments.streaming, arguments.markdown, arguments.controls, arguments.activity)

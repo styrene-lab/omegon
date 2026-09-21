@@ -166,9 +166,7 @@ impl App {
                 entries: Vec::new(),
             }
         };
-        let engine_status_height = u16::from(
-            self.ui_surfaces.activity && self.ui_presentation.level != UiPresentationLevel::Full,
-        );
+        let engine_status_height = u16::from(self.live_action_height() > 0);
         let raw_tool_inspection_height = activity_preferred_height_for_level(
             &activity_projection,
             area.width,
@@ -343,7 +341,7 @@ impl App {
                 (Rect::ZERO, tool_inspection_area)
             };
             if status_area.height > 0 {
-                self.render_engine_status_row(status_area, frame, self.theme.as_ref());
+                self.render_live_action(status_area, frame);
             }
             render_activity_panel_for_level(
                 activity_area,
