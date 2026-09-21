@@ -107,12 +107,14 @@ jobs:
       - name: Run omegon tests
         env:
           OMEGON_NERD_FONT: "1"
-        run: cargo test -p omegon --bin omegon -- --nocapture
+        # Match just test-rust: these tests exercise process-global cwd/env/profile state.
+        run: cargo test -p omegon --bin omegon -- --nocapture --test-threads=1
 
   rust-integration:
     name: Rust integration tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Cargo's feature-aware --tests selection includes the serialized binary suite.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - name: Install Rust toolchain
@@ -120,7 +122,8 @@ jobs:
       - name: Run omegon integration tests
         env:
           OMEGON_NERD_FONT: "1"
-        run: cargo test -p omegon --tests -- --nocapture
+        # Keep feature-gated targets excluded by Cargo's default feature selection.
+        run: cargo test -p omegon --tests -- --nocapture --test-threads=1
 
   unix-terminal-detachment:
     name: Unix terminal detachment acceptance
