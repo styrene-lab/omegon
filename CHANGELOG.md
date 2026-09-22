@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- Document native Headroom's unre-based archived-WIP status and the settings/codescan integration debt and fresh validation required before revival.
 - Add deterministic `headroom-understanding-eval` tooling for checking whether compressed headroom fixtures can answer required-fact and authored understanding questions with CCR retrieval when needed.
 - Add understanding-evaluator coverage to headroom pack evaluation so pack artifacts report question pass/fail counts alongside compression savings and restoration metrics.
 - Document the strict core headroom pack readiness gate, including the current 96% savings, zero-restoration, and 103/103 understanding-question pass result.

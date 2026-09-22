@@ -5,7 +5,20 @@ tags = ["headroom","benchmarks","next-session"]
 
 # Native Headroom — Next Session Plan
 
-## Current evidence
+## Preservation status and revival prerequisites
+
+`workstream/native-headroom` is deliberately unre-based archived WIP, not a production-ready integration. It retains its original base `196ec5266847882f655ebe55e6e163c0dca2eb6b`; canonical main at preservation was `7b2da402073d84e54f3caffbb13845a007161c62`. The attempted rebase was aborted.
+
+Before revisiting this work:
+
+- Rebase onto then-current main and resolve integration debt before claiming readiness.
+- Integrate Headroom settings through the shared settings projection, including mutation routing and persistence semantics. Do not restore the obsolete inline settings renderer.
+- Adapt search limits and telemetry to the managed codescan binding and contracts boundary. Do not restore the obsolete embedded codescan engine architecture.
+- Run fresh focused tests, applicable broader integration gates, and the live A/B matrix below. Keep compression opt-in/default-off until new evidence supports changing that posture.
+
+Preservation validation is limited to `git diff --check`; no tests or benchmarks were rerun. The results below are historical evidence, not validation against current main.
+
+## Historical evidence
 
 - Strict core pack passes with `96%` evaluated savings, `0` restored facts, and `103/103` understanding questions passing.
 - First real sparse-critical JSON A/B passed functionally and showed provider-token reduction:
