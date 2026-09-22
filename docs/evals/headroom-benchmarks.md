@@ -66,6 +66,19 @@ python3 scripts/benchmark_harness.py ai/benchmarks/tasks/headroom-retrieve-origi
 
 Do not expand to a full cross-harness matrix until single-task Omegon runs are stable and the result artifacts show useful headroom telemetry.
 
+## Next A/B task matrix
+
+Next session should broaden live Omegon A/B evidence beyond the sparse-critical JSON sentinel. Run these shapes in order, keeping each task as an off/on pair with `--headroom-ab-real` and recording provider-token totals, task status, headroom eval status, restored fact count, and any retrieval behavior:
+
+1. `headroom-log-failure-diagnosis` — long failing build/test log; answer must name the failing test/error line and relevant source path.
+2. `headroom-diff-risk-review` — large patch review; answer must name changed files/functions and at least one seeded behavioral or security risk.
+3. `headroom-retrieval-required-original` — compressed output intentionally omits an original-only detail; answer must use CCR retrieval and include that detail.
+4. `headroom-markdown-decision-recall` — long design doc; answer must cite a decision, rejected alternative, and constraint.
+5. `headroom-code-api-explain` — large Rust module; answer must explain a target function contract, edge case, and relevant test/call site.
+6. `headroom-debug-from-log-to-code` — failure log plus source inspection; answer must connect symptom to source mechanism and, where fixture-safe, propose or apply the minimal fix.
+
+Priority rationale: JSON already has a positive real A/B result. Log and diff are in the current default auto-kind candidate set, so they need live evidence first. Markdown, code, and broad plain text show strong corpus savings, but should remain gated until live task evidence proves no reasoning degradation.
+
 ## Acceptance posture
 
 These benchmarks are evidence-gathering tasks. Native headroom remains default-off until benchmark results show that `headroom.mode=on` preserves task success while reducing context pressure.
