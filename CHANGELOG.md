@@ -121,6 +121,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Fix headroom A/B report token-delta wording so increased on-run token usage is reported as an increase rather than mislabeled as savings.
 - Treat DuckDuckGo HTTP 202 Accepted responses as rate limiting so DDG throttle pages do not fall through into parser diagnostics.
 - Classify DuckDuckGo zero-key search responses before parsing so no-result pages, bot/challenge pages, consent/region interstitials, and unexpected HTML shells produce actionable diagnostics instead of a generic parser failure.
 - Stop advertising Brotli in zero-key web-search requests so DuckDuckGo does not return `br`-encoded HTML that the current reqwest client cannot decode before parsing.

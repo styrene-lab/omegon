@@ -2260,9 +2260,14 @@ def render_headroom_ab_report(summaries: list[dict[str, Any]]) -> str:
         off_tokens = off.get("total_tokens")
         on_tokens = on.get("total_tokens")
         if isinstance(off_tokens, int) and isinstance(on_tokens, int) and off_tokens > 0:
-            delta = off_tokens - on_tokens
-            pct = int((delta * 100) / off_tokens)
-            lines.append(f"  token delta: {delta} ({pct}% saved vs off)")
+            delta = on_tokens - off_tokens
+            pct = int((abs(delta) * 100) / off_tokens)
+            if delta < 0:
+                lines.append(f"  token delta: {delta} ({pct}% reduction vs off)")
+            elif delta > 0:
+                lines.append(f"  token delta: +{delta} ({pct}% increase vs off)")
+            else:
+                lines.append("  token delta: 0 (no change vs off)")
         else:
             lines.append("  token delta: unavailable")
         lines.append("")
