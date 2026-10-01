@@ -1256,5 +1256,12 @@
     "opened": "2026-07-21T23:48:32Z",
     "released": "2026-07-24T17:16:43Z",
     "notes": []
+  },
+  "nightly": {
+    "status": "nightly",
+    "channel": "nightly",
+    "version": "0.29.0-nightly.20261001",
+    "last_build": "2026-10-01T14:33:01Z",
+    "build_count": 1
   }
 }
