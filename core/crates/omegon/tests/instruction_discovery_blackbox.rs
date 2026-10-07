@@ -88,6 +88,9 @@ impl Drop for FixtureProvider {
 }
 
 fn read_request(stream: &mut TcpStream) -> Result<Value> {
+    // Accepted sockets can inherit the listener's nonblocking flag on macOS.
+    // The request reader uses a bounded blocking timeout, not readiness polling.
+    stream.set_nonblocking(false)?;
     // Agent setup may still be settling managed services when the connector opens
     // this socket. Leave headroom under the bounded CLI deadline on loaded CI.
     stream.set_read_timeout(Some(Duration::from_secs(15)))?;
