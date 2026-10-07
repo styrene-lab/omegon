@@ -14,6 +14,11 @@ python3 scripts/tui_acceptance.py --binary target/dev-release/omegon --tui inlin
 
 The runner uses a temporary workspace and explicit user environment. Before sending the first draft, it opens F2, inspects the current session, switches to Work, and returns to the preserved draft. It submits two prompts through terminal keystrokes, checks for distinct fixture replies, resizes from 120×40 to 90×30, and captures the resulting terminal cells. It invokes `/session-export scrollback`, verifies the saved primary screen contains the second reply, and checks that fullscreen content and terminal mode preferences are restored. It then opens Settings during a gated provider request, switches to the Project browser Work tab, denies a real write-tool permission prompt, verifies that the Work tab is restored, and checks that the denied file remains absent. The isolated profile explicitly requires write approval; temporary paths alone do not require it. A timeout fails the run and retains the last screen. Cleanup closes only the owned tmux server and terminates its process group if terminal closure cannot stop it.
 
+Inference uses the explicit loopback endpoint. The child environment routes other
+HTTP(S) requests through the fixture's rejecting proxy. The manifest records
+blocked HTTPS CONNECT targets, including background discovery and update checks.
+This is HTTP-client isolation for the fixture, not an operating-system network sandbox.
+
 Inspect the numbered `.txt` screens, `omegon.log`, and `manifest.json`. The manifest identifies source revision and dirty files, executable path and SHA-256, process/start identity, capture times and dimensions, hashes, and request count. Keep these artifacts outside Git. The log may contain local fixture prompt/context data.
 
 The fixture contract tests run without tmux or Cargo:

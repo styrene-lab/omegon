@@ -59,17 +59,35 @@ def test_quiet_startup_gate_rejects_catalog_and_duplicate_summary():
 
 
 def test_unconfigured_launch_has_no_implied_provider():
-    with tempfile.TemporaryDirectory() as folder:
+    with tempfile.TemporaryDirectory() as folder, runner.fixture_provider() as provider:
         root = Path(folder)
         workspace = runner.prepare_unconfigured_workspace(root)
         assert list(workspace.iterdir()) == [], "unconfigured workspace must have no fixture configuration"
         command = runner.tui_command(Path("/binary"), workspace, Path("/log"), unconfigured=True)
         assert "--model" not in command
-        environment = runner.tui_environment(root, unconfigured=True)
+        environment = runner.tui_environment(root, provider.url, unconfigured=True)
         assert environment["HOME"] == str(root)
         for key in ("OMEGON_CHILD", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
                     "OMEGON_PROJECT_ENDPOINT_616363657074616E6365_TOKEN"):
             assert key not in environment, f"unconfigured launch has {key}"
+
+
+def test_fixture_environment_rejects_external_provider_connections():
+    from http.client import HTTPConnection
+    with tempfile.TemporaryDirectory() as folder, runner.fixture_provider() as provider:
+        environment = runner.tui_environment(Path(folder), provider.url)
+        assert environment["OMEGON_PROJECT_ENDPOINT_616363657074616E6365_TOKEN"] == "local-only"
+        for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+            assert environment[key] == provider.url
+        assert environment["NO_PROXY"] == "127.0.0.1,localhost"
+        connection = HTTPConnection("127.0.0.1", provider.server_port, timeout=2)
+        try:
+            connection.request("CONNECT", "api.openai.com:443")
+            assert connection.getresponse().status == 403
+            assert provider.blocked_connects == {"api.openai.com:443"}
+            assert provider.requests == 0
+        finally:
+            connection.close()
 
 
 def test_unconfigured_startup_gate_rejects_phantom_route_metadata():
@@ -440,6 +458,7 @@ if __name__ == "__main__":
     test_provider_can_request_a_bounded_permission_probe()
     test_quiet_startup_gate_rejects_catalog_and_duplicate_summary()
     test_unconfigured_launch_has_no_implied_provider()
+    test_fixture_environment_rejects_external_provider_connections()
     test_unconfigured_startup_gate_rejects_phantom_route_metadata()
     test_unconfigured_cancel_gate_requires_one_unsent_draft()
     test_unconfigured_session_gate_rejects_admitted_prompts_and_model_requests()

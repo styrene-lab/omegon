@@ -226,6 +226,13 @@ def fixture_provider():
         def log_message(self, *_args):
             pass
 
+        def do_CONNECT(self):
+            # Act only as a rejecting proxy for background discovery/update
+            # clients. Never forward traffic outside the loopback fixture.
+            with server.request_lock:
+                server.blocked_connects.add(self.path)
+            self.send_error(403, "External requests disabled by local fixture")
+
         def do_GET(self):
             if self.path == "/v1/models":
                 body = {"data": [{"id": "gpt-5.4", "object": "model"}]}
@@ -404,6 +411,7 @@ def fixture_provider():
     server.release_stages = [threading.Event() for _ in range(5)]
     server.stream_read_path = None
     server.request_bodies = []
+    server.blocked_connects = set()
     server.stream_waiting = threading.Event()
     server.release_stream = threading.Event()
     server.cancel_waiting = threading.Event()
@@ -472,12 +480,15 @@ def prepare_unconfigured_workspace(root):
     return workspace
 
 
-def tui_environment(root, *, fresh_install=False, unconfigured=False):
+def tui_environment(root, fixture_url, *, fresh_install=False, unconfigured=False):
     # Never inherit operator credentials, config locations, or launcher child state.
     environment = {"PATH": os.environ["PATH"], "HOME": str(root), "OMEGON_HOME": str(root / "omegon-home"),
                    "XDG_CONFIG_HOME": str(root / ".config"), "TERM": "xterm-256color", "LANG": "en_US.UTF-8",
-                   "NO_COLOR": "1"}
+                   "NO_COLOR": "1", "HTTP_PROXY": fixture_url, "HTTPS_PROXY": fixture_url,
+                   "ALL_PROXY": fixture_url, "NO_PROXY": "127.0.0.1,localhost"}
     if not unconfigured:
+        # Startup still checks the provider-prefix credential. Keep its dummy
+        # value but reject external discovery through the fixture proxy above.
         environment.update({"OPENAI_API_KEY": "local-only",
                             "OMEGON_PROJECT_ENDPOINT_616363657074616E6365_TOKEN": "local-only"})
     if not (fresh_install or unconfigured):
@@ -641,7 +652,7 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
             executable.chmod(0o755)
         command = tui_command(executable, workspace, log, None if entry else presentation, None if entry else detail, unconfigured=unconfigured)
         # Start with an explicit environment, so real credentials/plugins cannot leak into the fixture.
-        environment = tui_environment(root, fresh_install=fresh_install, unconfigured=unconfigured)
+        environment = tui_environment(root, provider.url, fresh_install=fresh_install, unconfigured=unconfigured)
         if controls or activity or menu_backdrop:
             environment.pop("NO_COLOR", None)
         if entry:
@@ -1282,6 +1293,7 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
             raise
         finally:
             ledger["provider_requests"] = provider.requests
+            ledger["blocked_external_connects"] = sorted(provider.blocked_connects)
             if activity:
                 ledger["activity_fixture"] = {"stages_sent": [event.is_set() for event in provider.activity_stages],
                     "stages_released": [event.is_set() for event in provider.release_activity]}
