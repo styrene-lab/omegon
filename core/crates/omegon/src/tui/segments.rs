@@ -301,13 +301,11 @@ pub(crate) fn summarize_tool_args(tool_name: &str, args: Option<&str>) -> Option
                     let limit = value.get("limit").and_then(json_u64);
                     let range = match (offset, limit) {
                         (Some(offset), Some(limit)) if limit > 0 => {
-                            let first = offset.saturating_add(1);
-                            let last = offset.saturating_add(limit);
+                            let first = offset.max(1);
+                            let last = first.saturating_add(limit - 1);
                             Some(format!("lines {first}–{last}"))
                         }
-                        (Some(offset), _) => {
-                            Some(format!("from line {}", offset.saturating_add(1)))
-                        }
+                        (Some(offset), _) => Some(format!("from line {}", offset.max(1))),
                         (None, Some(limit)) => Some(format!("first {limit} lines")),
                         (None, None) => None,
                     };
@@ -3377,7 +3375,34 @@ mod tests {
         )
         .expect("summary");
 
-        assert_eq!(summary, "src/lib.rs · lines 219–563");
+        assert_eq!(summary, "src/lib.rs · lines 218–562");
+    }
+
+    #[tokio::test]
+    async fn summarize_read_range_matches_tool_one_based_offset() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), "first\nsecond\nthird\nfourth\n").unwrap();
+        for offset in [0, 1, 2] {
+            let result = crate::tools::read::execute(file.path(), Some(offset), Some(2))
+                .await
+                .unwrap();
+            let first = result.details["offset"].as_u64().unwrap();
+            let count = result.details["shownLines"].as_u64().unwrap();
+            let args = serde_json::json!({
+                "path": file.path(), "offset": offset, "limit": 2
+            })
+            .to_string();
+            let summary = summarize_tool_args("read", Some(&args)).unwrap();
+            assert_eq!(
+                summary,
+                format!(
+                    "{} · lines {}–{}",
+                    file.path().display(),
+                    first,
+                    first + count - 1
+                )
+            );
+        }
     }
 
     #[test]
@@ -4048,7 +4073,7 @@ mod tests {
             text.contains("/Users/wilson/project/src/ops/forge.rs"),
             "{text}"
         );
-        assert!(text.contains("lines 41–60"), "{text}");
+        assert!(text.contains("lines 40–59"), "{text}");
         assert!(text.contains("3 lines"), "{text}");
         assert!(!text.contains(DETAILS_HINT_LABEL), "{text}");
     }

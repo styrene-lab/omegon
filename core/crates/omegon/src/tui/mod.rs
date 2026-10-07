@@ -8564,8 +8564,8 @@ mod slash_command_parsing_tests {
             text.push_str(terminal.backend().buffer()[(x, 0)].symbol());
         }
 
-        assert!(text.contains("workstreams×1"), "{text}");
-        assert!(text.contains("waiting 2/5"), "{text}");
+        assert!(text.contains("1 workstreams · current:"), "{text}");
+        assert!(text.contains("2/5 waiting"), "{text}");
         assert!(text.contains("release hardening"), "{text}");
     }
 
