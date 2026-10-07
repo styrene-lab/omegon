@@ -2331,11 +2331,12 @@ mod tests {
             .1;
 
         assert!(route_loop.contains("semantic_facts.start_step()?"));
-        assert!(route_loop.contains("semantic_facts.prepare_model_request"));
+        assert!(route_loop.contains("crate::loop_session::TurnRequestPreparation"));
+        assert!(route_loop.contains("preparation.capture("));
         assert!(route_loop.contains("semantic_facts.record_tool_calls"));
         assert!(route_loop.contains("semantic_facts.record_tool_results"));
         assert!(route_loop.contains("semantic_facts.close_step"));
-        assert!(route_loop.contains("semantic_request: semantic_request.as_ref()"));
+        assert!(route_loop.contains("route.dispatch(preparation.dispatch("));
         for concrete in [
             "SessionAuthority",
             "StepStarted",

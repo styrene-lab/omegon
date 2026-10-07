@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::bridge::{LlmBridge, LlmEvent, LlmMessage, StreamOptions};
 use crate::conversation::{AssistantMessage, ToolCall};
+use crate::model_request::{PreparedModelRequest, RequestInputs, RequestPolicy};
 use crate::session_authority::{RouteLeaseRecorded, SessionAuthorityHandle};
 use crate::upstream_errors::{
     TransientFailureKind, UpstreamFailureLogEntry, append_upstream_failure_log,
@@ -408,21 +409,50 @@ impl ResolvedProviderRoute {
         tools: &[omegon_traits::ToolDefinition],
         options: &StreamOptions,
     ) -> anyhow::Result<tokio::sync::mpsc::Receiver<LlmEvent>> {
-        validate_admitted_request(self.admitted_capabilities.as_ref(), tools, options)?;
-        self.bridge.validate_request_capabilities(tools, options)?;
-        let lease = route_lease(
-            &self.selected_model,
-            &self.native_model,
-            Some(&self.credential_source_class),
-            None,
-            self.endpoint_provenance.as_ref(),
+        self.prepare_request(
+            owner,
+            RequestInputs {
+                system: system_prompt,
+                messages,
+                tools,
+                options,
+                policy: RequestPolicy::Compatibility,
+            },
+        )?
+        .stream()
+        .await
+    }
+
+    pub(crate) fn prepare_request<'a>(
+        &'a self,
+        owner: RouteLeaseOwner<'_>,
+        inputs: RequestInputs<'a>,
+    ) -> anyhow::Result<PreparedModelRequest<'a, ()>> {
+        anyhow::ensure!(
+            !matches!(inputs.policy, RequestPolicy::Auxiliary { .. })
+                || matches!(owner, RouteLeaseOwner::Step(_)),
+            "auxiliary request requires sessionless step evidence"
+        );
+        validate_admitted_request(
+            self.admitted_capabilities.as_ref(),
+            inputs.tools,
+            inputs.options,
         )?;
-        owner.record(&lease)?;
-        let mut native_options = options.clone();
-        native_options.model = Some(self.native_model.clone());
-        self.bridge
-            .stream(system_prompt, messages, tools, &native_options)
-            .await
+        PreparedModelRequest::prepare(
+            self.bridge.as_ref(),
+            inputs,
+            Some(&self.native_model),
+            |_| {
+                let lease = route_lease(
+                    &self.selected_model,
+                    &self.native_model,
+                    Some(&self.credential_source_class),
+                    None,
+                    self.endpoint_provenance.as_ref(),
+                )?;
+                owner.record(&lease)
+            },
+        )
     }
 }
 
@@ -1288,22 +1318,21 @@ pub(crate) async fn compact_loop_route(
     bridge: &dyn LlmBridge,
     request: LoopCompactionRequest<'_>,
 ) -> anyhow::Result<String> {
-    bridge.validate_request_capabilities(&[], request.options)?;
-    const MAX_COMPACTION_CHARS: usize = 100_000;
+    const MAX_COMPACTION_BYTES: usize = 100_000;
     let (_, _, system) = crate::session_compaction::summary_prompt()?;
     let authority_payload = request
         .authority
         .map(|authority| authority.provider_payload(request.payload))
         .unwrap_or(request.payload);
     let authority_input_too_large =
-        request.authority.is_some() && authority_payload.len() > MAX_COMPACTION_CHARS;
-    let payload = if authority_payload.len() > MAX_COMPACTION_CHARS && request.authority.is_none() {
+        request.authority.is_some() && authority_payload.len() > MAX_COMPACTION_BYTES;
+    let payload = if authority_payload.len() > MAX_COMPACTION_BYTES && request.authority.is_none() {
         tracing::warn!(
             original = authority_payload.len(),
-            truncated = MAX_COMPACTION_CHARS,
+            truncated = MAX_COMPACTION_BYTES,
             "compaction payload truncated to fit provider limits"
         );
-        &authority_payload[..authority_payload.floor_char_boundary(MAX_COMPACTION_CHARS)]
+        &authority_payload[..authority_payload.floor_char_boundary(MAX_COMPACTION_BYTES)]
     } else {
         authority_payload
     };
@@ -1319,66 +1348,77 @@ pub(crate) async fn compact_loop_route(
     let serving_model = bridge
         .native_model_hint()
         .map_or_else(|| requested_model.to_string(), str::to_string);
-    if let Some(authority) = request.authority {
-        let lease = route_lease(
-            request.selected_model,
-            &serving_model,
-            bridge.credential_source_class_hint(),
-            authority.compaction_request_id(),
-            bridge.endpoint_route_provenance_hint(),
-        )?;
-        let lease_id = if authority.is_idle() {
-            None
-        } else {
-            let (Some(session_authority), Some(turn_id)) =
-                (request.scope.authority.as_ref(), request.scope.turn_id)
-            else {
-                anyhow::bail!("turn compaction requires complete session authority");
-            };
-            RouteLeaseOwner::Session {
-                authority: session_authority,
-                turn_id,
+    let prepared = PreparedModelRequest::prepare(
+        bridge,
+        RequestInputs {
+            system: &system,
+            messages: &messages,
+            tools: &[],
+            options: request.options,
+            policy: RequestPolicy::Compaction,
+        },
+        None,
+        |_| {
+            if let Some(authority) = request.authority {
+                let lease = route_lease(
+                    request.selected_model,
+                    &serving_model,
+                    bridge.credential_source_class_hint(),
+                    authority.compaction_request_id(),
+                    bridge.endpoint_route_provenance_hint(),
+                )?;
+                let lease_id = if authority.is_idle() {
+                    None
+                } else {
+                    let (Some(session_authority), Some(turn_id)) =
+                        (request.scope.authority.as_ref(), request.scope.turn_id)
+                    else {
+                        anyhow::bail!("turn compaction requires complete session authority");
+                    };
+                    RouteLeaseOwner::Session {
+                        authority: session_authority,
+                        turn_id,
+                    }
+                    .record(&lease)?;
+                    Some(lease.lease_id)
+                };
+                authority.prepare(crate::loop_driver::LoopCompactionRouteEvidence {
+                    lease_id,
+                    selected_provider_id: lease.selected_provider_id,
+                    selected_model_id: lease.selected_model_id,
+                    serving_provider_id: lease.serving_provider_id,
+                    serving_model_id: lease.serving_model_id,
+                    schema_dialect: lease.schema_dialect,
+                    credential_source_class: lease.credential_source_class,
+                    fallback_reason: lease.fallback_reason,
+                    contribution_generation_id: lease.contribution_generation_id,
+                    route_policy: lease.route_policy,
+                    endpoint_id: lease.endpoint_id,
+                    adapter_id: lease.adapter_id,
+                    inventory_generation: lease.inventory_generation,
+                })?;
+                if authority_input_too_large {
+                    authority.fail(
+                        crate::session_authority::CompactionRequestOutcome::ProviderFailed,
+                        "compaction_input_too_large",
+                    )?;
+                    anyhow::bail!("Compaction input exceeds provider safety limit");
+                }
+            } else {
+                record_loop_route_lease_for_request(
+                    request.scope,
+                    request.step_id,
+                    request.selected_model,
+                    &serving_model,
+                    bridge.credential_source_class_hint(),
+                    None,
+                    bridge.endpoint_route_provenance_hint(),
+                )?;
             }
-            .record(&lease)?;
-            Some(lease.lease_id)
-        };
-        authority.prepare(crate::loop_driver::LoopCompactionRouteEvidence {
-            lease_id,
-            selected_provider_id: lease.selected_provider_id,
-            selected_model_id: lease.selected_model_id,
-            serving_provider_id: lease.serving_provider_id,
-            serving_model_id: lease.serving_model_id,
-            schema_dialect: lease.schema_dialect,
-            credential_source_class: lease.credential_source_class,
-            fallback_reason: lease.fallback_reason,
-            contribution_generation_id: lease.contribution_generation_id,
-            route_policy: lease.route_policy,
-            endpoint_id: lease.endpoint_id,
-            adapter_id: lease.adapter_id,
-            inventory_generation: lease.inventory_generation,
-        })?;
-        if authority_input_too_large {
-            authority.fail(
-                crate::session_authority::CompactionRequestOutcome::ProviderFailed,
-                "compaction_input_too_large",
-            )?;
-            anyhow::bail!("Compaction input exceeds provider safety limit");
-        }
-    } else {
-        record_loop_route_lease_for_request(
-            request.scope,
-            request.step_id,
-            request.selected_model,
-            &serving_model,
-            bridge.credential_source_class_hint(),
-            None,
-            bridge.endpoint_route_provenance_hint(),
-        )?;
-    }
-    let mut rx = match bridge
-        .stream(&system, &messages, &[], request.options)
-        .await
-    {
+            Ok(())
+        },
+    )?;
+    let mut rx = match prepared.stream().await {
         Ok(receiver) => receiver,
         Err(error) => {
             if let Some(authority) = request.authority {
@@ -1415,6 +1455,15 @@ pub(crate) async fn compact_loop_route(
                     )?;
                 }
                 anyhow::bail!("Compaction LLM error: {message}")
+            }
+            LlmEvent::UpstreamFailure { failure } => {
+                if let Some(authority) = request.authority {
+                    authority.fail(
+                        crate::session_authority::CompactionRequestOutcome::ProviderFailed,
+                        "provider_error",
+                    )?;
+                }
+                return Err(failure.into());
             }
             _ => {}
         }
@@ -1460,20 +1509,57 @@ pub(crate) async fn dispatch_loop_route(
     bridge: &dyn LlmBridge,
     request: LoopRouteRequest<'_>,
 ) -> anyhow::Result<LoopRouteDispatch> {
-    bridge.validate_request_capabilities(request.tools, &request.route.options)?;
     let serving_model = bridge
         .native_model_hint()
         .unwrap_or(&request.route.serving_model)
         .to_string();
-    let durable_route = record_loop_route_lease_for_request(
-        request.scope,
-        request.step_id,
-        &request.route.selected_model,
-        &serving_model,
-        bridge.credential_source_class_hint(),
-        request.semantic_request,
-        bridge.endpoint_route_provenance_hint(),
+    let prepared = PreparedModelRequest::prepare(
+        bridge,
+        RequestInputs {
+            system: request.system_prompt,
+            messages: request.messages,
+            tools: request.tools,
+            options: &request.route.options,
+            policy: RequestPolicy::Turn,
+        },
+        None,
+        |inputs| {
+            if let Some(identity) = request.semantic_request {
+                anyhow::ensure!(
+                    identity.step_id == request.step_id
+                        && Some(identity.turn_id) == request.scope.turn_id
+                        && request.scope.authority.is_some()
+                        && request.response_facts.is_some(),
+                    "model request ownership or response authority is inconsistent"
+                );
+                crate::loop_session::validate_dispatch_capture(
+                    request
+                        .scope
+                        .authority
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("model request has no authority"))?,
+                    identity,
+                    inputs,
+                    request.route,
+                )?;
+            } else {
+                anyhow::ensure!(
+                    request.response_facts.is_none(),
+                    "response authority requires a model request"
+                );
+            }
+            record_loop_route_lease_for_request(
+                request.scope,
+                request.step_id,
+                &request.route.selected_model,
+                &serving_model,
+                bridge.credential_source_class_hint(),
+                request.semantic_request,
+                bridge.endpoint_route_provenance_hint(),
+            )
+        },
     )?;
+    let durable_route = prepared.evidence().clone();
 
     let mut attempt = 0u32;
     let message_id = Uuid::new_v4();
@@ -1481,15 +1567,7 @@ pub(crate) async fn dispatch_loop_route(
     let started = Instant::now();
     loop {
         attempt += 1;
-        let error = match bridge
-            .stream(
-                request.system_prompt,
-                request.messages,
-                request.tools,
-                &request.route.options,
-            )
-            .await
-        {
+        let error = match prepared.stream().await {
             Ok(mut receiver) => match consume_llm_stream_with_policy(
                 &mut receiver,
                 request.events,
@@ -3476,11 +3554,15 @@ mod tests {
     #[derive(Default)]
     struct CapturingCompactionAuthority {
         evidence: std::sync::Mutex<Option<crate::loop_driver::LoopCompactionRouteEvidence>>,
+        payload: Option<String>,
+        reject_evidence: bool,
+        commits: AtomicUsize,
+        failures: std::sync::Mutex<Vec<crate::session_authority::CompactionRequestOutcome>>,
     }
 
     impl crate::loop_driver::LoopCompactionAuthority for CapturingCompactionAuthority {
         fn provider_payload<'a>(&'a self, fallback: &'a str) -> &'a str {
-            fallback
+            self.payload.as_deref().unwrap_or(fallback)
         }
 
         fn compaction_request_id(&self) -> Option<Uuid> {
@@ -3495,21 +3577,343 @@ mod tests {
             &self,
             evidence: crate::loop_driver::LoopCompactionRouteEvidence,
         ) -> anyhow::Result<()> {
+            anyhow::ensure!(
+                !self.reject_evidence,
+                "required compaction evidence unavailable"
+            );
             *self.evidence.lock().unwrap() = Some(evidence);
             Ok(())
         }
 
         fn commit_done(&self, _summary: &str) -> anyhow::Result<()> {
+            self.commits.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
 
         fn fail(
             &self,
-            _outcome: crate::session_authority::CompactionRequestOutcome,
+            outcome: crate::session_authority::CompactionRequestOutcome,
             _reason: &str,
         ) -> anyhow::Result<()> {
+            self.failures.lock().unwrap().push(outcome);
             Ok(())
         }
+    }
+
+    #[derive(Default)]
+    struct PreparationBridge {
+        events: Vec<LlmEvent>,
+        idle: bool,
+        held_sender: std::sync::Mutex<Option<tokio::sync::mpsc::Sender<LlmEvent>>>,
+        inputs: std::sync::Mutex<Vec<serde_json::Value>>,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmBridge for PreparationBridge {
+        async fn stream(
+            &self,
+            system: &str,
+            messages: &[LlmMessage],
+            tools: &[omegon_traits::ToolDefinition],
+            options: &StreamOptions,
+        ) -> anyhow::Result<tokio::sync::mpsc::Receiver<LlmEvent>> {
+            assert!(tools.is_empty());
+            self.inputs.lock().unwrap().push(serde_json::json!({"system":system,"messages":messages,"model":options.model,
+                "reasoning":options.reasoning,"extended":options.extended_context,"extra":options.extra_body}));
+            let (tx, rx) = tokio::sync::mpsc::channel(self.events.len() + 1);
+            for event in &self.events {
+                tx.try_send(event.clone()).unwrap();
+            }
+            if self.idle {
+                *self.held_sender.lock().unwrap() = Some(tx);
+            }
+            Ok(rx)
+        }
+    }
+
+    fn preparation_done() -> LlmEvent {
+        LlmEvent::Done {
+            message: serde_json::json!({}),
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            provider_telemetry: None,
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn prepared_compaction_rejects_all_unsuccessful_terminals() {
+        use crate::session_authority::CompactionRequestOutcome as Outcome;
+        let failure = LlmEvent::UpstreamFailure {
+            failure: crate::upstream_errors::UpstreamResponseFailure {
+                message: "provider failure".into(),
+                retry_after_ms: None,
+            },
+        };
+        for (events, idle, expected) in [
+            (
+                vec![LlmEvent::TextDelta {
+                    delta: "partial".into(),
+                }],
+                false,
+                Outcome::Eof,
+            ),
+            (vec![preparation_done()], false, Outcome::ProviderFailed),
+            (
+                vec![
+                    LlmEvent::Error {
+                        message: "failed".into(),
+                    },
+                    preparation_done(),
+                ],
+                false,
+                Outcome::ProviderFailed,
+            ),
+            (
+                vec![
+                    failure,
+                    LlmEvent::TextDelta {
+                        delta: "must not commit".into(),
+                    },
+                    preparation_done(),
+                ],
+                false,
+                Outcome::ProviderFailed,
+            ),
+            (vec![], true, Outcome::TimedOut),
+        ] {
+            let bridge = PreparationBridge {
+                events,
+                idle,
+                ..Default::default()
+            };
+            let authority = CapturingCompactionAuthority::default();
+            let result = compact_loop_route(
+                &bridge,
+                LoopCompactionRequest {
+                    payload: "input",
+                    options: &StreamOptions::default(),
+                    selected_model: "anthropic:claude-sonnet-4-6",
+                    scope: &crate::invocation_service::InvocationScope::default(),
+                    step_id: Uuid::new_v4(),
+                    authority: Some(&authority),
+                },
+            )
+            .await;
+            assert!(result.is_err());
+            assert_eq!(authority.commits.load(Ordering::SeqCst), 0);
+            assert_eq!(*authority.failures.lock().unwrap(), [expected]);
+            if idle {
+                assert!(
+                    bridge
+                        .held_sender
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .unwrap()
+                        .is_closed()
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn prepared_compaction_preserves_input_authority_and_byte_limits() {
+        let oversized = format!("{}é", "x".repeat(99_999));
+        let scope = crate::invocation_service::InvocationScope::default();
+        let options = StreamOptions::default();
+        for reject_evidence in [false, true] {
+            let authority = CapturingCompactionAuthority {
+                payload: Some(oversized.clone()),
+                reject_evidence,
+                ..Default::default()
+            };
+            let bridge = PreparationBridge::default();
+            assert!(
+                compact_loop_route(
+                    &bridge,
+                    LoopCompactionRequest {
+                        payload: "compatibility must not replace authority",
+                        options: &options,
+                        selected_model: "anthropic:claude-sonnet-4-6",
+                        scope: &scope,
+                        step_id: Uuid::new_v4(),
+                        authority: Some(&authority),
+                    }
+                )
+                .await
+                .is_err()
+            );
+            assert!(bridge.inputs.lock().unwrap().is_empty());
+            assert_eq!(authority.commits.load(Ordering::SeqCst), 0);
+        }
+        let bridge = PreparationBridge {
+            events: vec![
+                LlmEvent::TextDelta {
+                    delta: "summary".into(),
+                },
+                preparation_done(),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            compact_loop_route(
+                &bridge,
+                LoopCompactionRequest {
+                    payload: &oversized,
+                    options: &options,
+                    selected_model: "anthropic:claude-sonnet-4-6",
+                    scope: &scope,
+                    step_id: Uuid::new_v4(),
+                    authority: None,
+                }
+            )
+            .await
+            .unwrap(),
+            "summary"
+        );
+        assert_eq!(
+            bridge.inputs.lock().unwrap()[0]["messages"][0]["content"],
+            "x".repeat(99_999)
+        );
+        let authority = CapturingCompactionAuthority {
+            payload: Some("authority input".into()),
+            ..Default::default()
+        };
+        compact_loop_route(
+            &bridge,
+            LoopCompactionRequest {
+                payload: "compatibility",
+                options: &options,
+                selected_model: "anthropic:claude-sonnet-4-6",
+                scope: &scope,
+                step_id: Uuid::new_v4(),
+                authority: Some(&authority),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            bridge.inputs.lock().unwrap()[1]["messages"][0]["content"],
+            "authority input"
+        );
+        assert_eq!(authority.commits.load(Ordering::SeqCst), 1);
+        assert!(
+            authority
+                .evidence
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .lease_id
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn prepared_auxiliary_retains_step_evidence_native_identity_and_budget() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("route.jsonl");
+        let step_id = Uuid::new_v4();
+        let recorder = StepRouteLeaseRecorder::at_path(step_id, path.clone());
+        let route = ResolvedProviderRoute {
+            selected_model: "openai-codex:gpt-5.5".into(),
+            serving_model: "openai:gpt-5.5".into(),
+            native_model: "openai:gpt-5.5".into(),
+            credential_source_class: "test".into(),
+            endpoint_provenance: None,
+            admitted_capabilities: None,
+            bridge: Box::new(PreparationBridge::default()),
+        };
+        let options = StreamOptions {
+            model: Some(route.serving_model.clone()),
+            ..Default::default()
+        };
+        let messages = [LlmMessage::User {
+            content: "attributed source data".into(),
+            images: vec![],
+        }];
+        let prepared = route
+            .prepare_request(
+                RouteLeaseOwner::Step(&recorder),
+                RequestInputs {
+                    system: "classification",
+                    messages: &messages,
+                    tools: &[],
+                    options: &options,
+                    policy: RequestPolicy::Auxiliary {
+                        max_bytes: Some(123),
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(prepared.output_byte_limit(), Some(123));
+        let encoded = std::fs::read_to_string(&path).unwrap();
+        let fact: StepRouteLeaseFact = serde_json::from_str(encoded.trim()).unwrap();
+        assert_eq!(fact.step_id, step_id);
+        assert_eq!(fact.lease.selected_provider_id, "openai-codex");
+        assert_eq!(fact.lease.serving_provider_id, "openai");
+        assert!(!encoded.contains("attributed source data"));
+        assert!(!encoded.contains("session_id"));
+        drop(prepared.stream().await.unwrap());
+        let invalid =
+            StepRouteLeaseRecorder::at_path(Uuid::new_v4(), path.join("impossible.jsonl"));
+        assert!(
+            route
+                .prepare_request(
+                    RouteLeaseOwner::Step(&invalid),
+                    RequestInputs {
+                        system: "classification",
+                        messages: &messages,
+                        tools: &[],
+                        options: &options,
+                        policy: RequestPolicy::Auxiliary {
+                            max_bytes: Some(123)
+                        },
+                    }
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn auxiliary_preparation_rejects_session_append_authority() {
+        let (_directory, authority, _scope, identity) = staged_request();
+        let before = authority.state().last_sequence;
+        let route = ResolvedProviderRoute {
+            selected_model: "anthropic:claude-sonnet-4-6".into(),
+            serving_model: "anthropic:claude-sonnet-4-6".into(),
+            native_model: "anthropic:claude-sonnet-4-6".into(),
+            credential_source_class: "test".into(),
+            endpoint_provenance: None,
+            admitted_capabilities: None,
+            bridge: Box::new(PreparationBridge::default()),
+        };
+        let options = StreamOptions::default();
+        let result = route.prepare_request(
+            RouteLeaseOwner::Session {
+                authority: &authority,
+                turn_id: identity.turn_id,
+            },
+            RequestInputs {
+                system: "source label grants no authority",
+                messages: &[],
+                tools: &[],
+                options: &options,
+                policy: RequestPolicy::Auxiliary {
+                    max_bytes: Some(100),
+                },
+            },
+        );
+        let Err(error) = result else {
+            panic!("auxiliary request acquired session append authority")
+        };
+        assert_eq!(
+            error.to_string(),
+            "auxiliary request requires sessionless step evidence"
+        );
+        assert_eq!(authority.state().last_sequence, before);
     }
 
     #[async_trait::async_trait]
@@ -3674,6 +4078,13 @@ mod tests {
                 .contains("provider contribution declares tools unsupported")
         );
         assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    fn staged_messages() -> [LlmMessage; 1] {
+        [LlmMessage::User {
+            content: "route".into(),
+            images: Vec::new(),
+        }]
     }
 
     fn staged_request() -> (
@@ -3986,7 +4397,11 @@ mod tests {
                 .expect("join must be durable before bridge entry");
             assert!(state.route_leases.contains_key(&join.lease_id));
             self.entries.fetch_add(1, Ordering::SeqCst);
-            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            let (tx, rx) = tokio::sync::mpsc::channel(2);
+            tx.try_send(LlmEvent::TextDelta {
+                delta: "answer".into(),
+            })
+            .unwrap();
             tx.try_send(LlmEvent::Done {
                 message: serde_json::json!({}),
                 input_tokens: 0,
@@ -4003,6 +4418,8 @@ mod tests {
     #[tokio::test]
     async fn durable_lease_and_join_precede_bridge_entry() {
         let (_directory, authority, scope, request_id) = staged_request();
+        let messages = staged_messages();
+        let response_adapter = crate::loop_session::LoopSemanticFactAdapter::new(&scope);
         let entries = Arc::new(AtomicUsize::new(0));
         let bridge = AuthorityInspectingBridge {
             authority,
@@ -4016,7 +4433,7 @@ mod tests {
             LoopRouteRequest {
                 route: &route,
                 system_prompt: "system",
-                messages: &[],
+                messages: &messages,
                 tools: &[],
                 events: &events,
                 max_retries: 1,
@@ -4025,7 +4442,7 @@ mod tests {
                 scope: &scope,
                 step_id: request_id.step_id,
                 semantic_request: Some(&request_id),
-                response_facts: None,
+                response_facts: Some(&response_adapter),
             },
         )
         .await
@@ -4039,8 +4456,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn prepared_turn_rejects_changed_inputs_and_owner_before_route_evidence() {
+        for mutation in [
+            "system",
+            "message",
+            "tool",
+            "step",
+            "ordinal",
+            "response_owner",
+        ] {
+            let (_directory, authority, scope, mut identity) = staged_request();
+            let response_adapter = crate::loop_session::LoopSemanticFactAdapter::new(&scope);
+            let entries = Arc::new(AtomicUsize::new(0));
+            let bridge = CountingBridge(entries.clone());
+            let route = loop_route("anthropic", "claude-sonnet-4-6");
+            let (events, _) = tokio::sync::broadcast::channel(4);
+            let mut messages = staged_messages();
+            if mutation == "message" {
+                messages[0] = LlmMessage::User {
+                    content: "changed".into(),
+                    images: vec![],
+                };
+            }
+            if mutation == "ordinal" {
+                identity.request_ordinal += 1;
+            }
+            let tools = if mutation == "tool" {
+                vec![omegon_traits::ToolDefinition {
+                    name: "added".into(),
+                    label: "Added".into(),
+                    description: "not captured".into(),
+                    parameters: serde_json::json!({}),
+                    capabilities: vec![],
+                }]
+            } else {
+                vec![]
+            };
+            let before = authority.state().last_sequence;
+            let result = dispatch_loop_route(
+                &bridge,
+                LoopRouteRequest {
+                    route: &route,
+                    system_prompt: if mutation == "system" {
+                        "changed"
+                    } else {
+                        "system"
+                    },
+                    messages: &messages,
+                    tools: &tools,
+                    events: &events,
+                    max_retries: 1,
+                    retry_delay_ms: 1,
+                    cancel_keeps_prompt: None,
+                    scope: &scope,
+                    step_id: if mutation == "step" {
+                        Uuid::new_v4()
+                    } else {
+                        identity.step_id
+                    },
+                    semantic_request: Some(&identity),
+                    response_facts: if mutation == "response_owner" {
+                        None
+                    } else {
+                        Some(&response_adapter)
+                    },
+                },
+            )
+            .await;
+            assert!(result.is_err(), "mutation {mutation} was admitted");
+            assert_eq!(entries.load(Ordering::SeqCst), 0);
+            assert_eq!(
+                authority.state().last_sequence,
+                before,
+                "mutation {mutation} wrote route evidence"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn authority_append_failure_prevents_bridge_entry() {
         let (_directory, authority, scope, request_id) = staged_request();
+        let messages = staged_messages();
+        let response_adapter = crate::loop_session::LoopSemanticFactAdapter::new(&scope);
         authority.make_next_append_fail();
         let entries = Arc::new(AtomicUsize::new(0));
         let bridge = CountingBridge(entries.clone());
@@ -4051,7 +4548,7 @@ mod tests {
             LoopRouteRequest {
                 route: &route,
                 system_prompt: "system",
-                messages: &[],
+                messages: &messages,
                 tools: &[],
                 events: &events,
                 max_retries: 1,
@@ -4060,7 +4557,7 @@ mod tests {
                 scope: &scope,
                 step_id: request_id.step_id,
                 semantic_request: Some(&request_id),
-                response_facts: None,
+                response_facts: Some(&response_adapter),
             },
         )
         .await;
@@ -4071,6 +4568,7 @@ mod tests {
 
     #[tokio::test]
     async fn failed_attempt_chunks_remain_canonical_but_only_done_attempt_commits() {
+        let messages = staged_messages();
         let (_directory, authority, scope, request) = staged_request();
         let response_adapter = crate::loop_session::LoopSemanticFactAdapter::new(&scope);
         let attempts = Arc::new(AtomicUsize::new(0));
@@ -4085,7 +4583,7 @@ mod tests {
             LoopRouteRequest {
                 route: &route,
                 system_prompt: "system",
-                messages: &[],
+                messages: &messages,
                 tools: &[],
                 events: &events,
                 max_retries: 2,
@@ -4135,6 +4633,7 @@ mod tests {
 
     #[tokio::test]
     async fn authority_failure_append_prevents_transport_retry() {
+        let messages = staged_messages();
         let (_directory, authority, scope, request) = staged_request();
         let response_adapter = crate::loop_session::LoopSemanticFactAdapter::new(&scope);
         let attempts = Arc::new(AtomicUsize::new(0));
@@ -4150,7 +4649,7 @@ mod tests {
             LoopRouteRequest {
                 route: &route,
                 system_prompt: "system",
-                messages: &[],
+                messages: &messages,
                 tools: &[],
                 events: &events,
                 max_retries: 2,
@@ -4176,6 +4675,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn server_retry_delay_is_scheduled_after_durable_failed_attempt() {
+        let messages = staged_messages();
         let (_directory, authority, scope, request) = staged_request();
         let response_adapter = crate::loop_session::LoopSemanticFactAdapter::new(&scope);
         let attempts = Arc::new(AtomicUsize::new(0));
@@ -4192,7 +4692,7 @@ mod tests {
             LoopRouteRequest {
                 route: &route,
                 system_prompt: "system",
-                messages: &[],
+                messages: &messages,
                 tools: &[],
                 events: &events,
                 max_retries: 2,
@@ -4221,6 +4721,7 @@ mod tests {
 
     #[tokio::test]
     async fn server_delay_does_not_make_nonretryable_failure_retryable() {
+        let messages = staged_messages();
         let (_directory, _authority, scope, request) = staged_request();
         let response_adapter = crate::loop_session::LoopSemanticFactAdapter::new(&scope);
         let attempts = Arc::new(AtomicUsize::new(0));
@@ -4235,7 +4736,7 @@ mod tests {
             LoopRouteRequest {
                 route: &route,
                 system_prompt: "system",
-                messages: &[],
+                messages: &messages,
                 tools: &[],
                 events: &events,
                 max_retries: 2,
@@ -4285,6 +4786,7 @@ mod tests {
 
     #[tokio::test]
     async fn observer_sees_durable_chunk_before_broadcast() {
+        let messages = staged_messages();
         let (_directory, authority, scope, request) = staged_request();
         let response_adapter = crate::loop_session::LoopSemanticFactAdapter::new(&scope);
         let (events, mut observer) = tokio::sync::broadcast::channel(8);
@@ -4294,7 +4796,7 @@ mod tests {
             LoopRouteRequest {
                 route: &route,
                 system_prompt: "system",
-                messages: &[],
+                messages: &messages,
                 tools: &[],
                 events: &events,
                 max_retries: 1,
@@ -4504,6 +5006,7 @@ mod tests {
 
     #[tokio::test]
     async fn content_append_failure_prevents_chunk_broadcast_and_commit() {
+        let messages = staged_messages();
         let (_directory, authority, scope, request) = staged_request();
         let response_adapter = crate::loop_session::LoopSemanticFactAdapter::new(&scope);
         let bridge = FailContentAppendBridge {
@@ -4517,7 +5020,7 @@ mod tests {
             LoopRouteRequest {
                 route: &route,
                 system_prompt: "system",
-                messages: &[],
+                messages: &messages,
                 tools: &[],
                 events: &events,
                 max_retries: 1,

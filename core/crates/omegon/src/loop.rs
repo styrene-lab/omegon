@@ -494,45 +494,26 @@ pub(crate) async fn run_release_coupled(
         active_route = route.turn_route().await;
         route.validate_request_capabilities(&tool_defs)?;
         route.prepare(&active_route, events).await;
-        let llm_messages = semantic_facts.current_context_messages(&compatibility_messages)?;
-        let semantic_request = if semantic_facts.enabled() {
-            let tool_lineage = invocation_contract.tool_schema_lineage(&tool_defs)?;
-            semantic_facts.prepare_model_request(crate::loop_session::LoopModelRequestCapture {
-                step: semantic_step
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("semantic emission produced no step"))?,
-                purpose: crate::loop_driver::LoopModelRequestPurpose::Initial,
-                replaces: None,
-                system_prompt: &system_prompt,
-                messages: &llm_messages,
-                tools: &tool_defs,
-                tool_lineage: &tool_lineage,
-                route: &active_route,
-            })?
-        } else {
-            None
+        let preparation = crate::loop_session::TurnRequestPreparation {
+            step: semantic_step.as_ref(),
+            compatibility_step_id: route_step_id,
+            system_prompt: &system_prompt,
+            tools: &tool_defs,
+            route: &active_route,
+            scope: invocation_scope,
+            events,
+            config,
         };
-        let dispatch_step_id = semantic_step
-            .as_ref()
-            .map_or(route_step_id, |step| step.step_id);
+        let captured = preparation.capture(
+            semantic_facts,
+            invocation_contract,
+            &compatibility_messages,
+            crate::loop_driver::LoopModelRequestPurpose::Initial,
+            None,
+        )?;
 
         let dispatch = tokio::select! {
-            result = route.dispatch(crate::loop_driver::LoopRouteRequest {
-                route: &active_route,
-                system_prompt: &system_prompt,
-                messages: &llm_messages,
-                tools: &tool_defs,
-                events,
-                max_retries: config.max_retries,
-                retry_delay_ms: config.retry_delay_ms,
-                cancel_keeps_prompt: config.cancel_keeps_prompt.as_ref(),
-                scope: invocation_scope,
-                step_id: dispatch_step_id,
-                semantic_request: semantic_request.as_ref(),
-                response_facts: semantic_request.as_ref().map(|_| {
-                    semantic_facts as &dyn crate::loop_driver::LoopResponseFactContract
-                }),
-            }) => {
+            result = route.dispatch(preparation.dispatch(&captured, semantic_facts)) => {
                 match result {
                     Ok(dispatch) => dispatch,
                     Err(e) if crate::loop_driver::route_repair(route.failure_kind(&e))
@@ -625,35 +606,12 @@ pub(crate) async fn run_release_coupled(
                         }
                         // Rebuild the in-memory compatibility view, then re-derive dispatch context from authority.
                         let compatibility_messages = context_contract.messages(conversation);
-                        let repair_purpose = crate::loop_driver::LoopModelRequestPurpose::ContextOverflowRepair;
-                        if let Some(previous) = semantic_request.as_ref() {
-                            semantic_facts.supersede_for_repair(previous, repair_purpose)?;
-                        }
-                        let llm_messages = semantic_facts.current_context_messages(&compatibility_messages)?;
-                        let repair_request = if semantic_facts.enabled() {
-                            let tool_lineage = invocation_contract.tool_schema_lineage(&tool_defs)?;
-                            semantic_facts.prepare_model_request(crate::loop_session::LoopModelRequestCapture {
-                                step: semantic_step.as_ref().expect("enabled semantic step"),
-                                purpose: repair_purpose,
-                                replaces: semantic_request.as_ref(),
-                                system_prompt: &system_prompt,
-                                messages: &llm_messages,
-                                tools: &tool_defs,
-                                tool_lineage: &tool_lineage,
-                                route: &active_route,
-                            })?
-                        } else { None };
-                        route.dispatch(crate::loop_driver::LoopRouteRequest {
-                            route: &active_route, system_prompt: &system_prompt,
-                            messages: &llm_messages, tools: &tool_defs, events,
-                            max_retries: config.max_retries, retry_delay_ms: config.retry_delay_ms,
-                            cancel_keeps_prompt: config.cancel_keeps_prompt.as_ref(),
-                            scope: invocation_scope, step_id: dispatch_step_id,
-                            semantic_request: repair_request.as_ref(),
-                            response_facts: repair_request.as_ref().map(|_| {
-                                semantic_facts as &dyn crate::loop_driver::LoopResponseFactContract
-                            }),
-                        }).await?
+                        let repair = preparation.capture(
+                            semantic_facts, invocation_contract, &compatibility_messages,
+                            crate::loop_driver::LoopModelRequestPurpose::ContextOverflowRepair,
+                            captured.identity.as_ref(),
+                        )?;
+                        route.dispatch(preparation.dispatch(&repair, semantic_facts)).await?
                     }
                     Err(e) if crate::loop_driver::route_repair(route.failure_kind(&e))
                         == Some(crate::loop_driver::LoopRouteRepair::RepairMalformedHistory) => {
@@ -670,35 +628,12 @@ pub(crate) async fn run_release_coupled(
                         // Drop the first half of history — brute but effective
                         context_contract.repair_malformed_history(conversation);
                         let compatibility_messages = context_contract.messages(conversation);
-                        let repair_purpose = crate::loop_driver::LoopModelRequestPurpose::ProviderHistoryRepair;
-                        if let Some(previous) = semantic_request.as_ref() {
-                            semantic_facts.supersede_for_repair(previous, repair_purpose)?;
-                        }
-                        let llm_messages = semantic_facts.current_context_messages(&compatibility_messages)?;
-                        let repair_request = if semantic_facts.enabled() {
-                            let tool_lineage = invocation_contract.tool_schema_lineage(&tool_defs)?;
-                            semantic_facts.prepare_model_request(crate::loop_session::LoopModelRequestCapture {
-                                step: semantic_step.as_ref().expect("enabled semantic step"),
-                                purpose: repair_purpose,
-                                replaces: semantic_request.as_ref(),
-                                system_prompt: &system_prompt,
-                                messages: &llm_messages,
-                                tools: &tool_defs,
-                                tool_lineage: &tool_lineage,
-                                route: &active_route,
-                            })?
-                        } else { None };
-                        route.dispatch(crate::loop_driver::LoopRouteRequest {
-                            route: &active_route, system_prompt: &system_prompt,
-                            messages: &llm_messages, tools: &tool_defs, events,
-                            max_retries: config.max_retries, retry_delay_ms: config.retry_delay_ms,
-                            cancel_keeps_prompt: config.cancel_keeps_prompt.as_ref(),
-                            scope: invocation_scope, step_id: dispatch_step_id,
-                            semantic_request: repair_request.as_ref(),
-                            response_facts: repair_request.as_ref().map(|_| {
-                                semantic_facts as &dyn crate::loop_driver::LoopResponseFactContract
-                            }),
-                        }).await?
+                        let repair = preparation.capture(
+                            semantic_facts, invocation_contract, &compatibility_messages,
+                            crate::loop_driver::LoopModelRequestPurpose::ProviderHistoryRepair,
+                            captured.identity.as_ref(),
+                        )?;
+                        route.dispatch(preparation.dispatch(&repair, semantic_facts)).await?
                     }
                     Err(e) => return Err(e),
                 }

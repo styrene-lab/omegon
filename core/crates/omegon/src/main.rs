@@ -162,6 +162,7 @@ mod memory_service;
 mod model_catalog;
 mod model_preferences;
 mod model_registry;
+mod model_request;
 mod mqtt_bridge;
 mod native_io;
 mod ollama;

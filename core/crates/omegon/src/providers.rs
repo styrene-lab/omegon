@@ -789,17 +789,19 @@ async fn quick_completion_internal(
         extra_body: std::collections::HashMap::new(),
     };
 
-    let rx = route
-        .stream(
-            crate::provider_route_service::RouteLeaseOwner::Step(&recorder),
-            "You are a concise classification assistant.",
-            &messages,
-            &[],
-            &options,
-        )
-        .await?;
+    let prepared = route.prepare_request(
+        crate::provider_route_service::RouteLeaseOwner::Step(&recorder),
+        crate::model_request::RequestInputs {
+            system: "You are a concise classification assistant.",
+            messages: &messages,
+            tools: &[],
+            options: &options,
+            policy: crate::model_request::RequestPolicy::Auxiliary { max_bytes },
+        },
+    )?;
+    let rx = prepared.stream().await?;
 
-    collect_quick_completion(rx, max_bytes).await
+    collect_quick_completion(rx, prepared.output_byte_limit()).await
 }
 
 async fn collect_quick_completion(
@@ -929,6 +931,34 @@ mod memory_completion_adversarial_tests {
         );
         assert_eq!(result.unwrap().unwrap().text, "[]");
         assert!(tx.is_closed());
+    }
+
+    #[tokio::test]
+    async fn bounded_completion_rejects_error_before_done_and_legacy_keeps_eof() {
+        for error in [
+            LlmEvent::Error {
+                message: "failed".into(),
+            },
+            upstream_failure_event("failed".into(), Some(10)),
+        ] {
+            let (tx, rx) = tokio::sync::mpsc::channel(3);
+            tx.try_send(LlmEvent::TextDelta { delta: "[]".into() })
+                .unwrap();
+            tx.try_send(error).unwrap();
+            tx.try_send(done()).unwrap();
+            assert!(collect_quick_completion(rx, Some(100)).await.is_err());
+            assert!(tx.is_closed());
+        }
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        tx.try_send(LlmEvent::TextDelta {
+            delta: "legacy answer".into(),
+        })
+        .unwrap();
+        drop(tx);
+        assert_eq!(
+            collect_quick_completion(rx, None).await.unwrap().text,
+            "legacy answer"
+        );
     }
 }
 

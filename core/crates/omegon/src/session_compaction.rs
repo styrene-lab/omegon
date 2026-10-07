@@ -782,6 +782,60 @@ mod tests {
         assert_eq!(handle.state().last_sequence, before);
     }
 
+    #[tokio::test]
+    async fn prepared_idle_summary_retains_session_authority_without_synthetic_turn() {
+        let directory = tempfile::tempdir().unwrap();
+        let handle = authority(&directory);
+        admitted_prompt(&handle, "old");
+        admitted_prompt(&handle, "retained");
+        let before = handle.state();
+        let compaction =
+            SessionCompaction::begin_idle(handle.clone(), &plan(&["old", "retained"], None))
+                .unwrap()
+                .unwrap();
+        let bridge = crate::bridge::MockBridge {
+            events: vec![
+                crate::bridge::LlmEvent::TextDelta {
+                    delta: "idle summary".into(),
+                },
+                crate::bridge::LlmEvent::Done {
+                    message: serde_json::json!({}),
+                    input_tokens: 1,
+                    output_tokens: 1,
+                    cache_read_tokens: 0,
+                    cache_creation_tokens: 0,
+                    provider_telemetry: None,
+                },
+            ],
+        };
+        crate::provider_route_service::compact_loop_route(
+            &bridge,
+            crate::provider_route_service::LoopCompactionRequest {
+                payload: "compatibility",
+                options: &crate::bridge::StreamOptions::default(),
+                selected_model: "anthropic:claude-sonnet-4-6",
+                scope: &crate::invocation_service::InvocationScope::default(),
+                step_id: Uuid::new_v4(),
+                authority: Some(&compaction),
+            },
+        )
+        .await
+        .unwrap();
+        let after = handle.state();
+        assert_eq!(after.prompts, before.prompts);
+        assert_eq!(after.turn_starts, before.turn_starts);
+        assert_eq!(after.steps, before.steps);
+        assert_eq!(after.route_leases, before.route_leases);
+        assert!(after.active_turn.is_none());
+        assert!(after.active_step.is_none());
+        assert!(matches!(
+            after.compaction_requests[&compaction.compaction_request_id()]
+                .preparation()
+                .route,
+            CompactionRoute::SessionIdle { .. }
+        ));
+    }
+
     #[test]
     fn summary_prompt_carries_admitted_content_generation() {
         let (owner, generation, body) = super::summary_prompt().unwrap();
