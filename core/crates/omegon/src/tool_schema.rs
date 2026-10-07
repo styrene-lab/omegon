@@ -274,7 +274,10 @@ mod tests {
         assert_eq!(dialect_for_provider("openai"), Some(SchemaDialect::OpenAI));
         assert_eq!(dialect_for_provider("groq"), Some(SchemaDialect::OpenAI));
         assert_eq!(dialect_for_provider("ollama"), Some(SchemaDialect::OpenAI));
-        assert_eq!(dialect_for_provider("ollama-cloud"), None);
+        assert_eq!(
+            dialect_for_provider("ollama-cloud"),
+            Some(SchemaDialect::OpenAI)
+        );
         assert_eq!(dialect_for_provider("unknown"), None);
     }
 }

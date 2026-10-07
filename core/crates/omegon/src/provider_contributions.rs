@@ -724,7 +724,10 @@ fn built_in_candidates() -> Vec<ProviderContributionCandidate> {
             "ollama-cloud",
             &[],
             Auth::ApiKey,
-            Tools::Unsupported,
+            // Native /api/chat accepts function declarations. Use the same
+            // parameter subset as local Ollama, independently of model support.
+            // https://docs.ollama.com/api/chat
+            openai_tools,
             Factory::OllamaCloud,
         ),
         candidate(
@@ -952,7 +955,7 @@ mod tests {
         );
         assert_eq!(
             registry().get("ollama-cloud").unwrap().tools,
-            ProviderToolContract::Unsupported
+            ProviderToolContract::Supported(SchemaDialect::OpenAI)
         );
         assert!(!registry().get("google-antigravity").unwrap().executable);
     }

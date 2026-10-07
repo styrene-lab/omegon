@@ -26,6 +26,9 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Check issue reporter offline
+        run: node --test scripts/provider_drift_workflow.test.cjs
+
       - name: Resolve drift credentials
         run: |
           {
@@ -120,7 +123,7 @@ jobs:
                 owner,
                 repo,
                 issue_number: issue.number,
-                body: `Superseded by drift fingerprint \\`${report.fingerprint}\\`. Closing in favor of a fresh issue for the new failure shape.`,
+                body: 'Superseded by drift fingerprint `' + report.fingerprint + '`. Closing in favor of a fresh issue for the new failure shape.',
               });
               await github.rest.issues.update({
                 owner,
