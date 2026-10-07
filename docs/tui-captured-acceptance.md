@@ -31,6 +31,12 @@ This foundation covers fresh-session startup, terminal input, streaming completi
 
 ## Selecting a presentation
 
+With `--tui inline --stress`, the held first response also receives `/splash`.
+The runner requires an immediate disabled-replay notice, the primary screen, and
+the live cancellation hint before continuing through inspection and the second
+turn. `stress-quiet-replay.txt` records this checkpoint. Use `--menu-backdrop` in a
+separate run to verify canonical saved-session resume and terminal restoration.
+
 For live inline scrollback, add `--streaming` to the PTY command. This scenario
 holds the provider stream at five checkpoints before completion. Each checkpoint
 requires the earliest delivered lines in primary terminal scrollback, beyond the

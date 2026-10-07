@@ -18,7 +18,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
-- Private TUI acceptance rejects external HTTP(S) discovery through its loopback fixture proxy.
+- Inline `/splash` now returns an immediate notice instead of entering a blocking fullscreen animation, keeping live input and event processing available.
+
+- Private TUI acceptance retains the exact observed replay checkpoint and rejects external HTTP(S) discovery through its loopback fixture proxy.
 
 - Normal turns, history repairs, compaction, and bounded auxiliary inference now share internal request validation before provider dispatch. Turn inputs must match their captured authority manifests; flow-specific tools, budgets, route evidence, and completion owners are preserved. Compaction rejects structured upstream failures even if a later Done event arrives.
 

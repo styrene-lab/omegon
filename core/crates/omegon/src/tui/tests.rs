@@ -3781,6 +3781,33 @@ fn slash_warp_toggles_between_slim_and_full_modes() {
 }
 
 #[test]
+fn inline_splash_preserves_draft_and_borrowed_inspector_without_replay() {
+    for active in [false, true] {
+        for borrowed in [false, true] {
+            let mut app = test_app();
+            app.base_terminal = TerminalPresentation::Inline;
+            app.inline_active = !borrowed;
+            app.agent_active = active;
+            app.editor.set_text("unsent operator draft");
+            let tx = test_tx();
+            if borrowed {
+                app.handle_slash_command("/settings", &tx);
+            }
+            let owner = app.navigation_owner();
+            let result = app.handle_slash_command("/splash", &tx);
+            assert!(matches!(result, SlashResult::Display(ref text) if text.contains("inline")));
+            assert!(
+                !app.replay_splash,
+                "inline must not enter the blocking replay loop"
+            );
+            assert_eq!(app.editor.render_text(), "unsent operator draft");
+            assert_eq!(app.navigation_owner(), owner);
+            assert_eq!(app.agent_active, active);
+        }
+    }
+}
+
+#[test]
 fn ui_command_switches_between_om_active_and_full_presentations() {
     let mut app = test_app();
     let tx = test_tx();

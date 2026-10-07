@@ -33,6 +33,20 @@ def test_provider_rejects_unknown_routes():
         else:
             raise AssertionError("unknown route accepted")
 
+
+def test_quiet_inline_replay_requires_notice_primary_and_live_control():
+    notice = "Splash replay is disabled in inline mode"
+    runner.assert_quiet_inline_replay(notice + "\nResponding · Ctrl+C cancel", "0")
+    for viewport, alternate in [("Responding · Ctrl+C cancel", "0"),
+                                (notice + "\nCtrl+C cancel", "1"), (notice, "0")]:
+        try:
+            runner.assert_quiet_inline_replay(viewport, alternate)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("blocking or obscured inline replay was accepted")
+
+
 def test_provider_can_request_a_bounded_permission_probe():
     with runner.fixture_provider() as server:
         server.tool_path = "/tmp/fixture-only/denied.txt"
@@ -455,6 +469,7 @@ if __name__ == "__main__":
         assert offering['id'] == 'openai:omegon-tui-fixture', 'fixture must use a distinct offering with a supported provider prefix'
     test_provider_streams_distinct_turns_without_external_inference()
     test_provider_rejects_unknown_routes()
+    test_quiet_inline_replay_requires_notice_primary_and_live_control()
     test_provider_can_request_a_bounded_permission_probe()
     test_quiet_startup_gate_rejects_catalog_and_duplicate_summary()
     test_unconfigured_launch_has_no_implied_provider()

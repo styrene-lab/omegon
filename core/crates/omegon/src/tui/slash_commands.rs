@@ -1230,6 +1230,13 @@ Scroll transcript:
             }
 
             "splash" => {
+                // Inline sessions keep input and agent-event draining in the main
+                // loop, including while an inspector borrows fullscreen space.
+                if self.base_terminal == TerminalPresentation::Inline {
+                    return SlashResult::Display(
+                        "Splash replay is disabled in inline mode".into(),
+                    );
+                }
                 // Set flag to replay splash on next draw cycle
                 self.replay_splash = true;
                 SlashResult::Handled

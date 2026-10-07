@@ -545,6 +545,12 @@ def assert_streaming_payload(transcript, markers):
         assert normalized.count(marker + body) == 1, f"streamed payload lost or altered nonwhitespace characters: {marker}"
 
 
+def assert_quiet_inline_replay(viewport, alternate_on):
+    assert "Splash replay is disabled in inline mode" in viewport, "inline replay has no immediate notice"
+    assert alternate_on == "0", "inline replay borrowed the alternate screen"
+    assert "Ctrl+C cancel" in viewport, "replay request hid the live cancellation control"
+
+
 def run(binary: Path, output: Path, presentation="fullscreen", detail="active", entry=None, stress=False, fresh_install=False, unconfigured=False, streaming=False, markdown=False, controls=False, activity=False, menu_backdrop=False):
     if menu_backdrop and (presentation != "inline" or unconfigured or stress or streaming or markdown or controls or activity or entry):
         raise ValueError("menu-backdrop acceptance requires configured inline layout without another scenario")
@@ -589,9 +595,9 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
     def history():
         return tmux("capture-pane", *(["-J"] if streaming else []), "-p", "-S", "-", "-t", "run:0.0") if presentation == "inline" else screen()
 
-    def capture(name, *, primary=False):
+    def capture(name, *, primary=False, snapshot=None):
         path = output / (name + ".txt")
-        path.write_text((history() if presentation == "inline" else tmux("capture-pane", "-p", "-a", "-t", "run:0.0")) if primary else screen())
+        path.write_text(snapshot if snapshot is not None else ((history() if presentation == "inline" else tmux("capture-pane", "-p", "-a", "-t", "run:0.0")) if primary else screen()))
         if streaming and primary:
             # -J joins terminal soft-wrap rows for marker identity after resize;
             # retain physical rows too so the actual visual layout is reviewable.
@@ -604,8 +610,9 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
     def wait_for(predicate, label, seconds=60):
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
-            if predicate():
-                return
+            observation = predicate()
+            if observation:
+                return observation
             time.sleep(0.05)
         capture("failure")
         capture("failure-primary", primary=True)
@@ -1186,6 +1193,21 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
                         wait_for(lambda: history().count("TUI_FIXTURE_REPLY_1") == 1,
                                  "stable streaming prefix published before Project takes fullscreen")
                         capture("stress-prefix-before-project", primary=True)
+                        action("send-keys", "-t", "run:0.0", "-l", "/splash")
+                        action("send-keys", "-t", "run:0.0", "Enter")
+                        def quiet_replay_snapshot():
+                            # Native insertion can temporarily clear the live area.
+                            # Assert and retain one completed observation, not a
+                            # second capture taken halfway through the next draw.
+                            current = screen()
+                            return current if ("Splash replay is disabled in inline mode" in current
+                                               and "Ctrl+C cancel" in current) else None
+                        observed = wait_for(quiet_replay_snapshot,
+                                            "inline replay notice and cancellation control during streaming")
+                        assert_quiet_inline_replay(observed, tmux("display-message", "-p", "-t", "run:0.0", "#{alternate_on}").strip())
+                        capture("stress-quiet-replay", snapshot=observed)
+                        ledger["quiet_inline_replay"] = {"notice_visible": True, "primary_retained": True,
+                            "provider_held": not provider.release_stream.is_set()}
                     action("send-keys", "-t", "run:0.0", "-l", "UNSENT_DRAFT_SURVIVES")
                     action("send-keys", "-t", "run:0.0", "F2")
                     wait_for(lambda: "Project browser" in screen(), "Project admits input during large stream")
