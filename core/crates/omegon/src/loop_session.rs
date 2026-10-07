@@ -21,6 +21,147 @@ pub(crate) struct LoopModelRequestCapture<'a> {
     pub(crate) route: &'a crate::loop_driver::LoopRoute,
 }
 
+/// Flow adapter shared by initial requests and both history-repair paths.
+/// Selection, authority manifests, and invocation permission keep their owners.
+pub(crate) struct TurnRequestPreparation<'a> {
+    pub(crate) step: Option<&'a crate::loop_driver::LoopStepIdentity>,
+    pub(crate) compatibility_step_id: uuid::Uuid,
+    pub(crate) system_prompt: &'a str,
+    pub(crate) tools: &'a [omegon_traits::ToolDefinition],
+    pub(crate) route: &'a crate::loop_driver::LoopRoute,
+    pub(crate) scope: &'a crate::invocation_service::InvocationScope,
+    pub(crate) events: &'a tokio::sync::broadcast::Sender<omegon_traits::AgentEvent>,
+    pub(crate) config: &'a crate::r#loop::LoopConfig,
+}
+
+pub(crate) struct CapturedTurnRequest {
+    messages: Vec<crate::bridge::LlmMessage>,
+    pub(crate) identity: Option<crate::loop_driver::LoopModelRequestIdentity>,
+}
+
+/// Compare the final transport inputs to the existing durable manifest. This is
+/// read-only: a changed input must obtain a new request, never recapture this ID.
+pub(crate) fn validate_dispatch_capture(
+    authority: &crate::session_authority::SessionAuthorityHandle,
+    identity: &crate::loop_driver::LoopModelRequestIdentity,
+    inputs: &crate::model_request::RequestInputs<'_>,
+    route: &crate::provider_route_service::LoopRoute,
+) -> anyhow::Result<()> {
+    use crate::session_authority::{ModelRequestState, ProjectionClass};
+    let state = authority.state();
+    let Some(ModelRequestState::Open { preparation, .. }) =
+        state.model_requests.get(&identity.request_id)
+    else {
+        anyhow::bail!("dispatch requires an open prepared request");
+    };
+    anyhow::ensure!(
+        preparation.step_id == identity.step_id
+            && preparation.turn_id == identity.turn_id
+            && preparation.request_ordinal == identity.request_ordinal
+            && state
+                .active_step
+                .as_ref()
+                .is_some_and(|step| step.active_request_id == Some(identity.request_id)),
+        "dispatch identity does not match the active prepared request"
+    );
+    anyhow::ensure!(
+        preparation.context_items.len() == inputs.messages.len() + 1
+            && preparation.schema_set.schemas.len() == inputs.tools.len(),
+        "dispatch input count differs from the prepared manifest"
+    );
+    let read = |reference: &crate::session_authority::ContentRef| {
+        authority.read_content(reference, ProjectionClass::Default)
+    };
+    anyhow::ensure!(
+        read(&preparation.context_items[0].content_ref)? == inputs.system.as_bytes(),
+        "dispatch system differs from the prepared manifest"
+    );
+    for (item, message) in preparation
+        .context_items
+        .iter()
+        .skip(1)
+        .zip(inputs.messages)
+    {
+        anyhow::ensure!(
+            read(&item.content_ref)? == canonical_json_bytes(message)?,
+            "dispatch message differs from the prepared manifest"
+        );
+    }
+    anyhow::ensure!(
+        preparation.schema_set.normalizer_contribution_id == route.normalizer_contribution_id
+            && preparation.schema_set.normalizer_generation_id == route.normalizer_generation_id,
+        "dispatch schema normalizer differs from the prepared manifest"
+    );
+    for (schema, tool) in preparation.schema_set.schemas.iter().zip(inputs.tools) {
+        anyhow::ensure!(
+            schema.schema_dialect == route.schema_dialect
+                && read(&schema.schema_content_ref)? == canonical_json_bytes(tool)?,
+            "dispatch tool differs from the prepared manifest"
+        );
+    }
+    Ok(())
+}
+
+impl TurnRequestPreparation<'_> {
+    pub(crate) fn capture(
+        &self,
+        facts: &mut dyn LoopSemanticFactContract,
+        invocation: &dyn crate::loop_driver::LoopInvocationContract,
+        compatibility: &[crate::bridge::LlmMessage],
+        purpose: crate::loop_driver::LoopModelRequestPurpose,
+        replaces: Option<&crate::loop_driver::LoopModelRequestIdentity>,
+    ) -> anyhow::Result<CapturedTurnRequest> {
+        if let Some(previous) = replaces {
+            facts.supersede_for_repair(previous, purpose)?;
+        }
+        let messages = facts.current_context_messages(compatibility)?;
+        let identity = if facts.enabled() {
+            let tool_lineage = invocation.tool_schema_lineage(self.tools)?;
+            facts.prepare_model_request(LoopModelRequestCapture {
+                step: self
+                    .step
+                    .ok_or_else(|| anyhow::anyhow!("semantic emission produced no step"))?,
+                purpose,
+                replaces,
+                system_prompt: self.system_prompt,
+                messages: &messages,
+                tools: self.tools,
+                tool_lineage: &tool_lineage,
+                route: self.route,
+            })?
+        } else {
+            None
+        };
+        Ok(CapturedTurnRequest { messages, identity })
+    }
+
+    pub(crate) fn dispatch<'a>(
+        &'a self,
+        captured: &'a CapturedTurnRequest,
+        facts: &'a dyn LoopSemanticFactContract,
+    ) -> crate::loop_driver::LoopRouteRequest<'a> {
+        crate::loop_driver::LoopRouteRequest {
+            route: self.route,
+            system_prompt: self.system_prompt,
+            messages: &captured.messages,
+            tools: self.tools,
+            events: self.events,
+            max_retries: self.config.max_retries,
+            retry_delay_ms: self.config.retry_delay_ms,
+            cancel_keeps_prompt: self.config.cancel_keeps_prompt.as_ref(),
+            scope: self.scope,
+            step_id: self
+                .step
+                .map_or(self.compatibility_step_id, |step| step.step_id),
+            semantic_request: captured.identity.as_ref(),
+            response_facts: captured
+                .identity
+                .as_ref()
+                .map(|_| facts as &dyn crate::loop_driver::LoopResponseFactContract),
+        }
+    }
+}
+
 pub(crate) trait LoopSemanticFactContract:
     crate::loop_driver::LoopResponseFactContract + Send
 {
@@ -2918,6 +3059,41 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_capture_rejects_changed_schema_without_reusing_request_identity() {
+        let (_directory, authority, scope) = authority_scope();
+        let mut facts = LoopSemanticFactAdapter::new(&scope);
+        let tools = [tool(serde_json::json!({"type":"object"}))];
+        let identity = capture_request(&mut facts, "system", &[], &tools);
+        let messages = facts.current_context_messages(&[]).unwrap();
+        let route = route();
+        let route = crate::provider_route_service::LoopRoute {
+            selected_model: route.selected_model,
+            serving_model: route.serving_model,
+            provider_id: route.provider_id,
+            schema_dialect: route.schema_dialect,
+            contribution_generation_id: route.contribution_generation_id,
+            normalizer_contribution_id: route.normalizer_contribution_id,
+            normalizer_generation_id: route.normalizer_generation_id,
+            options: crate::bridge::StreamOptions::default(),
+        };
+        let mut inputs = crate::model_request::RequestInputs {
+            system: "system",
+            messages: &messages,
+            tools: &tools,
+            options: &route.options,
+            policy: crate::model_request::RequestPolicy::Turn,
+        };
+        validate_dispatch_capture(&authority, &identity, &inputs, &route).unwrap();
+        let changed = [tool(
+            serde_json::json!({"type":"object","required":["new_argument"]}),
+        )];
+        inputs.tools = &changed;
+        assert!(validate_dispatch_capture(&authority, &identity, &inputs, &route).is_err());
+        assert_eq!(authority.state().model_requests.len(), 1);
+        assert!(authority.state().route_leases.is_empty());
+    }
+
+    #[test]
     fn repair_allocates_next_request_in_same_step() {
         let (directory, authority, scope) = authority_scope();
         let mut adapter = LoopSemanticFactAdapter::new(&scope);
@@ -2967,7 +3143,108 @@ mod tests {
     }
 
     #[test]
-    fn applied_compaction_context_matches_next_prepared_capture() {
+    fn turn_preparation_adapter_preserves_both_repair_identities_and_manifests() {
+        use crate::loop_driver::LoopModelRequestPurpose;
+        for purpose in [
+            LoopModelRequestPurpose::ContextOverflowRepair,
+            LoopModelRequestPurpose::ProviderHistoryRepair,
+        ] {
+            let (directory, authority, scope) = authority_scope();
+            let mut facts = LoopSemanticFactAdapter::new(&scope);
+            let step = facts.start_step().unwrap().unwrap();
+            let route = route();
+            let (events, _) = tokio::sync::broadcast::channel(4);
+            let config = crate::r#loop::LoopConfig {
+                max_retries: 3,
+                retry_delay_ms: 42,
+                ..Default::default()
+            };
+            let mut runtime = crate::bus::EventBus::new();
+            runtime.finalize();
+            let invocation = crate::loop_driver::LoopInvocationPort::new(&mut runtime);
+            let preparation = TurnRequestPreparation {
+                step: Some(&step),
+                compatibility_step_id: uuid::Uuid::new_v4(),
+                system_prompt: "system",
+                tools: &[],
+                route: &route,
+                scope: &scope,
+                events: &events,
+                config: &config,
+            };
+            let initial = preparation
+                .capture(
+                    &mut facts,
+                    &invocation,
+                    &[],
+                    LoopModelRequestPurpose::Initial,
+                    None,
+                )
+                .unwrap();
+            let initial_id = initial.identity.as_ref().unwrap();
+            crate::provider_route_service::record_loop_route_lease_for_test(
+                &scope,
+                step.step_id,
+                &route.selected_model,
+                &route.serving_model,
+                initial_id,
+            )
+            .unwrap();
+            let repair = preparation
+                .capture(&mut facts, &invocation, &[], purpose, Some(initial_id))
+                .unwrap();
+            let repair_id = repair.identity.as_ref().unwrap();
+            assert_current_context_matches_capture(&directory, &authority, repair_id);
+            crate::provider_route_service::record_loop_route_lease_for_test(
+                &scope,
+                step.step_id,
+                &route.selected_model,
+                &route.serving_model,
+                repair_id,
+            )
+            .unwrap();
+            let dispatch = preparation.dispatch(&repair, &facts);
+            assert_eq!(dispatch.step_id, step.step_id);
+            assert_eq!(dispatch.max_retries, 3);
+            assert_eq!(dispatch.retry_delay_ms, 42);
+            assert!(dispatch.tools.is_empty());
+            assert!(dispatch.response_facts.is_some());
+            assert_ne!(repair_id.request_id, initial_id.request_id);
+            assert_eq!(repair_id.request_ordinal, initial_id.request_ordinal + 1);
+            let state = authority.state();
+            let prepared = state.model_requests[&repair_id.request_id].preparation();
+            assert_eq!(prepared.replaces_request_id, Some(initial_id.request_id));
+            assert_eq!(prepared.purpose, purpose.into());
+            assert_eq!(state.route_leases.len(), 2);
+            assert_ne!(
+                state.request_route_joins[&repair_id.request_id].lease_id,
+                state.request_route_joins[&initial_id.request_id].lease_id
+            );
+            assert_eq!(
+                authority
+                    .read_content(
+                        &prepared.context_items[0].content_ref,
+                        crate::session_authority::ProjectionClass::Default
+                    )
+                    .unwrap(),
+                dispatch.system_prompt.as_bytes()
+            );
+            for (item, message) in prepared.context_items.iter().skip(1).zip(dispatch.messages) {
+                assert_eq!(
+                    authority
+                        .read_content(
+                            &item.content_ref,
+                            crate::session_authority::ProjectionClass::Default
+                        )
+                        .unwrap(),
+                    canonical_json_bytes(message).unwrap()
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn applied_compaction_context_matches_next_prepared_capture() {
         let (directory, authority, scope) = authority_scope();
         let mut adapter = LoopSemanticFactAdapter::new(&scope);
         authority
@@ -3022,30 +3299,45 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        let lease_id = uuid::Uuid::new_v4();
-        authority
-            .record_route_lease(
-                "2026-08-21T12:00:02Z",
-                crate::session_authority::RouteLeaseRecorded {
-                    lease_id,
-                    request_id: compaction.compaction_request_id(),
-                    turn_id: second.turn_id,
-                    selected_provider_id: "anthropic".into(),
-                    selected_model_id: route().selected_model,
-                    serving_provider_id: "anthropic".into(),
-                    serving_model_id: route().serving_model,
-                    schema_dialect: route().schema_dialect,
-                    credential_source_class: "test".into(),
-                    fallback_reason: None,
-                    contribution_generation_id: "provider:anthropic/v1".into(),
-                    route_policy: "direct".into(),
+        let bridge = crate::bridge::MockBridge {
+            events: vec![
+                crate::bridge::LlmEvent::TextDelta {
+                    delta: "compacted summary".into(),
                 },
-            )
-            .unwrap();
-        compaction
-            .prepare(crate::session_authority::CompactionRoute::TurnLease { lease_id })
-            .unwrap();
-        compaction.commit_done("compacted summary", None).unwrap();
+                crate::bridge::LlmEvent::Done {
+                    message: serde_json::json!({}),
+                    input_tokens: 1,
+                    output_tokens: 1,
+                    cache_read_tokens: 0,
+                    cache_creation_tokens: 0,
+                    provider_telemetry: None,
+                },
+            ],
+        };
+        let summary = crate::provider_route_service::compact_loop_route(
+            &bridge,
+            crate::provider_route_service::LoopCompactionRequest {
+                payload: "compatibility must not replace authority",
+                options: &crate::bridge::StreamOptions::default(),
+                selected_model: &route().selected_model,
+                scope: &scope,
+                step_id: second.step_id,
+                authority: Some(&compaction),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(summary, "compacted summary");
+        assert!(
+            authority
+                .state()
+                .route_leases
+                .values()
+                .any(
+                    |lease| lease.request_id == compaction.compaction_request_id()
+                        && lease.turn_id == second.turn_id
+                )
+        );
         let compatibility_compacted = [crate::bridge::LlmMessage::User {
             content: "compacted summary".into(),
             images: Vec::new(),
