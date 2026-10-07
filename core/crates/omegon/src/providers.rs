@@ -4459,15 +4459,14 @@ impl OllamaCloudClient {
         wire_msgs
     }
 
-    fn parse_tool_calls(message: &Value) -> Vec<crate::bridge::WireToolCall> {
+    fn parse_tool_calls(message: &Value, offset: usize) -> Vec<crate::bridge::WireToolCall> {
         message
             .get("tool_calls")
             .and_then(Value::as_array)
             .map(|calls| {
                 calls
                     .iter()
-                    .enumerate()
-                    .filter_map(|(idx, call)| {
+                    .filter_map(|call| {
                         let function = call.get("function")?;
                         let name = function.get("name")?.as_str()?.to_string();
                         let arguments = function
@@ -4478,13 +4477,16 @@ impl OllamaCloudClient {
                         let id = call
                             .get("id")
                             .and_then(Value::as_str)
-                            .map(ToOwned::to_owned)
-                            .unwrap_or_else(|| format!("ollama-call-{}", idx + 1));
-                        Some(crate::bridge::WireToolCall {
-                            id,
-                            name,
-                            arguments,
-                        })
+                            .map(ToOwned::to_owned);
+                        Some((id, name, arguments))
+                    })
+                    // The offset counts retained calls across chunks. Allocate
+                    // fallback IDs only after filtering to keep it monotonic.
+                    .enumerate()
+                    .map(|(idx, (id, name, arguments))| crate::bridge::WireToolCall {
+                        id: id.unwrap_or_else(|| format!("ollama-call-{}", offset + idx + 1)),
+                        name,
+                        arguments,
                     })
                     .collect()
             })
@@ -4570,9 +4572,6 @@ impl LlmBridge for OllamaCloudClient {
         tools: &[ToolDefinition],
         options: &StreamOptions,
     ) -> anyhow::Result<mpsc::Receiver<LlmEvent>> {
-        if !tools.is_empty() {
-            anyhow::bail!("provider ollama-cloud does not support tool declarations");
-        }
         let (tx, rx) = mpsc::channel(256);
         let model = options
             .model
@@ -4591,6 +4590,32 @@ impl LlmBridge for OllamaCloudClient {
             "messages": Self::build_wire_messages(system_prompt, messages),
             "stream": true,
         });
+        if !tools.is_empty() {
+            // Ollama's native ChatRequest uses the function-tool envelope too:
+            // https://docs.ollama.com/api/chat
+            body["tools"] = Value::Array(
+                tools
+                    .iter()
+                    .map(|tool| {
+                        let parameters =
+                            provider_function_parameters("ollama-cloud", &tool.parameters)
+                                .ok_or_else(|| {
+                                    anyhow::anyhow!(
+                                        "provider ollama-cloud does not support tool declarations"
+                                    )
+                                })?;
+                        Ok(json!({
+                            "type": "function",
+                            "function": {
+                                "name": tool.name,
+                                "description": tool.description,
+                                "parameters": parameters,
+                            }
+                        }))
+                    })
+                    .collect::<anyhow::Result<Vec<_>>>()?,
+            );
+        }
         if let Some(think) = ollama_think_value(&model, options.reasoning.as_deref()) {
             body["think"] = think;
         }
@@ -4634,7 +4659,7 @@ impl LlmBridge for OllamaCloudClient {
 /// - Content:   `{"message":{"content":"token"},"done":false}`
 /// - Final:     `{"done":true,"prompt_eval_count":N,"eval_count":N,...}`
 ///
-/// Tool calls arrive in the final message's `message.tool_calls` array.
+/// Tool calls can arrive in any chunk's `message.tool_calls` array.
 async fn parse_ollama_ndjson_stream(
     response: reqwest::Response,
     provider_telemetry: Option<omegon_traits::ProviderTelemetrySnapshot>,
@@ -4651,7 +4676,8 @@ async fn parse_ollama_ndjson_stream(
     let mut full_thinking = String::new();
     let mut input_tokens = 0u64;
     let mut output_tokens = 0u64;
-    let mut final_message = json!({});
+    let mut tool_calls = Vec::new();
+    let mut stream_error = None;
     // Tracks whether the NDJSON stream delivered its `{"done":true}` terminal
     // chunk. A stream that ends without it (connection drop) must not be
     // replayed as a completed turn — mirrors the Codex/Anthropic/OpenAI guards.
@@ -4673,6 +4699,18 @@ async fn parse_ollama_ndjson_stream(
             Err(_) => continue,
         };
 
+        // Native errors can arrive after HTTP 200, including mid-stream.
+        // Error takes precedence over done and any buffered tool calls.
+        // https://docs.ollama.com/api/errors
+        if let Some(error) = chunk
+            .get("error")
+            .and_then(Value::as_str)
+            .filter(|error| !error.trim().is_empty())
+        {
+            stream_error = Some(error.to_string());
+            break;
+        }
+
         let done = chunk.get("done").and_then(Value::as_bool).unwrap_or(false);
 
         if done {
@@ -4682,18 +4720,20 @@ async fn parse_ollama_ndjson_stream(
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
             output_tokens = chunk.get("eval_count").and_then(Value::as_u64).unwrap_or(0);
-            // Some models include the final message content in the done chunk
-            if let Some(msg) = chunk.get("message") {
-                final_message = msg.clone();
-            }
             saw_done = true;
-            break;
         }
 
         let message = match chunk.get("message") {
             Some(m) => m,
+            None if done => break,
             None => continue,
         };
+        // Native streaming returns complete calls before the terminal chunk.
+        // Keep them even when the final message contains only empty content.
+        tool_calls.extend(OllamaCloudClient::parse_tool_calls(
+            message,
+            tool_calls.len(),
+        ));
 
         // Thinking delta
         let thinking_delta = message
@@ -4732,6 +4772,9 @@ async fn parse_ollama_ndjson_stream(
                 })
                 .await;
         }
+        if done {
+            break;
+        }
     }
 
     // Close any open phases
@@ -4744,6 +4787,16 @@ async fn parse_ollama_ndjson_stream(
         // Ensure at least one text start/end pair
         let _ = tx.send(LlmEvent::TextStart).await;
         let _ = tx.send(LlmEvent::TextEnd).await;
+    }
+
+    if let Some(error) = stream_error {
+        let _ = tx
+            .send(upstream_failure_event(
+                format!("Ollama Cloud: {error}"),
+                None,
+            ))
+            .await;
+        return Ok(());
     }
 
     if !saw_done {
@@ -4767,8 +4820,7 @@ async fn parse_ollama_ndjson_stream(
         return Ok(());
     }
 
-    // Tool calls from the final message
-    let tool_calls = OllamaCloudClient::parse_tool_calls(&final_message);
+    // Publish calls only after a successful terminal chunk.
     for tool_call in &tool_calls {
         let _ = tx.send(LlmEvent::ToolCallStart).await;
         let _ = tx
@@ -5226,6 +5278,192 @@ impl LlmBridge for AntigravityClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn ollama_cloud_native_tools_and_no_tools_round_trip() {
+        use axum::{Json, Router, http::HeaderMap, routing::post};
+        use std::sync::{Arc, Mutex};
+        use std::time::Duration;
+
+        for (with_tools, complete) in [(true, true), (false, true), (true, false)] {
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let captured = requests.clone();
+            let app = Router::new().route(
+                "/api/chat",
+                post(move |headers: HeaderMap, Json(body): Json<Value>| {
+                    let captured = captured.clone();
+                    async move {
+                        assert_eq!(headers["authorization"], "Bearer fixture-key");
+                        captured.lock().unwrap().push(body);
+                        let response = if with_tools {
+                            // Calls precede the terminal chunk in native streaming.
+                            concat!(
+                                "{\"message\":{\"tool_calls\":[{\"function\":{\"name\":\"read\",\"arguments\":{\"path\":\"README.md\"}}}]},\"done\":false}\n",
+                                "{\"message\":{\"tool_calls\":[{\"function\":{\"name\":\"read\",\"arguments\":{\"path\":\"Cargo.toml\"}}}]},\"done\":false}\n",
+                                "{\"message\":{\"content\":\"\"},\"done\":true,\"prompt_eval_count\":3,\"eval_count\":2}\n"
+                            )
+                        } else {
+                            "{\"message\":{\"content\":\"OK\"},\"done\":true,\"prompt_eval_count\":3,\"eval_count\":2}\n"
+                        };
+                        let response = if complete {
+                            response.to_string()
+                        } else {
+                            // The connection closes after calls but before done.
+                            response.lines().take(2).collect::<Vec<_>>().join("\n") + "\n"
+                        };
+                        ([("content-type", "application/x-ndjson")], response)
+                    }
+                }),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base_url = format!("http://{}/api", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let result = tokio::time::timeout(Duration::from_secs(10), async {
+                let client = OllamaCloudClient {
+                    client: reqwest::Client::builder().no_proxy().build().unwrap(),
+                    api_key: "fixture-key".into(),
+                    base_url,
+                };
+                let tools = if with_tools {
+                    vec![ToolDefinition {
+                        name: "read".into(),
+                        label: "Read".into(),
+                        description: "Read a file".into(),
+                        parameters: json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"allOf":[]}),
+                        capabilities: vec![],
+                    }]
+                } else {
+                    vec![]
+                };
+                let options = StreamOptions {
+                    model: Some("ollama-cloud:gpt-oss:120b-cloud".into()),
+                    reasoning: Some("medium".into()),
+                    ..Default::default()
+                };
+                let mut events = client.stream("Fixture instructions", &[], &tools, &options).await?;
+                let mut calls = Vec::new();
+                let mut done = None;
+                let mut failure = None;
+                while let Some(event) = events.recv().await {
+                    match event {
+                        LlmEvent::ToolCallEnd { tool_call } => calls.push(tool_call),
+                        LlmEvent::Done { message, input_tokens, output_tokens, .. } => {
+                            assert_eq!((input_tokens, output_tokens), (3, 2));
+                            done = Some(message);
+                        }
+                        LlmEvent::Error { message } => failure = Some(message),
+                        LlmEvent::UpstreamFailure { failure } => anyhow::bail!("{}", failure.message),
+                        _ => {}
+                    }
+                }
+                if !complete {
+                    assert!(done.is_none());
+                    assert!(calls.is_empty(), "incomplete response must not publish tool calls");
+                    assert!(failure.unwrap().contains("stream closed without completion"));
+                    return anyhow::Ok(());
+                }
+                assert!(failure.is_none(), "native stream failed: {failure:?}");
+                let done = done.expect("native stream must complete");
+                if with_tools {
+                    assert_eq!(calls.len(), 2);
+                    assert_eq!(calls[0].name, "read");
+                    assert_eq!(calls[0].arguments["path"], "README.md");
+                    assert_eq!(calls[1].arguments["path"], "Cargo.toml");
+                    assert_ne!(calls[0].id, calls[1].id);
+                    assert_eq!(done["tool_calls"].as_array().unwrap().len(), 2);
+                } else {
+                    assert!(calls.is_empty());
+                    assert_eq!(done["text"], "OK");
+                }
+                anyhow::Ok(())
+            }).await;
+            server.abort();
+            let _ = server.await;
+            result.expect("native fixture exceeded deadline").unwrap();
+
+            let requests = requests.lock().unwrap();
+            assert_eq!(requests.len(), 1);
+            let body = &requests[0];
+            assert_eq!(body["model"], "gpt-oss:120b-cloud");
+            assert_eq!(body["stream"], true);
+            assert_eq!(body["think"], "medium");
+            assert_eq!(body["messages"][0]["content"], "Fixture instructions");
+            if with_tools {
+                assert_eq!(body["tools"][0]["type"], "function");
+                assert_eq!(body["tools"][0]["function"]["name"], "read");
+                assert_eq!(body["tools"][0]["function"]["description"], "Read a file");
+                assert_eq!(
+                    body["tools"][0]["function"]["parameters"],
+                    json!({
+                        "type":"object", "properties":{"path":{"type":"string"}}, "required":["path"]
+                    })
+                );
+            } else {
+                assert!(body.get("tools").is_none());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn ollama_cloud_native_error_discards_buffered_calls_before_any_done() {
+        let diagnostic = "model failed to generate a response: \"fixture\" — capacity";
+        for error_has_done in [false, true] {
+            for later_done in [false, true] {
+                let mut error = json!({"error": diagnostic, "debug": "unrelated envelope field"});
+                if error_has_done {
+                    error["done"] = json!(true);
+                    error["message"] = json!({"content": "must not complete"});
+                }
+                let mut chunks = vec![
+                    json!({"message": {
+                        "thinking": "planning", "content": "partial",
+                        "tool_calls": [{"function": {"name": "read", "arguments": {"path": "README.md"}}}]
+                    }, "done": false}),
+                    error,
+                ];
+                if later_done {
+                    chunks.push(json!({"message": {"content": "must not complete"}, "done": true}));
+                }
+                let body = chunks
+                    .iter()
+                    .map(|chunk| format!("{chunk}\n"))
+                    .collect::<String>();
+                let response = reqwest::Response::from(
+                    axum::http::Response::builder()
+                        .header("content-type", "application/x-ndjson")
+                        .body(body)
+                        .unwrap(),
+                );
+                let (tx, mut rx) = mpsc::channel(32);
+                parse_ollama_ndjson_stream(response, None, &tx)
+                    .await
+                    .unwrap();
+                drop(tx);
+                let mut failures = Vec::new();
+                let mut text_ended = false;
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        LlmEvent::UpstreamFailure { failure } => failures.push(failure),
+                        LlmEvent::TextEnd => text_ended = true,
+                        LlmEvent::TextDelta { delta } => assert_eq!(delta, "partial"),
+                        LlmEvent::Done { .. }
+                        | LlmEvent::ToolCallStart
+                        | LlmEvent::ToolCallEnd { .. } => {
+                            panic!("native error published completion or buffered calls")
+                        }
+                        LlmEvent::Error { message } => {
+                            panic!("native diagnostic was replaced by generic error: {message}")
+                        }
+                        _ => {}
+                    }
+                }
+                assert!(text_ended, "the partial text phase must close on failure");
+                assert_eq!(failures.len(), 1);
+                assert_eq!(failures[0].message, format!("Ollama Cloud: {diagnostic}"));
+                assert_eq!(failures[0].retry_after_ms, None);
+            }
+        }
+    }
 
     #[tokio::test]
     async fn astra_openai_uses_responses_and_streams_tools() {
@@ -7130,11 +7368,62 @@ mod tests {
             ]
         });
 
-        let tool_calls = OllamaCloudClient::parse_tool_calls(&message);
+        let tool_calls = OllamaCloudClient::parse_tool_calls(&message, 0);
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0].name, "bash");
         assert_eq!(tool_calls[0].arguments, json!({"command": "pwd"}));
         assert_eq!(tool_calls[0].id, "ollama-call-1");
+    }
+
+    #[test]
+    fn ollama_cloud_fallback_ids_follow_valid_calls_across_malformed_chunks() {
+        let chunks = [
+            json!({"tool_calls": [{}, {"function": {"name": "read", "arguments": {"path": "a"}}}]}),
+            json!({"tool_calls": [{"function": {"name": "read", "arguments": {"path": "b"}}}]}),
+            json!({"tool_calls": [
+                {"id": "native-42", "function": {"name": "read", "arguments": {"path": "c"}}},
+                {"function": {}},
+                {"function": {"name": "read", "arguments": {"path": "d"}}}
+            ]}),
+        ];
+        let mut calls = Vec::new();
+        for chunk in chunks {
+            calls.extend(OllamaCloudClient::parse_tool_calls(&chunk, calls.len()));
+        }
+        assert_eq!(
+            calls
+                .iter()
+                .map(|call| call.id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "ollama-call-1",
+                "ollama-call-2",
+                "native-42",
+                "ollama-call-4"
+            ]
+        );
+        assert_eq!(
+            calls
+                .iter()
+                .map(|call| call.arguments["path"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["a", "b", "c", "d"]
+        );
+        // Results may complete out of order. Each result ID must resolve to
+        // exactly its original call, including the preserved native ID.
+        for (call_id, path) in [
+            ("ollama-call-4", "d"),
+            ("native-42", "c"),
+            ("ollama-call-2", "b"),
+            ("ollama-call-1", "a"),
+        ] {
+            let matching = calls
+                .iter()
+                .filter(|call| call.id == call_id)
+                .collect::<Vec<_>>();
+            assert_eq!(matching.len(), 1);
+            assert_eq!(matching[0].arguments["path"], path);
+        }
     }
 
     #[test]

@@ -170,6 +170,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Ollama Cloud now sends native function-tool declarations instead of rejecting tool-enabled prompts. GPT OSS 120B Cloud declares its documented tool support for admitted routes. Streamed calls are retained until successful completion, and requests configured without tools still omit declarations. Malformed call entries do not consume fallback IDs. Native stream errors retain their diagnostics and discard buffered calls, even when accompanied or followed by a completion marker.
+
 - WebSocket clients subscribe before snapshot delivery so completions during reconnect remain observable. Snapshots replay captured web-owned approvals with session isolation and redacted metadata; the browser reconciles snapshot and live approval prompts by identity. Regression fixtures verify durable admission deduplication and detached delegate result retrieval, while legacy prompt retries still require a client identity contract.
 
 - The Nix host-only distribution smoke now allows enough time for an uncached package build instead of canceling a healthy final derivation at the previous job limit.

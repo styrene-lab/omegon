@@ -2754,6 +2754,150 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn native_drift_models_prepare_supported_tools_without_changing_identity() {
+        use crate::inference_inventory::{EvidenceKind, InventoryLayer, InventorySnapshot};
+        use crate::model_request::{PreparedModelRequest, RequestInputs, RequestPolicy};
+        let inventory = InventorySnapshot::build(
+            1,
+            vec![InventoryLayer::embedded_registry(
+                crate::model_registry::ModelRegistry::global(),
+            )],
+        )
+        .unwrap();
+        let tools = [omegon_traits::ToolDefinition {
+            name: "read".into(),
+            label: "Read".into(),
+            description: "Read a file".into(),
+            parameters: serde_json::json!({"type":"object"}),
+            capabilities: vec![],
+        }];
+        // GPT OSS's per-model evidence: https://ollama.com/library/gpt-oss:120b-cloud
+        for model in [
+            "ollama-cloud:gpt-oss:120b-cloud",
+            "anthropic:claude-sonnet-4-6",
+            "openai:gpt-5.4",
+        ] {
+            let provider = crate::providers::infer_provider_id(model);
+            assert!(crate::tool_schema::dialect_for_provider(&provider).is_some());
+            let admitted_capabilities = if provider == "ollama-cloud" {
+                let offering = admit_exact_route(&inventory, model, &["tools".into()])
+                    .expect("GPT OSS Cloud must declare its documented tool support");
+                Some(AdmittedModelCapabilities {
+                    tools: offering_capability_admission(offering, "tools", EvidenceKind::Declared),
+                    reasoning: offering_capability_admission(
+                        offering,
+                        "reasoning",
+                        EvidenceKind::Declared,
+                    ),
+                    provider_supports_tools: true,
+                })
+            } else {
+                // Headless Anthropic/OpenAI smoke uses resolve_provider_route's
+                // compatibility route, without inventory-bound admission.
+                None
+            };
+            let calls = Arc::new(AtomicUsize::new(0));
+            let bridge = RoutedBridge {
+                selected_model: model.into(),
+                serving_model: model.into(),
+                native_model: model.into(),
+                credential_source_class: "test".into(),
+                endpoint_provenance: None,
+                admitted_capabilities,
+                inner: Box::new(CountingBridge(calls.clone())),
+            };
+            let options = StreamOptions {
+                model: Some(model.into()),
+                ..Default::default()
+            };
+            let prepared = PreparedModelRequest::prepare(
+                &bridge,
+                RequestInputs {
+                    system: "system",
+                    messages: &[],
+                    tools: &tools,
+                    options: &options,
+                    policy: RequestPolicy::Turn,
+                },
+                Some(model),
+                |_| Ok(()),
+            )
+            .unwrap();
+            prepared.stream().await.unwrap();
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            assert_eq!(bridge.selected_model_hint(), Some(model));
+            assert_eq!(bridge.serving_model_hint(), Some(model));
+        }
+    }
+
+    #[tokio::test]
+    async fn prepared_tool_admission_rejects_unsupported_but_allows_configured_no_tools() {
+        use crate::model_request::{PreparedModelRequest, RequestInputs, RequestPolicy};
+        let tools = [omegon_traits::ToolDefinition {
+            name: "read".into(),
+            label: "Read".into(),
+            description: "Read a file".into(),
+            parameters: serde_json::json!({"type":"object"}),
+            capabilities: vec![],
+        }];
+        for (provider_supports_tools, model_tools) in [
+            (false, CapabilityAdmission::Supported),
+            (true, CapabilityAdmission::Missing),
+            (true, CapabilityAdmission::InsufficientEvidence),
+        ] {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let evidence = AtomicUsize::new(0);
+            let bridge = RoutedBridge {
+                selected_model: "lab:model".into(),
+                serving_model: "lab:model".into(),
+                native_model: "lab:model".into(),
+                credential_source_class: "test".into(),
+                endpoint_provenance: None,
+                admitted_capabilities: Some(AdmittedModelCapabilities {
+                    tools: model_tools,
+                    reasoning: CapabilityAdmission::Supported,
+                    provider_supports_tools,
+                }),
+                inner: Box::new(CountingBridge(calls.clone())),
+            };
+            let options = StreamOptions::default();
+            for advertised in [&tools[..], &[][..]] {
+                let prepared = PreparedModelRequest::prepare(
+                    &bridge,
+                    RequestInputs {
+                        system: "system",
+                        messages: &[],
+                        tools: advertised,
+                        options: &options,
+                        policy: RequestPolicy::Turn,
+                    },
+                    None,
+                    |_| {
+                        evidence.fetch_add(1, Ordering::SeqCst);
+                        Ok(())
+                    },
+                );
+                if advertised.is_empty() {
+                    prepared
+                        .expect("explicit no-tools configuration must remain valid")
+                        .stream()
+                        .await
+                        .unwrap();
+                    assert_eq!(calls.load(Ordering::SeqCst), 1);
+                    assert_eq!(evidence.load(Ordering::SeqCst), 1);
+                } else {
+                    assert!(
+                        prepared.is_err(),
+                        "unsupported declarations must fail preparation"
+                    );
+                    assert_eq!(calls.load(Ordering::SeqCst), 0);
+                    assert_eq!(evidence.load(Ordering::SeqCst), 0);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
     #[allow(
         clippy::await_holding_lock,
         reason = "serialize synthetic credential fixtures through native bridge resolution"
