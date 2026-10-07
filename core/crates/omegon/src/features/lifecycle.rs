@@ -2537,41 +2537,6 @@ impl Feature for LifecycleFeature {
 
     fn on_event(&mut self, event: &BusEvent) -> Vec<BusRequest> {
         match event {
-            BusEvent::SessionStart { .. } => {
-                // Check Vault health if configured — with a short timeout
-                // to avoid blocking the event loop.
-                let mut requests = vec![];
-                if std::env::var("VAULT_ADDR").is_ok()
-                    || self.repo_path.join(".omegon/vault.json").exists()
-                {
-                    match std::process::Command::new("vault")
-                        .args(["status", "-format=json"])
-                        .env("VAULT_CLIENT_TIMEOUT", "5")
-                        .stdout(std::process::Stdio::piped())
-                        .stderr(std::process::Stdio::piped())
-                        .spawn()
-                        .and_then(|child| child.wait_with_output())
-                    {
-                        Ok(out) => {
-                            let body = String::from_utf8_lossy(&out.stdout);
-                            let sealed = serde_json::from_str::<Value>(&body)
-                                .ok()
-                                .and_then(|v| v["sealed"].as_bool())
-                                .unwrap_or(true);
-                            if sealed {
-                                requests.push(BusRequest::Notify {
-                                    message: "Vault is sealed — secrets from Vault unavailable. Use /vault unseal".into(),
-                                    level: omegon_traits::NotifyLevel::Warning,
-                                });
-                            }
-                        }
-                        Err(_) => {
-                            // vault CLI not available or unreachable — silent skip
-                        }
-                    }
-                }
-                requests
-            }
             BusEvent::TurnEnd(_) => {
                 self.turn_counter += 1;
                 // Refresh every 5 turns to pick up external changes
@@ -2672,6 +2637,8 @@ mod tests {
     use super::*;
     use crate::bus::EventBus;
     use std::fs;
+    #[cfg(unix)]
+    use std::path::Path;
 
     fn setup_test_repo() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
@@ -2702,6 +2669,99 @@ mod tests {
         .await
         .unwrap();
         (bus, LifecycleFeature::managed(repo, binding, host))
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn session_start_does_not_probe_vault() {
+        const SCENARIO: &str = "OMEGON_TEST_LIFECYCLE_VAULT_SCENARIO";
+        const MARKER: &str = "OMEGON_TEST_VAULT_PROBE_MARKER";
+        if let Ok(scenario) = std::env::var(SCENARIO) {
+            let (_dir, repo) = setup_test_repo();
+            match scenario.as_str() {
+                "environment" => {
+                    assert!(std::env::var("VAULT_ADDR").is_ok());
+                    assert!(!repo.join(".omegon/vault.json").exists());
+                }
+                "project-config" => {
+                    assert!(std::env::var_os("VAULT_ADDR").is_none());
+                    fs::create_dir_all(repo.join(".omegon")).unwrap();
+                    fs::write(
+                        repo.join(".omegon/vault.json"),
+                        r#"{"addr":"http://127.0.0.1:1","auth":{"method":"token"}}"#,
+                    )
+                    .unwrap();
+                }
+                _ => panic!("unknown Vault test scenario: {scenario}"),
+            }
+            let (_bus, mut feature) = managed_feature(&repo).await;
+            let requests = feature.on_event(&BusEvent::SessionStart {
+                cwd: repo,
+                session_id: "lifecycle-vault-ownership".into(),
+            });
+            assert!(
+                !PathBuf::from(std::env::var_os(MARKER).unwrap()).exists(),
+                "lifecycle SessionStart invoked the Vault CLI ({scenario})"
+            );
+            assert!(
+                requests.is_empty(),
+                "lifecycle SessionStart must not emit secret-health policy: {requests:?}"
+            );
+            return;
+        }
+
+        // Re-exec only this test with a private environment: parallel tests and
+        // the operator's Vault credentials must never see the fixture PATH.
+        for scenario in ["environment", "project-config"] {
+            let home = tempfile::tempdir().unwrap();
+            let bin = home.path().join("bin");
+            fs::create_dir(&bin).unwrap();
+            let vault = bin.join("vault");
+            std::os::unix::fs::symlink(
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lifecycle/vault.sh"),
+                &vault,
+            )
+            .unwrap();
+            let marker = home.path().join("vault-invoked");
+            // Prove the executable trap works before trusting its absence.
+            let probe = std::process::Command::new(&vault)
+                .args(["status", "-format=json"])
+                .env_clear()
+                .env(MARKER, &marker)
+                .output()
+                .unwrap();
+            assert_eq!(probe.status.code(), Some(2));
+            assert_eq!(
+                fs::read_to_string(&marker).unwrap(),
+                "status -format=json\n"
+            );
+            fs::remove_file(&marker).unwrap();
+
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--exact",
+                    "features::lifecycle::tests::session_start_does_not_probe_vault",
+                    "--nocapture",
+                ])
+                .env_clear()
+                .env(SCENARIO, scenario)
+                .env(MARKER, &marker)
+                .env("HOME", home.path())
+                .env("OMEGON_HOME", home.path().join(".omegon"))
+                .env("PATH", &bin);
+            if scenario == "environment" {
+                command.env("VAULT_ADDR", "http://127.0.0.1:1");
+            }
+            let output = command.output().unwrap();
+            assert!(
+                output.status.success(),
+                "isolated {scenario} test failed: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(!marker.exists(), "Vault CLI invoked for {scenario}");
+        }
     }
 
     #[test]

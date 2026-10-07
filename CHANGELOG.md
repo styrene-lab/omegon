@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- The design/change lifecycle no longer runs `vault status` or emits sealed-Vault warnings on session start. Use `/vault status` for explicit health checks through the shared secrets subsystem.
+
 - CI now serializes main-crate tests to respect process-global fixture isolation, with a matching integration-job time budget. Delegate process tests use checked-in executable fixtures to avoid Linux executable-write races.
 
 - Composition surface baselines now account for the four admitted memory tools and applicability schemas in the Wave 5 prerequisite stack. Recorded Linux artifact evidence and budget regressions preserve existing growth allowances and reduced-host limits.
