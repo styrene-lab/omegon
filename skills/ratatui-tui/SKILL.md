@@ -20,7 +20,7 @@ From the workspace root, run:
 python3 skills/ratatui-tui/scripts/resolve_stack.py
 ```
 
-The resolver reads Cargo metadata and lock resolution. It emits declared requirements, exact resolved versions, enabled features, local source paths, and version-pinned docs.rs links. If the script is unavailable in an installed skill, use `cargo metadata --format-version 1` directly; never copy the versions shown by an older session or this document.
+The resolver reads Cargo metadata and lock resolution. It emits declared requirements and features, exact resolved versions, `tui` feature membership, local source paths, and version-pinned docs.rs links. If the script is unavailable in an installed skill, use `cargo metadata --format-version 1` directly; never copy the versions shown by an older session or this document.
 
 Treat crates enabled by the package's `tui` feature as the active stack. Direct TUI dependencies remain visible even if feature metadata is absent. Candidate libraries in `references/ecosystem-candidates.md` are research leads, not dependencies or recommendations.
 
@@ -54,7 +54,7 @@ Treat crates enabled by the package's `tui` feature as the active stack. Direct 
 
 - Canonical conversation state is the source of truth.
 - Do not publish primary-screen history while alternate-screen content is active.
-- Inspect eligible records without committing the cursor, perform insertion, then commit. Failed insertion remains retryable.
+- Inspect eligible records without committing the cursor, perform insertion, then commit after confirmed delivery. A known failure before writing can retry; ambiguous partial delivery must not blindly replay records.
 - Never duplicate canonical records into an unbounded presentation queue.
 
 ### Stateful widgets own explicit state
@@ -112,4 +112,4 @@ Before changing architecture, search for local terminal guards, render scheduler
 
 ## Safety Notes
 
-The resolver executes `cargo metadata` as an argument-array subprocess without a shell, reads only project/Cargo metadata, applies timeouts and output bounds, and does not fetch documentation. Generated URLs are references, not proof that an API exists; local resolved source is stronger evidence.
+The resolver executes `cargo metadata` as an argument-array subprocess without a shell and does not fetch documentation. It uses a 60-second timeout and rejects output larger than 32 MiB after capture; capture memory is not bounded by that check. Set `CARGO_NET_OFFLINE=true` when dependency downloads are not permitted. Generated URLs are references, not proof that an API exists; local resolved source is stronger evidence.

@@ -2,7 +2,7 @@
 schema_version = 1
 id = "omegon-shipped"
 version = "1.0.0"
-canonical_digest = "7382a2835bbdb71f7bc61960b873b044203d32e8937fbee39c416f7bb792644e"
+canonical_digest = "08ecd20f19df58ebd11e926c7887eafae5beda3242126ac78f10bc4ff59d9dc3"
 requested_capabilities = [
   "content:catalog-data",
   "content:persona-directive",
@@ -304,8 +304,8 @@ requested_capabilities = ["content:skill-metadata"]
 [[assets]]
 path = "skills/ratatui-tui/SKILL.md"
 kind = "skill"
-sha256 = "46edccc8707a466ea97bc66840f381a6f0eebdef7770bd7253d8d901e018e042"
-size = 6484
+sha256 = "39f553a69cf4e964a1adacad32349b11c948263aead6171004d303eaafa04275"
+size = 6724
 requested_capabilities = ["content:skill-metadata"]
 
 [[assets]]
