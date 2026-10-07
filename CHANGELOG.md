@@ -18,6 +18,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Added pinned LikeC4 tooling, opt-in diagram commands, an authoring skill, and source-backed context, internals, and host-component views with a shared review agreement. The model retains its teal/copper/charcoal theme and manual layout, distinguishes native extensions from MCP, and records bounded memory extraction under existing owners. Architecture evidence covers merged main `77996814`; headless runtime acceptance passed, while exact-head CI remains blocked by a Rust-build timeout.
+
+- Documented acceptance of merged request preparation and quiet inline behavior, distinct CI/provider/runtime evidence, and the remaining native lifecycle closure gap.
+
 - Inline `/splash` now returns an immediate notice instead of entering a blocking fullscreen animation, keeping live input and event processing available.
 
 - Private TUI acceptance retains the exact observed replay checkpoint and rejects external HTTP(S) discovery through its loopback fixture proxy.

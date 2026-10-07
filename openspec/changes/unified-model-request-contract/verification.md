@@ -1,10 +1,83 @@
 # Unified request preparation verification
 
-## Ownership and provenance
+## Post-merge acceptance — 2026-10-07
+
+The user accepted the shared internal envelope and subsequently authorized landing
+and lifecycle and architecture reconciliation. This supersedes the original
+PR-creation-only authorization preserved in the historical handoff below.
+
+Merged integration sequence:
+
+| Change | Merge commit | Disposition |
+| --- | --- | --- |
+| [Request preparation #247](https://github.com/styrene-lab/omegon/pull/247) | `13760f256662de5cbb8089d38990f7db3c93d89d` | Implemented, tested, independently reviewed without blockers, and accepted. |
+| [CI toolchain repair #248](https://github.com/styrene-lab/omegon/pull/248) | `031ef2b78729962370cb1151491800273e10e62d` | Merged compiler-baseline repair. |
+| [Provider repair #250](https://github.com/styrene-lab/omegon/pull/250) | `024a8616bfee6f4b3c3bf89fc9c32a2f540e8c48` | Merged Ollama Cloud request and provider-drift reporting repair. |
+| [Quiet inline #249](https://github.com/styrene-lab/omegon/pull/249) | `77996814af7720a45f15fd482ac8579093ebdd6f` | Merged on top of #250; inline PR-head CI passed at `f21cc8d6`. |
+
+The [combined integration record](../quiet-inline-replay/verification.md#integration-acceptance--2026-10-07)
+tracks the separate inline evidence and completed combined-main report at
+`77996814`: headless stress/resume passed; CI had 29 successful jobs and one
+Rust-build timeout. Earlier provider-head results below do not claim verification
+of that combined merge. Neither evidence set validates a later rebased TUI tip.
+
+The integration owner supplied the following completed run evidence. Both runs
+used provider-repair head `a08d526106fe068cf573a12b70782b14a979e15a`:
+
+- [CI run 37663285447](https://github.com/styrene-lab/omegon/actions/runs/37663285447):
+  all 30 jobs passed; all 31 PR checks passed at that head.
+- [Hosted provider run 37663276660](https://github.com/styrene-lab/omegon/actions/runs/37663276660):
+  three actual hosted tool round trips passed, for Anthropic, OpenAI, and Ollama
+  Cloud. Local Ollama was skipped. The issue-reporting step was skipped, so this
+  run performed no live issue writes.
+
+These are later composed regression results, not results from the original
+request-contract test head. Hosted tool round trips complement the deterministic
+compaction and memory scenarios below; they do not establish live coverage of
+every included flow. This documentation update made no new provider calls.
+
+### Architecture and native closure
+
+The [LikeC4 model](../../../site/diagrams/likec4/context.c4) includes
+`omegon.host.memory → omegon.host.inference: Requests bounded memory extraction`
+in `hostComponents`. The accepted preparation contract spans existing adapters
+without a new component. The
+[design node](../../../docs/unified-model-request-contract.md#architecture-model-references)
+records stable model references and immutable implementation evidence.
+
+All 12 tasks remain checked. The standalone Python OpenSpec validator and
+`archive --check` previously passed, reporting archive readiness. That result
+does not reconcile the native ledger. The integration owner's inspection found
+no native ledger entry for this change. Native test registration rejects the
+artifact-derived `verifying` stage. Native archival moves content and transitions
+state without merging baseline deltas; standalone archival merges deltas without
+native ledger updates.
+The [closure concern](../../../docs/lifecycle-closure-reconciliation.md) pins the
+source evidence and the need for a supported, idempotent closure owner.
+
+At the closeout inspection, native management tools were unavailable. The
+installed launcher could not resolve its checkout, and the available debug binary
+exposed no standalone management command. These historical operating limitations
+are not product requirements.
+No tool-backed transition or archive was performed. The design node retains
+`implementing` with administrative closure pending; implementation acceptance
+does not imply an archived change.
+
+### Documentation checks — 2026-10-07
+
+- Read-only Python `validate unified-model-request-contract`: `OK (verifying)`.
+  This is artifact-derived state, not a native transition.
+- Local document links, heading anchors, and pinned source paths: passed.
+- Design-node fields, sections, and matching open-question lists: manually
+  checked against the canonical `design_artifacts.rs` codec.
+- `tasks.md`: byte-identical to merged main, with all 12 tasks checked.
+- `git diff --check`: passed.
+
+## Historical ownership and provenance — 2026-10-07, before merge
 
 - Branch: `feat/unified-model-request-preparation`.
 - Base: `1828d6c5a6f78eceae9e811e9ba39e4ccf4f59d4`, the PR #246 merge.
-- Worktree: `/Users/wilson/workspace/styrene-lab/omegon-model-request-preparation`.
+- Worktree: the isolated `omegon-model-request-preparation` checkout.
 - Proposal research was imported from the sibling `omegon-likec4` draft. The
   parent draft and diagram runtime remain owned by the parent session.
 - Only `omegon` code changes. No traits, dependency, persisted-schema, credential
@@ -33,7 +106,7 @@ Memory's outer 30-second deadline and candidate parser are unchanged. Mutable
 capture generation checks precede admission; stored immutable evidence and pinned
 ended-session finalization retain their existing recovery semantics.
 
-## Author validation record
+## Historical author validation record — 2026-10-07, before merge
 
 Environment: `nix develop --offline --no-write-lock-file`, Rust/Cargo 1.95.0 from
 the checked-in flake lock. Cargo uses `CARGO_NET_OFFLINE=true`; tests use
@@ -87,7 +160,10 @@ nix develop --offline --no-write-lock-file -c sh -c \
 The main crate used its default `product`, `tui`, and `self-update` features on
 macOS. No full-workspace or cross-platform gate is claimed.
 
-## Review findings and remaining boundaries
+## Historical review and handoff — 2026-10-07, before merge
+
+The authorization limits in this section describe the original handoff. The
+post-merge acceptance record above supersedes them.
 
 Self-review found and addressed:
 

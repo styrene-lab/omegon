@@ -1,17 +1,105 @@
 # Verification
 
-## Source and environment
+## Integration acceptance — 2026-10-07
+
+[PR #249](https://github.com/styrene-lab/omegon/pull/249) merged at
+`77996814af7720a45f15fd482ac8579093ebdd6f`. Its first parent is
+`024a8616bfee6f4b3c3bf89fc9c32a2f540e8c48`, so combined main includes request
+preparation #247, CI repair #248, provider repair #250, and quiet inline #249.
+The bounded inline implementation is accepted. Landing and lifecycle and
+architecture reconciliation are authorized.
+
+### Evidence chain
+
+| Evidence | Exact source or artifact | Result and boundary |
+| --- | --- | --- |
+| Request preparation author gates and independent review | PR #247, merge `13760f25` | Passed; scenario mapping and original test evidence remain in the [request-contract record](../unified-model-request-contract/verification.md). |
+| Provider CI and hosted round trips after CI repair #248 | Provider head `a08d526106fe068cf573a12b70782b14a979e15a`, merged as #250 at `024a8616` | CI run `37663285447`: 30 jobs and 31 PR checks passed. Hosted run `37663276660`: Anthropic, OpenAI, and Ollama Cloud round trips passed. Local Ollama and issue reporting were skipped. |
+| Inline PR CI | `f21cc8d6c9308bfe18026f56768552e127a1846c` | [Test run 37664057629](https://github.com/styrene-lab/omegon/actions/runs/37664057629): all 30 jobs passed. Lipstyk also passed. Rust 1.95 was used; inline and missing-AgentEnd regressions passed. The opt-in PTY detachment test actually ran: one passed, zero ignored. |
+| Earlier private stress and resume | Frozen binary SHA-256 `5caf296bce616b05f77c127c5bc8f854b0a8aa29648fd2ee098e6eb526d9bc8d` | Passed with retained source/driver identity and cleanup evidence below. This is not a build of the combined merge. |
+| Combined-main headless acceptance | Pristine `77996814af7720a45f15fd482ac8579093ebdd6f`, frozen binary SHA-256 `cf3210740a3f38fca9aa1f500a800952559d0e258a11d3fd7e6eda4e11758388` | Passed: six stress requests, one resume request, 43 captures, and verified owned-process cleanup. No GUI compatibility claim. |
+| Exact-head post-merge CI | `77996814af7720a45f15fd482ac8579093ebdd6f` | [Run 37671759878](https://github.com/styrene-lab/omegon/actions/runs/37671759878) completed with 29 successful jobs and one cancelled Rust build. The 30-minute job limit expired during task-capsule release compilation. This is not an all-green gate or a code assertion failure. |
+
+The integration owner supplied the completed CI and runtime results above. This documentation
+update does not rerun source tests, provider calls, or runtime acceptance. The
+original frozen binary reports `13760f2-dirty`; retained source comparisons bind
+it to the reviewed inline changes. Its earlier stress/resume evidence remains
+valid within that boundary and does not establish combined-main acceptance.
+
+### Combined-main headless acceptance — 2026-10-07
+
+The integration owner built pristine `77996814` with the locked Nix Rust 1.95
+toolchain. The frozen binary reports `omegon 0.29.0-dev (7799681 2026-10-07)` and
+hashes to `cf3210740a3f38fca9aa1f500a800952559d0e258a11d3fd7e6eda4e11758388`.
+Private receipt: `integration-77996814/final-result.json` under the approved
+OpenCode evidence directory. Its result is `runtime_pass_ci_blocked`.
+
+The private headless tmux stress run passed six local provider requests and
+retained 32 captures. It verified the quiet replay notice while the provider
+was held, ordinary second submission, real denied write without file mutation,
+cancellation and recovery, and inspector/draft preservation. The resume run
+passed one local request and retained 11 captures. It verified actual saved-session
+resume, borrowed-menu behavior, primary history, drafts, and thinking selection.
+Both manifests report cleanup success, zero remaining owned groups, and zero
+GUI windows. The fixture rejected external HTTP(S) probes to GitHub, OpenAI,
+and Ollama; it is not an OS network sandbox.
+
+Exact-head CI completed with 29 successful jobs and one cancelled job. The Rust
+build exceeded `30m0s` in **Build and exercise task capsule release binary**.
+Preceding build, composition, feature/Clippy, and contract steps passed. The
+timeout leaves that gate blocked; it does not identify a failed code assertion.
+
+This evidence belongs only to exact `77996814`. A later rebased TUI tip needs
+its own validation. This documentation integration did not rebuild or rerun
+the application.
+
+### Remaining acceptance and administrative closure
+
+Combined-main headless acceptance is complete. Exact-head CI remains blocked
+by the Rust-build timeout above. Native GUI compatibility was not exercised.
+
+All seven quiet-inline tasks remain checked. The OpenSpec artifact-derived stage
+is `verifying`; the change is not archived. User authorization includes closure,
+but native task/test registration, ledger reconciliation, and baseline-aware
+archival remain blocked by the
+[lifecycle closure gap](../../../docs/lifecycle-closure-reconciliation.md).
+Standalone archive readiness is not a native lifecycle transition. Completed
+tasks and guarded state have not been rewound to bypass this boundary.
+
+At the closeout inspection, the session had no native lifecycle-management tool.
+The installed launcher could not resolve its checkout, and the available debug
+binary had no standalone management command. These historical operating
+limitations do not establish a product requirement.
+
+### Documentation validation — 2026-10-07
+
+Read-only checks used an explicit `--root` pointing to this documentation
+worktree's `openspec/`, after integrating merged main `77996814`:
+
+| Change | `validate` | `archive --check` |
+| --- | --- | --- |
+| `unified-model-request-contract` | `OK (verifying)` | `ARCHIVE READY` |
+| `quiet-inline-replay` | `OK (verifying)` | `ARCHIVE READY` |
+
+Local links, heading anchors, and immutable source targets passed. Canonical
+design fields, sections, and matching open-question lists were manually reviewed
+against `design_artifacts.rs`. Task files are byte-identical to combined main:
+12 checked request-contract tasks and seven checked quiet-inline tasks.
+`git diff --check` passed. Source, baseline, and archive contents match combined
+main; these documentation checks did not run builds or mutate lifecycle state.
+
+## Historical source and environment — 2026-10-07, before merge
 
 - Branch: `feat/quiet-inline-unification`.
 - Base: `13760f256662de5cbb8089d38990f7db3c93d89d`, verified against `origin/main`
   and read-only `git ls-remote origin refs/heads/main`.
-- Isolated worktree: `/Users/wilson/workspace/styrene-lab/omegon-inline-unification`.
-- Canonical environment: `nix develop`, Rust 1.95.0 / Cargo 1.95.0 from
-  `/nix/store/an3nv5smkv3d0kp4wm545hps90fgmn4g-rust-default-1.95.0`.
+- Isolated worktree: the `omegon-inline-unification` checkout.
+- Canonical environment: `nix develop`, Rust 1.95.0 / Cargo 1.95.0 from the
+  locked Nix toolchain.
 - Compilation uses this worktree's own `target/`; no shared artifact overwrite.
 - Reference checkout was read-only and matched the requested commit and dirty-state boundary.
 
-## Deterministic checks
+## Historical deterministic checks — 2026-10-07, before merge
 
 | Check | Result |
 | --- | --- |
@@ -149,7 +237,11 @@ Commit and PR handoff are now operator-authorized. This evidence describes the
 reviewed source and frozen artifact, not a newly built committed binary. OpenSpec
 remains in verifying state; archival and installation have not been performed.
 
-### CI baseline integration for PR #249
+### Historical CI baseline integration for PR #249
+
+The pending-CI wording in this historical handoff is superseded by the completed
+PR-head results above. The exact combined-main runtime and CI results are now
+recorded separately above.
 
 Merged the exact CI baseline `031ef2b78729962370cb1151491800273e10e62d`
 into the inline branch without rebasing its two logical commits. The only merge
@@ -171,10 +263,11 @@ from the baseline-merge commit. Fresh hosted CI must validate the updated PR hea
 before normal merge. OpenSpec archival and combined-acceptance reconciliation
 remain with the parent workflow.
 
-## Runtime evidence ledger
+## Historical runtime evidence ledger — 2026-10-07, before merge
 
-Evidence root:
-`/private/var/folders/ln/r6np9wfn1wx8r6sdnvn07sxw0000gn/T/opencode/quiet-inline-vcvNwo`.
+Evidence root: the retained private `quiet-inline-vcvNwo` evidence directory.
+Artifact names below are relative to that directory; machine-local paths are
+omitted from this public record.
 
 Build: `nix develop --command cargo build -p omegon --locked`, completed successfully.
 Artifact: this worktree's `target/debug/omegon`, copied byte-for-byte to the evidence

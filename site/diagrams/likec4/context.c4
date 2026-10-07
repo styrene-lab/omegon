@@ -1,0 +1,182 @@
+specification {
+  element person {
+    style {
+      shape person
+      color secondary
+    }
+  }
+  element system {
+    style {
+      color primary
+    }
+  }
+  element externalSystem {
+    style {
+      color muted
+    }
+  }
+  element externalEnvironment {
+    style {
+      shape rectangle
+      color muted
+    }
+  }
+  element application {
+    style {
+      color primary
+    }
+  }
+  element component {
+    style {
+      color primary
+    }
+  }
+  element dataStore {
+    style {
+      shape cylinder
+      color muted
+    }
+  }
+}
+
+model {
+  operator = person 'Operator' {
+    description 'Directs work and reviews outcomes.'
+  }
+  omegon = system 'Omegon' {
+    description 'Helps the developer turn intent into project work while the developer supervises the agent and reviews results.'
+
+    host = application 'Omegon host' {
+      technology 'Rust'
+      description 'Common runtime for sessions, the agent loop, tool and provider integrations, adapters, and supervision.'
+
+      interfaces = component 'Operator interfaces' {
+        description 'Adapts native and ACP prompts, commands, approvals, and progress.'
+      }
+      orchestration = component 'Session orchestration' {
+        description 'Supervises session work and drives the inference-tool cycle.'
+      }
+      context = component 'Context assembly' {
+        description 'Builds per-turn instructions, conversation history, and contributed context.'
+      }
+      inference = component 'Inference gateway' {
+        description 'Resolves the provider and model route and normalizes response streams.'
+      }
+      tools = component 'Tool execution and policy' {
+        description 'Admits tool calls through permissions and approvals, executes them, and returns results.'
+      }
+      memory = component 'Project memory' {
+        description 'Recalls and maintains retained project knowledge and contributes relevant context.'
+      }
+      lifecycle = component 'Design and change lifecycle' {
+        description 'Manages project design and specification transitions and contributes active-work context.'
+      }
+      extensions = component 'Extension integration' {
+        description 'Adapts native extension capabilities and supervises extension processes and RPC.'
+      }
+      mcp = component 'MCP integration' {
+        description 'Discovers and adapts MCP tools, resources, and prompts; manages server connections.'
+      }
+    }
+    codescan = application 'Codescan service' {
+      technology 'Rust'
+      description 'Optional first-party indexing and search process. Runs only when enabled and available.'
+    }
+    sessions = dataStore 'Session history' {
+      technology 'JSONL and JSON'
+      description 'Local durable conversations and checkpoints for session resume.'
+    }
+    lifecycle = dataStore 'Lifecycle ledger' {
+      technology 'JSON'
+      description 'Repository-local lifecycle state and recorded transitions.'
+    }
+    memory = dataStore 'Durable memory' {
+      technology 'SQLite'
+      description 'Retained project knowledge.'
+    }
+    index = dataStore 'Code and knowledge index' {
+      technology 'SQLite'
+      description 'Derived searchable code and knowledge, owned by the Codescan service.'
+    }
+  }
+  acpEditor = externalSystem 'ACP-compatible editor' {
+    description 'An editor, such as Zed, through which the operator directs Omegon and reviews results.'
+  }
+  inferenceProvider = externalSystem 'Inference Provider' {
+    description 'Supplies model inference, local or hosted, outside Omegon.'
+  }
+  webInformation = externalSystem 'Web information sources' {
+    description 'Search providers, content extraction services, and websites that supply information from the web.'
+  }
+  secretsStore = externalSystem 'Secrets store' {
+    description 'Supplies credentials and other secrets through an OS keyring, Vault, or another configured secrets engine.'
+  }
+  extensionSystems = externalSystem 'Extension-connected systems' {
+    description 'Independent systems that supply additional capabilities through Omegon extensions.'
+  }
+  mcpServers = externalSystem 'MCP servers' {
+    description 'Optional, independently supplied local or remote capabilities exposed via Model Context Protocol.'
+  }
+  workspace = externalEnvironment 'Project workspace' {
+    technology 'User-owned environment'
+    description 'User-owned repository and project files, plus the command-execution environment. Omegon-owned stores are modeled separately, even when colocated on disk.'
+  }
+
+  operator -> omegon.host.interfaces 'Assigns work and reviews results through the native interface'
+  operator -> acpEditor 'Directs agent work through the editor'
+  acpEditor -> omegon.host.interfaces 'Submits tasks and receives progress'
+  omegon.host.inference -> inferenceProvider 'Requests model inference'
+  omegon.host.tools -> webInformation 'Finds and retrieves web information'
+  omegon.host -> secretsStore 'Retrieves configured secrets'
+  omegon.host.extensions -> extensionSystems 'Requests additional external capabilities'
+  omegon.host.mcp -> mcpServers 'Discovers and invokes MCP capabilities'
+  omegon.host.tools -> workspace 'Reads and changes project files; runs commands'
+  omegon.host.lifecycle -> workspace 'Reads and updates design and change artifacts'
+  omegon.codescan -> workspace 'Reads code and knowledge sources'
+
+  omegon.host.orchestration -> omegon.sessions 'Persists and resumes sessions'
+  omegon.host.lifecycle -> omegon.lifecycle 'Records lifecycle transitions'
+  omegon.host.memory -> omegon.memory 'Stores and retrieves retained knowledge'
+  omegon.host.extensions -> omegon.codescan 'Requests indexing and search' {
+    technology 'JSON-RPC over stdio'
+  }
+  omegon.codescan -> omegon.index 'Builds and queries index'
+
+  omegon.host.interfaces -> omegon.host.orchestration 'Submits and cancels work; observes progress'
+  omegon.host.orchestration -> omegon.host.context 'Assembles the next turn\'s context'
+  omegon.host.orchestration -> omegon.host.inference 'Requests streamed model responses'
+  omegon.host.orchestration -> omegon.host.tools 'Dispatches model-requested tool calls'
+  omegon.host.tools -> omegon.host.interfaces 'Requests operator approval when required'
+  omegon.host.tools -> omegon.host.memory 'Executes memory operations'
+  omegon.host.tools -> omegon.host.lifecycle 'Executes design and change operations'
+  omegon.host.tools -> omegon.host.extensions 'Invokes extension-owned tools'
+  omegon.host.context -> omegon.host.memory 'Requests relevant retained knowledge'
+  omegon.host.context -> omegon.host.lifecycle 'Requests focused design and active-change context'
+  omegon.host.tools -> omegon.host.mcp 'Invokes discovered MCP tools'
+  omegon.host.context -> omegon.host.mcp 'Collects MCP resource and prompt context'
+  omegon.host.memory -> omegon.host.inference 'Requests bounded memory extraction'
+}
+
+views {
+  view systemContext {
+    title 'Omegon — System context'
+    include operator, omegon, acpEditor, inferenceProvider, webInformation, secretsStore, extensionSystems, mcpServers, workspace
+    include
+      omegon -> workspace with {
+        title 'Reads and updates project artifacts; runs commands'
+      }
+    autoLayout LeftRight
+  }
+
+  view omegonInternals of omegon {
+    title 'Omegon — Internals'
+    include omegon, omegon.host, omegon.codescan, omegon.sessions, omegon.lifecycle, omegon.memory, omegon.index
+    autoLayout LeftRight
+  }
+
+  view hostComponents of omegon.host {
+    title 'Omegon host — Components'
+    include omegon.host, omegon.host.interfaces, omegon.host.orchestration, omegon.host.context, omegon.host.inference, omegon.host.tools, omegon.host.memory, omegon.host.lifecycle, omegon.host.extensions, omegon.host.mcp
+    autoLayout LeftRight
+  }
+}
