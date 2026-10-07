@@ -1,6 +1,11 @@
 import importlib.util
+import os
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
+
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,6 +47,48 @@ class ReleasePolicyWorkflowTests(unittest.TestCase):
             [],
             [line for line in cargo_test_lines if "OMEGON_NERD_FONT=1" not in line],
         )
+
+    def test_rust_build_resolves_baseline_and_keeps_stable_test_coverage(self) -> None:
+        jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+        steps = jobs["rust-build"]["steps"]
+        resolver = next(step for step in steps if step.get("id") == "rust-baseline")
+        install = next(step for step in steps if step.get("uses", "").startswith("dtolnay/"))
+        self.assertLess(steps.index(resolver), steps.index(install))
+        self.assertEqual(install["with"]["toolchain"], "${{ steps.rust-baseline.outputs.version }}")
+        self.assertIn("clippy", install["with"]["components"])
+        self.assertTrue(any("-- -D warnings" in step.get("run", "") for step in steps))
+        for name in ("rust-unit", "rust-integration"):
+            self.assertTrue(any(
+                step.get("uses") == "dtolnay/rust-toolchain@stable"
+                for step in jobs[name]["steps"]
+            ))
+
+        # Exercise the actual CI shell: propagate the evaluated version, and
+        # fail closed if Nix cannot resolve the checked-in lockfile.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            nix = root / "nix"
+            nix.write_text(
+                '#!/bin/sh\n'
+                'test "$*" = "eval --raw --no-update-lock-file '
+                '.#packages.x86_64-linux.rust-toolchain.version" || exit 2\n'
+                'if [ "$FAIL_NIX" = 1 ]; then exit 42; fi\n'
+                'printf 1.234.5\n'
+            )
+            nix.chmod(0o755)
+            output = root / "output"
+            env = dict(os.environ, PATH=f"{root}{os.pathsep}{os.environ['PATH']}",
+                       GITHUB_OUTPUT=str(output), FAIL_NIX="0")
+            result = subprocess.run(["bash", "-e", "-c", resolver["run"]],
+                                    env=env, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(output.read_text(), "version=1.234.5\n")
+            output.unlink()
+            env["FAIL_NIX"] = "1"
+            result = subprocess.run(["bash", "-e", "-c", resolver["run"]],
+                                    env=env, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 42, result.stderr)
+            self.assertFalse(output.exists())
 
 
 if __name__ == "__main__":

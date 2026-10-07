@@ -109,6 +109,15 @@ Without direnv, enter the same environment explicitly:
 nix develop
 ```
 
+The `Rust build` CI job uses the Rust version selected by `flake.nix` and
+`flake.lock`, including its Clippy checks with `-D warnings`. Read that version
+with `nix eval --raw .#packages.x86_64-linux.rust-toolchain.version`.
+`stable.latest` in the flake means the latest stable release in the **locked**
+Rust overlay, not the current upstream release. Toolchain baseline updates must
+therefore be deliberate lockfile changes, validated with the same build and lint
+checks. The other Rust test jobs continue to use upstream stable for forward
+compatibility. A passing local baseline does not replace those CI tests.
+
 The repository is a Cargo workspace rooted at this directory. The main binary is `core/crates/omegon`, and `cargo` commands are run from the repo root unless a recipe says otherwise. Use the focused validation table above while iterating; reserve `just test-rust` for broad or release-hardening gates.
 
 `just link` installs the local build for development by writing `~/.omegon/dev-alias.sh` and wiring the current shell profile. Source that file in the current shell if you need the alias immediately:
