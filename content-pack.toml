@@ -2,7 +2,7 @@
 schema_version = 1
 id = "omegon-shipped"
 version = "1.0.0"
-canonical_digest = "71ffd6e13ed4bd5207c401322488a1f6cb05bef6910ea626910342c4687f2570"
+canonical_digest = "2222527419944793dbe2309c73a6dd5cc36390613b1c1c20abac9634f27f38bd"
 requested_capabilities = [
   "content:catalog-data",
   "content:persona-directive",
@@ -271,6 +271,20 @@ path = "skills/git/_reference/ci-validation.md"
 kind = "skill"
 sha256 = "d41f219ae186072384844bfc32690e0012142e6dc0f97e2a7d245a5d183981f1"
 size = 5607
+requested_capabilities = ["content:skill-metadata"]
+
+[[assets]]
+path = "skills/likec4/SKILL.md"
+kind = "skill"
+sha256 = "a53902034a750780006deb6e03a164908aa9797157349b1a206e276fd97cf3aa"
+size = 12231
+requested_capabilities = ["content:skill-metadata"]
+
+[[assets]]
+path = "skills/likec4/references/sources.md"
+kind = "skill"
+sha256 = "8eb734f30aea16a9bc46cc619aed950bbfce9e8d52285f668ae71e55c556015e"
+size = 5432
 requested_capabilities = ["content:skill-metadata"]
 
 [[assets]]
