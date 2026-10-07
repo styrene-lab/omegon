@@ -119,6 +119,8 @@
       {
         packages = {
           default = omegon;
+          # CI reads this version without building the Nix toolchain closure.
+          rust-toolchain = rustToolchain;
           omegon = omegon;
           omegon-maintain = omegon;
         } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {

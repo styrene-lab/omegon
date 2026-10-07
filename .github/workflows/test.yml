@@ -46,8 +46,18 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+      - name: Install Nix for toolchain resolution
+        uses: DeterminateSystems/nix-installer-action@v17
+      - name: Resolve locked Rust baseline
+        id: rust-baseline
+        run: |
+          version=$(nix eval --raw --no-update-lock-file .#packages.x86_64-linux.rust-toolchain.version)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust-baseline.outputs.version }}
+          components: clippy
       - name: Build omegon binary
         run: cargo build -p omegon
       - name: Check shrinking Omegon composition
