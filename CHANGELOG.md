@@ -22,6 +22,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 - Private TUI acceptance retains the exact observed replay checkpoint and rejects external HTTP(S) discovery through its loopback fixture proxy.
 
+- The CI Rust build and strict Clippy baseline now derive their compiler version from the locked Nix toolchain used for local development. Existing Rust test jobs retain upstream-stable compatibility coverage.
+
 - Normal turns, history repairs, compaction, and bounded auxiliary inference now share internal request validation before provider dispatch. Turn inputs must match their captured authority manifests; flow-specific tools, budgets, route evidence, and completion owners are preserved. Compaction rejects structured upstream failures even if a later Done event arrives.
 
 - The design/change lifecycle no longer runs `vault status` or emits sealed-Vault warnings on session start. Use `/vault status` for explicit health checks through the shared secrets subsystem.

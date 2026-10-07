@@ -149,6 +149,28 @@ Commit and PR handoff are now operator-authorized. This evidence describes the
 reviewed source and frozen artifact, not a newly built committed binary. OpenSpec
 remains in verifying state; archival and installation have not been performed.
 
+### CI baseline integration for PR #249
+
+Merged the exact CI baseline `031ef2b78729962370cb1151491800273e10e62d`
+into the inline branch without rebasing its two logical commits. The only merge
+conflict was the Unreleased changelog; all inline and CI entries were preserved.
+The baseline changes CI, contributor guidance, its workflow contract test, and a
+flake package export. The locked compiler remains Rust 1.95.0, confirmed by
+`nix eval --raw --no-update-lock-file .#packages.x86_64-linux.rust-toolchain.version`.
+
+Git object comparisons against inline head `f6309630` confirm identical `core/`,
+`scripts/`, `Cargo.toml`, `Cargo.lock`, and `flake.lock` contents after integration.
+The complete Rust source tree object remains
+`7e70c899ddf078e3255d5b747d58b2367f1161e2`. The driver and frozen runtime hashes
+also still match the retained PTY manifests. `ci-baseline-source-identity.json`
+records these comparisons under the evidence root.
+
+The earlier serialized local gates and PTY captures therefore remain evidence for
+the same production and fixture contents. They are not presented as a new build
+from the baseline-merge commit. Fresh hosted CI must validate the updated PR head
+before normal merge. OpenSpec archival and combined-acceptance reconciliation
+remain with the parent workflow.
+
 ## Runtime evidence ledger
 
 Evidence root:
