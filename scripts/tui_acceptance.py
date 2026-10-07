@@ -226,6 +226,13 @@ def fixture_provider():
         def log_message(self, *_args):
             pass
 
+        def do_CONNECT(self):
+            # Act only as a rejecting proxy for background discovery/update
+            # clients. Never forward traffic outside the loopback fixture.
+            with server.request_lock:
+                server.blocked_connects.add(self.path)
+            self.send_error(403, "External requests disabled by local fixture")
+
         def do_GET(self):
             if self.path == "/v1/models":
                 body = {"data": [{"id": "gpt-5.4", "object": "model"}]}
@@ -404,6 +411,7 @@ def fixture_provider():
     server.release_stages = [threading.Event() for _ in range(5)]
     server.stream_read_path = None
     server.request_bodies = []
+    server.blocked_connects = set()
     server.stream_waiting = threading.Event()
     server.release_stream = threading.Event()
     server.cancel_waiting = threading.Event()
@@ -472,12 +480,15 @@ def prepare_unconfigured_workspace(root):
     return workspace
 
 
-def tui_environment(root, *, fresh_install=False, unconfigured=False):
+def tui_environment(root, fixture_url, *, fresh_install=False, unconfigured=False):
     # Never inherit operator credentials, config locations, or launcher child state.
     environment = {"PATH": os.environ["PATH"], "HOME": str(root), "OMEGON_HOME": str(root / "omegon-home"),
                    "XDG_CONFIG_HOME": str(root / ".config"), "TERM": "xterm-256color", "LANG": "en_US.UTF-8",
-                   "NO_COLOR": "1"}
+                   "NO_COLOR": "1", "HTTP_PROXY": fixture_url, "HTTPS_PROXY": fixture_url,
+                   "ALL_PROXY": fixture_url, "NO_PROXY": "127.0.0.1,localhost"}
     if not unconfigured:
+        # Startup still checks the provider-prefix credential. Keep its dummy
+        # value but reject external discovery through the fixture proxy above.
         environment.update({"OPENAI_API_KEY": "local-only",
                             "OMEGON_PROJECT_ENDPOINT_616363657074616E6365_TOKEN": "local-only"})
     if not (fresh_install or unconfigured):
@@ -534,6 +545,12 @@ def assert_streaming_payload(transcript, markers):
         assert normalized.count(marker + body) == 1, f"streamed payload lost or altered nonwhitespace characters: {marker}"
 
 
+def assert_quiet_inline_replay(viewport, alternate_on):
+    assert "Splash replay is disabled in inline mode" in viewport, "inline replay has no immediate notice"
+    assert alternate_on == "0", "inline replay borrowed the alternate screen"
+    assert "Ctrl+C cancel" in viewport, "replay request hid the live cancellation control"
+
+
 def run(binary: Path, output: Path, presentation="fullscreen", detail="active", entry=None, stress=False, fresh_install=False, unconfigured=False, streaming=False, markdown=False, controls=False, activity=False, menu_backdrop=False):
     if menu_backdrop and (presentation != "inline" or unconfigured or stress or streaming or markdown or controls or activity or entry):
         raise ValueError("menu-backdrop acceptance requires configured inline layout without another scenario")
@@ -578,9 +595,9 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
     def history():
         return tmux("capture-pane", *(["-J"] if streaming else []), "-p", "-S", "-", "-t", "run:0.0") if presentation == "inline" else screen()
 
-    def capture(name, *, primary=False):
+    def capture(name, *, primary=False, snapshot=None):
         path = output / (name + ".txt")
-        path.write_text((history() if presentation == "inline" else tmux("capture-pane", "-p", "-a", "-t", "run:0.0")) if primary else screen())
+        path.write_text(snapshot if snapshot is not None else ((history() if presentation == "inline" else tmux("capture-pane", "-p", "-a", "-t", "run:0.0")) if primary else screen()))
         if streaming and primary:
             # -J joins terminal soft-wrap rows for marker identity after resize;
             # retain physical rows too so the actual visual layout is reviewable.
@@ -593,8 +610,9 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
     def wait_for(predicate, label, seconds=60):
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
-            if predicate():
-                return
+            observation = predicate()
+            if observation:
+                return observation
             time.sleep(0.05)
         capture("failure")
         capture("failure-primary", primary=True)
@@ -641,7 +659,7 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
             executable.chmod(0o755)
         command = tui_command(executable, workspace, log, None if entry else presentation, None if entry else detail, unconfigured=unconfigured)
         # Start with an explicit environment, so real credentials/plugins cannot leak into the fixture.
-        environment = tui_environment(root, fresh_install=fresh_install, unconfigured=unconfigured)
+        environment = tui_environment(root, provider.url, fresh_install=fresh_install, unconfigured=unconfigured)
         if controls or activity or menu_backdrop:
             environment.pop("NO_COLOR", None)
         if entry:
@@ -1175,6 +1193,21 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
                         wait_for(lambda: history().count("TUI_FIXTURE_REPLY_1") == 1,
                                  "stable streaming prefix published before Project takes fullscreen")
                         capture("stress-prefix-before-project", primary=True)
+                        action("send-keys", "-t", "run:0.0", "-l", "/splash")
+                        action("send-keys", "-t", "run:0.0", "Enter")
+                        def quiet_replay_snapshot():
+                            # Native insertion can temporarily clear the live area.
+                            # Assert and retain one completed observation, not a
+                            # second capture taken halfway through the next draw.
+                            current = screen()
+                            return current if ("Splash replay is disabled in inline mode" in current
+                                               and "Ctrl+C cancel" in current) else None
+                        observed = wait_for(quiet_replay_snapshot,
+                                            "inline replay notice and cancellation control during streaming")
+                        assert_quiet_inline_replay(observed, tmux("display-message", "-p", "-t", "run:0.0", "#{alternate_on}").strip())
+                        capture("stress-quiet-replay", snapshot=observed)
+                        ledger["quiet_inline_replay"] = {"notice_visible": True, "primary_retained": True,
+                            "provider_held": not provider.release_stream.is_set()}
                     action("send-keys", "-t", "run:0.0", "-l", "UNSENT_DRAFT_SURVIVES")
                     action("send-keys", "-t", "run:0.0", "F2")
                     wait_for(lambda: "Project browser" in screen(), "Project admits input during large stream")
@@ -1282,6 +1315,7 @@ def run(binary: Path, output: Path, presentation="fullscreen", detail="active", 
             raise
         finally:
             ledger["provider_requests"] = provider.requests
+            ledger["blocked_external_connects"] = sorted(provider.blocked_connects)
             if activity:
                 ledger["activity_fixture"] = {"stages_sent": [event.is_set() for event in provider.activity_stages],
                     "stages_released": [event.is_set() for event in provider.release_activity]}
