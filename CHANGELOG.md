@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- The CI Rust build job has a 60-minute budget for cold debug/feature checks and the separate task-capsule release build. The locked toolchain and strict checks are unchanged.
+
 - Bundled LikeC4 skill metadata now declares intent-based activation and architecture-modeling triggers, keeping the shipped content pack valid.
 
 - Inference preparation captures route-specific capacity, numeric context intent, reasoning normalization, full visible-input estimates, and output-cap coverage. `/context capacity <tokens|maximum|reset>` controls a session target; profile `routeContextTargets` preserves route-scoped intent. Unsupported reasoning, including Astra `off`, requires explicit resolution without rewriting saved preferences. Context inspection and compact TUI/ACP projections distinguish estimated request usage from last-request provider measurements.
@@ -27,7 +29,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Structured menus support Page Up, Page Down, Home, and End using the rendered row capacity. Compact tool summaries omit redundant content, and context status distinguishes unmeasured startup usage.
 - The shipped content pack includes a portable Ratatui engineering skill with a project-resolved stack helper. Its publication guidance preserves the current distinction between known failure and ambiguous delivery.
 
-- Added pinned LikeC4 tooling, opt-in diagram commands, an authoring skill, and source-backed context, internals, and host-component views with a shared review agreement. The model retains its teal/copper/charcoal theme and manual layout, distinguishes native extensions from MCP, and records bounded memory extraction under existing owners. Architecture evidence covers merged main `77996814`; headless runtime acceptance passed, while exact-head CI remains blocked by a Rust-build timeout.
+- Added pinned LikeC4 tooling, opt-in diagram commands, an authoring skill, and source-backed context, internals, and host-component views with a shared review agreement. The model retains its teal/copper/charcoal theme and manual layout, distinguishes native extensions from MCP, and records bounded memory extraction under existing owners. Architecture evidence covers merged main `77996814`; headless runtime acceptance passed, while that baseline's CI exhausted the former Rust-build timeout.
 
 - Documented acceptance of merged request preparation and quiet inline behavior, distinct CI/provider/runtime evidence, and the remaining native lifecycle closure gap.
 
