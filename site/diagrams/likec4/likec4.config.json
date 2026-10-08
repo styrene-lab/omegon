@@ -1,0 +1,56 @@
+{
+  "$schema": "https://likec4.dev/schemas/config.json",
+  "name": "omegon",
+  "styles": {
+    "theme": {
+      "colors": {
+        "primary": {
+          "elements": {
+            "fill": "#287D70",
+            "stroke": "#19584F",
+            "hiContrast": "#FFFFFF",
+            "loContrast": "#F4F6EF"
+          },
+          "relationships": {
+            "line": "#287D70",
+            "label": "#F4F6EF",
+            "labelBg": "#242729"
+          }
+        },
+        "secondary": {
+          "elements": {
+            "fill": "#9C5436",
+            "stroke": "#BD673F",
+            "hiContrast": "#FFFFFF",
+            "loContrast": "#F1E7DA"
+          },
+          "relationships": {
+            "line": "#BD673F",
+            "label": "#F1E7DA",
+            "labelBg": "#242729"
+          }
+        },
+        "muted": {
+          "elements": {
+            "fill": "#484640",
+            "stroke": "#746354",
+            "hiContrast": "#FFFFFF",
+            "loContrast": "#F1E7DA"
+          },
+          "relationships": {
+            "line": "#746354",
+            "label": "#F1E7DA",
+            "labelBg": "#242729"
+          }
+        }
+      }
+    },
+    "defaults": {
+      "relationship": {
+        "color": "secondary",
+        "line": "solid",
+        "arrow": "vee"
+      }
+    }
+  }
+}
