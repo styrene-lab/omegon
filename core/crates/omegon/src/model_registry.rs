@@ -364,6 +364,9 @@ pub struct ModelEntry {
     pub context_input: usize,
     #[serde(rename = "contextOutput")]
     pub context_output: usize,
+    /// Reviewed route-specific meanings, additive to legacy unclassified fields.
+    #[serde(default, rename = "inferencePolicy")]
+    pub inference_policy: Option<RegistryPolicy>,
     #[serde(default)]
     pub capabilities: Vec<String>,
     #[serde(default, rename = "inputModalities")]
@@ -403,6 +406,23 @@ pub struct ModelRegistry {
     /// Keyed by "provider:model_id"
     models: HashMap<String, ModelEntry>,
     inference_defaults: InferenceDefaults,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistryPolicy {
+    pub default_window: Option<usize>,
+    pub maximum_window: Option<usize>,
+    pub maximum_input: Option<usize>,
+    pub maximum_total: Option<usize>,
+    pub maximum_output: Option<usize>,
+    pub basis: crate::inference_policy::WindowBasis,
+    pub source: String,
+    pub revision: Option<String>,
+    pub reviewed_at: String,
+    pub efforts: Vec<String>,
+    pub default_effort: Option<String>,
+    pub disabled: bool,
 }
 
 impl ModelRegistry {
@@ -725,6 +745,7 @@ impl ModelRegistry {
             execution_class: None,
             context_input: d.context_input,
             context_output: d.context_output,
+            inference_policy: None,
             capabilities: caps,
             input_modalities: vec!["text".into()],
             output_modalities: vec!["text".into()],

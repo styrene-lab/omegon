@@ -86,6 +86,7 @@ mod host_context;
 mod inference_discovery;
 mod inference_inventory;
 mod inference_manifest;
+mod inference_policy;
 mod inference_runtime;
 mod installed_release;
 mod invocation_batch;
@@ -2604,7 +2605,7 @@ pub(crate) fn apply_agent_manifest_pre_setup(
         if let Some(ref tl) = s.thinking_level
             && let Some(level) = settings::ThinkingLevel::parse(tl)
         {
-            settings.thinking = level;
+            settings.set_thinking(level);
         }
         if let Some(mt) = s.max_turns {
             settings.max_turns = mt;
@@ -3119,9 +3120,9 @@ async fn run_embedded_command(
                 let _ = events_tx.send(AgentEvent::SystemNotification {
                     message: "Reloading configuration...".into(),
                 });
-                let profile = settings::Profile::load(&agent_cwd);
+                let profile = settings::Profile::load_with_source(&agent_cwd);
                 if let Ok(mut s) = shared_settings.lock() {
-                    profile.apply_to(&mut s);
+                    profile.apply_to_runtime(&mut s, &agent_cwd, false);
                     tracing::info!(model = %s.model, "profile reloaded");
                 }
             }
@@ -5122,6 +5123,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     // Update settings with selected-model provider status before TUI reads it.
     if let Ok(mut s) = shared_settings.lock() {
         s.provider_connected = startup_decision.provider_connected;
+        if s.provider_connected {
+            s.selected_policy_capture = Some(bridge.policy_capture(&s.model));
+        }
     }
     let (events_tx, events_rx) = bootstrap::wire_event_channel(&agent, 256);
     let startup_model_intent = settings::Profile::load(&agent.cwd)
@@ -6229,7 +6233,7 @@ fn build_tui_secret_readiness_snapshot(
                         .unwrap_or_else(|| s.model.clone());
                     crate::bridge::StreamOptions {
                         model: Some(model),
-                        reasoning: Some(s.thinking.as_str().to_string()),
+                        reasoning: None, // Summary policy is independent of chat effort.
                         extended_context: false,
                         ..Default::default()
                     }
@@ -8455,7 +8459,7 @@ async fn maybe_run_injected_cleave_smoke_child(
                     .ok()
                     .and_then(|v| settings::ThinkingLevel::parse(&v))
                 {
-                    s.thinking = thinking;
+                    s.set_thinking(thinking);
                 }
                 if let Some(class) = std::env::var("OMEGON_CHILD_CONTEXT_CLASS")
                     .ok()

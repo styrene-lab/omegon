@@ -138,6 +138,12 @@ pub enum InterfaceControlRequest {
     NotesClear,
     CheckinView,
     ContextStatus,
+    ContextCapacity {
+        value: String,
+    },
+    ContextReasoning {
+        value: String,
+    },
     ContextCompact,
     ContextClear,
     ContextRequest {

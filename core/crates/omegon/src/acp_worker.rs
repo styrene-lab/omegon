@@ -441,9 +441,9 @@ async fn worker_loop(
     // Worker mutates these on SetModel/SetThinking/SetPosture; the ACP transport
     // thread reads them when rebuilding ConfigOption lists.
     if let Ok(mut s) = shared_settings.lock() {
-        let profile = crate::settings::Profile::load(&cwd);
-        let has_profile_model = profile.last_used_model.is_some();
-        profile.apply_to_with_posture(&mut s, &cwd);
+        let profile = crate::settings::Profile::load_with_source(&cwd);
+        let has_profile_model = profile.profile.last_used_model.is_some();
+        profile.apply_to_runtime(&mut s, &cwd, true);
         if !has_profile_model {
             s.set_model(&model);
         }
@@ -1692,6 +1692,7 @@ async fn handle_control_request(
                     "maxTurns": settings.max_turns,
                 },
                 "profile": profile,
+                "inferencePolicy": settings.inference_projection(),
             })
             .to_string()
         }
@@ -1710,9 +1711,9 @@ async fn handle_control_request(
         }
 
         "profile_apply" => {
-            let profile = crate::settings::Profile::load(cwd);
+            let profile = crate::settings::Profile::load_with_source(cwd);
             if let Ok(mut settings) = shared_settings.lock() {
-                profile.apply_to_with_posture(&mut settings, cwd);
+                profile.apply_to_runtime(&mut settings, cwd, true);
                 let slim = settings.is_slim();
                 let disabled = settings.posture_disabled_tools.clone();
                 let enabled = settings.posture_enabled_tools.clone();
@@ -1768,17 +1769,11 @@ async fn handle_control_request(
         }
 
         "context_status" => {
-            let est = conversation.estimate_tokens();
-            let window = shared_settings
+            let projection = shared_settings
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .context_window;
-            let usage_pct = if window > 0 {
-                (est as f64 / window as f64) * 100.0
-            } else {
-                0.0
-            };
-            format!("Context: ~{est} tokens ({usage_pct:.0}% of {window})")
+                .inference_projection();
+            crate::surfaces::inference_policy::status(&projection)
         }
 
         "context_class" => {

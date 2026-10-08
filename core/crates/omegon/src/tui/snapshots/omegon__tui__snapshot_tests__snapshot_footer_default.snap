@@ -1,10 +1,10 @@
 ---
 source: core/crates/omegon/src/tui/snapshot_tests.rs
-assertion_line: 284
+assertion_line: 285
 expression: render_to_string(&terminal)
 ---
 ╭ context ───────────────────╮╭ model ─────────────────────╮╭ memory ────────────────────╮╭ system ────────────────────╮
-│ ▐░░░░░░░░░░░░░░▌ 0%        ││ ☁  · Compact 0%            ││ ⌗ 0                        ││                           │
+│ usage unavailable          ││ ☁  · Compact usage n/a     ││ ⌗ 0                        ││                           │
 │                            ││  · ○ api key               ││                            ││                            │
 │                            ││                            ││                            ││                            │
 ╰────────────────────────────╯╰────────────────────────────╯╰────────────────────────────╯╰────────────────────────────╯

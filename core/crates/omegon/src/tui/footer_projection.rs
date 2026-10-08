@@ -34,6 +34,8 @@ impl ProjectFooterSurface for FooterData {
                     .collect(),
             },
             context: ContextProjection {
+                snapshot_id: self.policy_snapshot_id.clone(),
+                estimate_available: self.context_estimate_available,
                 percent: self.context_percent,
                 window: self.context_window,
                 class: project_context_class(self.context_class),

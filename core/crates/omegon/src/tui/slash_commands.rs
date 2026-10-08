@@ -829,8 +829,13 @@ Scroll transcript:
                     SlashResult::Handled
                 } else {
                     match canonical_slash_command("context", args) {
-                        Some(CanonicalSlashCommand::ContextStatus) => {
-                            let _ = tx.try_send(TuiCommand::ContextStatus { respond_to: None });
+                        Some(command @ (CanonicalSlashCommand::ContextStatus
+                            | CanonicalSlashCommand::ContextCapacity(_)
+                            | CanonicalSlashCommand::ContextReasoning(_))) => {
+                            let Some(request) = crate::operator_commands::control_request_from_slash_command(&command) else {
+                                return SlashResult::Display("Context policy control is unavailable".into());
+                            };
+                            let _ = tx.try_send(TuiCommand::ExecuteControl { request, respond_to: None });
                             SlashResult::Handled
                         }
                         Some(CanonicalSlashCommand::ContextCompact) => {
@@ -891,7 +896,7 @@ Scroll transcript:
                             let (sub, _) = args.split_once(' ').unwrap_or((args, ""));
                             SlashResult::Display(format!(
                                 "Unknown context option: {sub}.\n\
-                                 Use: /context [status|compact|compress|reset|clear|<class>]\n\
+                                 Use: /context [status|capacity <tokens|maximum|reset>|reasoning <intent>|compact|reset|<class>]\n\
                                  Classes: compact, standard, extended, massive"
                             ))
                         }

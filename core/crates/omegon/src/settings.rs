@@ -433,6 +433,20 @@ pub struct Settings {
 
     /// Thinking level: off, minimal, low, medium, high, xhigh, max.
     pub thinking: ThinkingLevel,
+    /// None means provider default. Preserve saved unsupported raw intent.
+    #[serde(default, skip)]
+    pub reasoning_intent: Option<String>,
+    #[serde(default, skip)]
+    pub route_targets: Vec<(
+        crate::inference_policy::TargetSource,
+        crate::inference_policy::NumericTarget,
+    )>,
+    #[serde(default, skip)]
+    pub last_inference_policy: Option<std::sync::Arc<crate::inference_policy::ResolvedPolicy>>,
+    #[serde(default, skip)]
+    pub selected_policy_capture: Option<crate::inference_policy::PolicyCapture>,
+    #[serde(default, skip)]
+    pub last_provider_usage: Option<omegon_traits::InferenceProviderUsage>,
 
     /// Maximum turns per agent invocation. 0 = no limit.
     pub max_turns: u32,
@@ -828,6 +842,11 @@ impl Default for Settings {
             profile_name: None,
             posture: BehavioralPosture::fixed(PosturePreset::Architect),
             thinking: ThinkingLevel::Medium,
+            reasoning_intent: None,
+            route_targets: Vec::new(),
+            last_inference_policy: None,
+            selected_policy_capture: None,
+            last_provider_usage: None,
             max_turns: 50,
             automation_level: AutomationLevel::default(),
             compaction_threshold: 0.75,
@@ -902,6 +921,49 @@ impl AutomationLevel {
 }
 
 impl Settings {
+    pub(crate) fn set_thinking(&mut self, level: ThinkingLevel) {
+        self.thinking = level;
+        self.reasoning_intent = Some(level.as_str().into());
+    }
+    pub(crate) fn inference_projection(&self) -> omegon_traits::InferencePolicyProjection {
+        if self.model.trim().is_empty() {
+            return crate::surfaces::inference_policy::project(
+                Ok(None),
+                false,
+                self.last_provider_usage.clone(),
+            );
+        }
+        let mut capture = self.selected_policy_capture.clone().unwrap_or_else(|| {
+            crate::inference_policy::capture_route(&self.model, None, None, None, None)
+        });
+        capture.intent = self.inference_intent();
+        if let Some(last) = &self.last_inference_policy
+            && last.capture.route == capture.route
+            && last.capture.inventory_generation == capture.inventory_generation
+            && last.capture.contribution_generation == capture.contribution_generation
+            && last.capture.selected_model == self.model
+            && last.reasoning.requested == self.reasoning_intent
+            && last.capture.intent == capture.intent
+        {
+            return crate::surfaces::inference_policy::project(
+                Ok(Some(last)),
+                true,
+                self.last_provider_usage.clone(),
+            );
+        }
+        let options = crate::bridge::StreamOptions {
+            model: Some(self.model.clone()),
+            reasoning: self.reasoning_intent.clone(),
+            ..Default::default()
+        };
+        let preview = crate::providers::resolve_request_policy(&capture, &options, false);
+        crate::surfaces::inference_policy::project(
+            preview.as_ref().map(Some).map_err(ToString::to_string),
+            false,
+            self.last_provider_usage.clone(),
+        )
+    }
+
     pub fn new(model: &str) -> Self {
         let context_window = infer_context_window(model);
         let context_class = ContextClass::from_tokens(context_window);
@@ -923,6 +985,7 @@ impl Settings {
         self.context_window = infer_context_window(model);
         self.context_class = ContextClass::from_tokens(self.context_window);
         self.provider_is_oauth = crate::auth::provider_oauth_for_model(model);
+        self.selected_policy_capture = None;
     }
 
     /// The effective working-set policy class for this turn.
@@ -958,6 +1021,7 @@ impl Settings {
 
         let envelope = self.resource_envelope();
         self.thinking = envelope.thinking;
+        self.reasoning_intent = Some(envelope.thinking.as_str().into());
         self.requested_context_class = Some(envelope.requested_context_class);
     }
 
@@ -967,6 +1031,35 @@ impl Settings {
     }
 
     /// Derive a SelectorPolicy for this turn's context assembly.
+    pub(crate) fn inference_intent(&self) -> crate::inference_policy::PolicyIntent {
+        let envelope = self.resource_envelope();
+        let mut host_caps = Vec::new();
+        if let Some(cap) = envelope.effective_context_cap_tokens {
+            host_caps.push(("posture".into(), cap));
+        }
+        let class = self
+            .requested_context_class
+            .unwrap_or(envelope.requested_context_class);
+        host_caps.push(("working-set class".into(), class.nominal_tokens()));
+        // A legacy unscoped value is only a narrowing host cap, never consent.
+        if self.context_window != infer_context_window(&self.model) {
+            host_caps.push(("legacy unscoped context_window".into(), self.context_window));
+        }
+        crate::inference_policy::PolicyIntent {
+            targets: self.route_targets.clone(),
+            host_caps,
+            heuristic_generation: Some(
+                if envelope.compact_reply_reserve {
+                    4096
+                } else {
+                    8192
+                } + self.thinking.budget_tokens().unwrap_or(0) as usize,
+            ),
+            input_reserve: 0, // Actual schemas replace the entire planning allocation.
+            proactive_threshold: Some(self.compaction_threshold),
+        }
+    }
+
     pub fn selector_policy(&self) -> SelectorPolicy {
         let envelope = self.resource_envelope();
         let thinking_reserve = self.thinking.budget_tokens().unwrap_or(0) as usize;
@@ -1278,6 +1371,34 @@ pub struct LoadedProfile {
     pub source: ProfileSource,
 }
 
+impl LoadedProfile {
+    pub(crate) fn apply_to_runtime(
+        &self,
+        settings: &mut Settings,
+        cwd: &std::path::Path,
+        posture: bool,
+    ) {
+        use crate::inference_policy::TargetSource;
+        settings.profile_source = self.source.clone();
+        settings
+            .route_targets
+            .retain(|(source, _)| matches!(source, TargetSource::Request | TargetSource::Session));
+        if matches!(self.source, ProfileSource::Project(_)) {
+            settings.route_targets.extend(
+                ProfileRegistry::discover(cwd)
+                    .user_route_targets()
+                    .into_iter()
+                    .map(|target| (TargetSource::User, target)),
+            );
+        }
+        if posture {
+            self.profile.apply_to_with_posture(settings, cwd);
+        } else {
+            self.profile.apply_to(settings);
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActiveProfileSelection {
@@ -1342,6 +1463,11 @@ pub struct Profile {
     pub model_intent: Option<ProfileModelIntent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub route_context_targets: Vec<crate::inference_policy::NumericTarget>,
+    /// Retain legacy unscoped numeric data without treating it as route consent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<serde_json::Value>,
     /// Operator-requested working-set policy class. This is distinct from the
     /// actual model-derived context window/class.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1912,6 +2038,21 @@ impl Profile {
     /// Apply profile to settings (called at startup).
     pub fn apply_to(&self, settings: &mut Settings) {
         settings.profile_name = self.compact_label().map(ToOwned::to_owned);
+        settings.reasoning_intent = self.thinking_level.clone();
+        let source = if matches!(settings.profile_source, ProfileSource::Project(_)) {
+            crate::inference_policy::TargetSource::Project
+        } else {
+            crate::inference_policy::TargetSource::User
+        };
+        settings
+            .route_targets
+            .retain(|(origin, _)| *origin != source);
+        settings.route_targets.extend(
+            self.route_context_targets
+                .iter()
+                .cloned()
+                .map(|target| (source, target)),
+        );
         settings.permissions = self.permissions.clone();
 
         if let Some(ref m) = self.last_used_model
@@ -2026,7 +2167,7 @@ impl Profile {
             provider: settings.provider().to_string(),
             model_id: settings.model_short().to_string(),
         });
-        self.thinking_level = Some(settings.thinking.as_str().to_string());
+        self.thinking_level = settings.reasoning_intent.clone();
         self.requested_context_class = settings
             .requested_context_class
             .map(|class| class.short().to_lowercase());
@@ -2277,6 +2418,20 @@ impl ProfileRegistryEntry {
 }
 
 impl ProfileRegistry {
+    pub(crate) fn user_route_targets(&self) -> Vec<crate::inference_policy::NumericTarget> {
+        if let Some(loaded) = self.resolve_selection(global_active_profile_path()) {
+            return loaded.profile.route_context_targets;
+        }
+        self.entries
+            .iter()
+            .find(|entry| {
+                entry.scope == ProfileRegistryScope::User
+                    && entry.source_kind == ProfileRegistrySourceKind::LegacySingleton
+            })
+            .map_or_else(Vec::new, |entry| {
+                entry.profile.route_context_targets.clone()
+            })
+    }
     pub fn discover(cwd: &std::path::Path) -> Self {
         let mut registry = Self::default();
         registry.load_registry_dir(ProfileRegistryScope::User, global_profiles_dir());
@@ -2606,7 +2761,7 @@ impl ResolvedCustomPosture {
         if let Some(ref t) = self.def.posture.thinking
             && let Some(level) = ThinkingLevel::parse(t)
         {
-            settings.thinking = level;
+            settings.set_thinking(level);
         }
         if let Some(ref cc) = self.def.posture.context_class
             && let Some(class) = ContextClass::parse(cc)

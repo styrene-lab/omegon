@@ -427,6 +427,12 @@ pub(crate) struct LoopDurableRouteIdentity {
 pub(crate) trait LoopRouteContract: Sync {
     async fn startup_route(&self) -> LoopRoute;
     async fn turn_route(&self) -> LoopRoute;
+    fn context_policy(
+        &self,
+        _has_tools: bool,
+    ) -> anyhow::Result<Option<crate::inference_policy::ResolvedPolicy>> {
+        Ok(None)
+    }
     async fn prepare(
         &self,
         route: &LoopRoute,
@@ -445,6 +451,12 @@ pub(crate) trait LoopRouteContract: Sync {
 #[async_trait::async_trait]
 pub(crate) trait LoopContextContract: Send {
     fn resolve_windows(&mut self, config: &LoopConfig) -> crate::loop_context::LoopContextWindows;
+    fn apply_policy(
+        &mut self,
+        _policy: &crate::inference_policy::ResolvedPolicy,
+        _schema_tokens: usize,
+    ) {
+    }
     async fn prepare_turn(
         &mut self,
         conversation: &mut ConversationState,
@@ -768,6 +780,27 @@ impl From<crate::provider_route_service::ProviderStopNotice> for LoopRouteNotice
 
 #[async_trait::async_trait]
 impl LoopRouteContract for LoopRoutePort<'_> {
+    fn context_policy(
+        &self,
+        has_tools: bool,
+    ) -> anyhow::Result<Option<crate::inference_policy::ResolvedPolicy>> {
+        let mut options = self
+            .active_options
+            .lock()
+            .map_err(|_| anyhow::anyhow!("route options lock poisoned"))?;
+        let Some(options) = options.as_mut() else {
+            return Ok(None);
+        };
+        let resolved = options
+            .policy_capture
+            .as_ref()
+            .map(|capture| crate::providers::resolve_request_policy(capture, options, has_tools))
+            .transpose()?;
+        if let Some(policy) = &resolved {
+            options.policy_capture = Some(policy.capture.clone());
+        }
+        Ok(resolved)
+    }
     async fn startup_route(&self) -> LoopRoute {
         let route = self
             .service
@@ -971,6 +1004,14 @@ struct LoopContextPort<'a> {
 impl LoopContextContract for LoopContextPort<'_> {
     fn resolve_windows(&mut self, config: &LoopConfig) -> crate::loop_context::LoopContextWindows {
         self.adapter.resolve_windows(config)
+    }
+
+    fn apply_policy(
+        &mut self,
+        policy: &crate::inference_policy::ResolvedPolicy,
+        schema_tokens: usize,
+    ) {
+        self.adapter.apply_policy(policy, schema_tokens);
     }
 
     async fn prepare_turn(

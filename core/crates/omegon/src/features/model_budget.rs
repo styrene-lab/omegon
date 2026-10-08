@@ -218,7 +218,7 @@ impl ModelBudget {
     }
 
     fn switch_thinking(&self, level: ThinkingLevel, reason: &str) -> String {
-        self.settings.lock().unwrap().thinking = level;
+        self.settings.lock().unwrap().set_thinking(level);
         format!(
             "{} Thinking → {} ({})",
             level.icon(),

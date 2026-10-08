@@ -770,8 +770,17 @@ impl App {
             self.footer_data.model_provider = s.provider().to_string();
             self.footer_data.context_class = s.effective_requested_class();
             self.footer_data.actual_context_class = s.context_class;
-            self.footer_data.context_window = s.context_window;
-            self.footer_data.thinking_level = s.thinking.as_str().to_string();
+            let policy = s.inference_projection();
+            self.footer_data.policy_snapshot_id = policy.snapshot_id;
+            self.footer_data.context_window = policy.assembly_budget.unwrap_or(0);
+            self.footer_data.context_percent = policy.estimated_percent.unwrap_or(0.0);
+            self.footer_data.estimated_tokens = policy.estimated_visible_input.unwrap_or(0);
+            self.footer_data.context_estimate_available = policy.estimated_visible_input.is_some();
+            self.footer_data.thinking_level = if policy.needs_resolution.is_some() {
+                "needs-resolution".into()
+            } else {
+                policy.effective_reasoning
+            };
             self.footer_data.posture = s.posture.effective.display_name().to_string();
             self.footer_data.runtime_brand =
                 if self.ui_presentation.level == UiPresentationLevel::Om {
@@ -1008,7 +1017,14 @@ impl App {
                 let percent = self.footer_data.context_percent.clamp(0.0, 100.0).round() as u8;
                 editor_block = editor_block.title_bottom(
                     Line::styled(
-                        format!(" {percent}% of {capacity} context "),
+                        if self.footer_data.context_estimate_available {
+                            format!(
+                                " ~{} / {capacity} context ({percent}%) ",
+                                widgets::format_tokens(self.footer_data.estimated_tokens)
+                            )
+                        } else {
+                            format!(" {capacity} context · usage unavailable ")
+                        },
                         t.style_ui_hint(),
                     )
                     .right_aligned(),
@@ -1281,17 +1297,17 @@ mod borrowed_screen_tests {
         app.update_settings(|settings| {
             settings.model = "openai-codex:gpt-5.4".into();
             settings.provider_connected = true;
-            settings.thinking = crate::settings::ThinkingLevel::Minimal;
+            settings.set_thinking(crate::settings::ThinkingLevel::Minimal);
         });
         draw(&mut app, 160, 40);
-        assert_eq!(app.footer_data.thinking_level, "minimal");
+        assert_eq!(app.footer_data.thinking_level, "low");
         app.base_terminal = TerminalPresentation::Inline;
         app.open_settings_menu();
         // The settings command changes authoritative settings and sends a
         // notification. It does not require an inference/ContextUpdated event.
         app.update_settings(|settings| {
             settings.model = "openai-codex:gpt-6-astra".into();
-            settings.thinking = crate::settings::ThinkingLevel::High;
+            settings.set_thinking(crate::settings::ThinkingLevel::High);
             settings.context_window = 200_000;
         });
         app.handle_agent_event(AgentEvent::SystemNotification {
@@ -1301,7 +1317,8 @@ mod borrowed_screen_tests {
         assert!(!menu_output.contains("HISTORY_SENTINEL"));
         assert_eq!(app.footer_data.thinking_level, "high");
         assert_eq!(app.footer_data.model_id, "openai-codex:gpt-6-astra");
-        assert_eq!(app.footer_data.context_window, 200_000);
+        assert_eq!(app.footer_data.context_window, 141_808);
+        assert!(!app.footer_data.context_estimate_available);
         app.active_menu = None;
         app.inline_active = true;
         let output = text(&draw(&mut app, 160, 8));

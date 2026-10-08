@@ -551,13 +551,16 @@ async fn run_interactive_active_turn(
             "post-turn cleanup acquired shared settings lock"
         );
     }
-    let context_window = settings.context_window;
+    let projection = settings.inference_projection();
+    let est = projection.estimated_visible_input.unwrap_or(est);
+    let context_window = projection.assembly_budget.unwrap_or(settings.context_window);
     let context_class = settings.effective_requested_class().label().to_string();
-    let thinking_level = settings.thinking.as_str().to_string();
+    let thinking_level = projection.effective_reasoning;
 
     let metrics_lock_started_at = std::time::Instant::now();
     if let Ok(mut metrics) = runtime.context_metrics.lock() {
         metrics.update(est, context_window, &context_class, &thinking_level);
+        metrics.measured = projection.estimated_visible_input.is_some();
     }
     let metrics_lock_elapsed = metrics_lock_started_at.elapsed();
     lifecycle.emit_phase(

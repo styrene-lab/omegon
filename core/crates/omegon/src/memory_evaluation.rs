@@ -186,6 +186,7 @@ mod tests {
             // Codex has no request-level output ceiling. Reserve the registered full
             // model ceiling, including reasoning, and send no unsupported extras.
             extra_body: Default::default(),
+            ..Default::default()
         }
     }
 

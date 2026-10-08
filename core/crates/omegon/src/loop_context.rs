@@ -59,6 +59,19 @@ pub(crate) struct LoopContextCompatibilityAdapter<'a> {
 }
 
 impl<'a> LoopContextCompatibilityAdapter<'a> {
+    pub(crate) fn apply_policy(
+        &mut self,
+        policy: &crate::inference_policy::ResolvedPolicy,
+        schema_tokens: usize,
+    ) {
+        self.manager
+            .set_selector_policy(crate::settings::SelectorPolicy {
+                model_window: policy.input_budget,
+                requested_class: crate::settings::ContextClass::Massive,
+                reply_reserve: 0,
+                tool_schema_reserve: schema_tokens,
+            });
+    }
     pub(crate) fn new(
         manager: &'a mut ContextManager,
         compaction: crate::context_compaction_service::ContextCompactionBinding,
@@ -374,6 +387,8 @@ fn compute_context_composition(
         }
     }
 
+    // Memory is a subcategory of tool history, not an additional input copy.
+    tool_history_tokens = tool_history_tokens.saturating_sub(memory_tokens);
     let used = system_tokens
         .saturating_add(conversation_tokens)
         .saturating_add(memory_tokens)
@@ -419,6 +434,105 @@ fn is_declared_memory_tool(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn resolved_policy_configured_threshold_controls_real_loop_compaction() {
+        struct Counting(std::sync::atomic::AtomicUsize);
+        #[async_trait::async_trait]
+        impl crate::bridge::LlmBridge for Counting {
+            fn serving_model_hint(&self) -> Option<&str> {
+                Some("openai-codex:gpt-6-astra")
+            }
+            async fn stream(
+                &self,
+                _: &str,
+                _: &[LlmMessage],
+                _: &[omegon_traits::ToolDefinition],
+                _: &crate::bridge::StreamOptions,
+            ) -> anyhow::Result<tokio::sync::mpsc::Receiver<crate::bridge::LlmEvent>> {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let (tx, rx) = tokio::sync::mpsc::channel(2);
+                tx.try_send(crate::bridge::LlmEvent::TextDelta {
+                    delta: "Finished.".into(),
+                })?;
+                tx.try_send(crate::bridge::LlmEvent::Done {
+                    message: serde_json::json!({}),
+                    input_tokens: 1,
+                    output_tokens: 1,
+                    cache_read_tokens: 0,
+                    cache_creation_tokens: 0,
+                    provider_telemetry: None,
+                })?;
+                Ok(rx)
+            }
+        }
+        for (threshold, requested_compaction) in [(0.8, true), (0.99, false)] {
+            let bridge = Counting(std::sync::atomic::AtomicUsize::new(0));
+            let mut bus = crate::bus::EventBus::new();
+            bus.finalize();
+            let mut manager = ContextManager::new("Complete this task.".into(), vec![]);
+            let mut conversation = ConversationState::new();
+            conversation.push_user("old ".repeat(17_000));
+            conversation.intent.stats.turns = 1;
+            conversation.push_user("Finish the task.".into());
+            let settings = crate::settings::shared("openai-codex:gpt-6-astra");
+            {
+                let mut settings = settings.lock().unwrap();
+                // Explicit fixture: W=38192, existing Medium host G_h=18192,
+                // P=0 leaves a 20000-token assembly budget.
+                settings.context_window = 38_192;
+                settings.compaction_threshold = threshold;
+            }
+            let config = LoopConfig {
+                model: "openai-codex:gpt-6-astra".into(),
+                settings: Some(settings),
+                max_turns: 1,
+                max_retries: 1,
+                allow_commit_nudge: false,
+                compatibility: crate::loop_driver::LoopCompatibilityBindings {
+                    context_compaction:
+                        crate::context_compaction_service::ContextCompactionBinding::direct_for_test(
+                        ),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let (events, mut observed) = tokio::sync::broadcast::channel(64);
+            let turn = crate::loop_driver::LoopDriverTurn::new(
+                &bridge,
+                &mut bus,
+                &mut manager,
+                &mut conversation,
+                &events,
+                tokio_util::sync::CancellationToken::new(),
+                &config,
+                std::sync::Arc::new(crate::provider_route_service::ProviderRouteService),
+            );
+            let execution = crate::loop_driver::ReleaseCoupledLoopDriver.run(turn).await;
+            let diagnostics: Vec<_> = std::iter::from_fn(|| observed.try_recv().ok())
+                .filter(|event| matches!(event, omegon_traits::AgentEvent::ContextCompaction(_)))
+                .collect();
+            assert!(
+                execution.result.is_ok(),
+                "threshold {threshold}: {:?}",
+                execution.result
+            );
+            assert_eq!(
+                bridge.0.load(std::sync::atomic::Ordering::SeqCst),
+                1,
+                "threshold {threshold}: {diagnostics:?}"
+            );
+            assert_eq!(diagnostics.iter().any(|event| matches!(event,
+                omegon_traits::AgentEvent::ContextCompaction(event) if event.status == omegon_traits::ContextCompactionStatus::Started)),
+                requested_compaction, "threshold {threshold}: {diagnostics:?}");
+            // This sessionless fixture has no authority for a turn summary.
+            // The pressure request must still pass through that existing owner.
+            if requested_compaction {
+                assert!(diagnostics.iter().any(|event| matches!(event,
+                    omegon_traits::AgentEvent::ContextCompaction(event) if event.reason.as_deref() == Some("turn compaction requires complete session authority"))));
+            }
+        }
+    }
 
     #[tokio::test]
     async fn fixed_context_budget_stops_loop_before_provider_dispatch() {

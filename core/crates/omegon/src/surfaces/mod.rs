@@ -11,6 +11,7 @@ pub mod diagnostics;
 pub mod editor;
 pub mod episodes;
 pub mod footer;
+pub mod inference_policy;
 pub mod inline;
 pub mod instruments;
 pub mod layout;

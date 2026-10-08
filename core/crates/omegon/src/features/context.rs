@@ -757,6 +757,18 @@ impl Feature for ContextProvider {
     ) -> anyhow::Result<ToolResult> {
         match tool_name {
             crate::tool_registry::context::CONTEXT_STATUS => {
+                if let Some(settings) = &self.settings {
+                    let projection = settings
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("settings lock poisoned"))?
+                        .inference_projection();
+                    return Ok(ToolResult {
+                        content: vec![ContentBlock::Text {
+                            text: crate::surfaces::inference_policy::status(&projection),
+                        }],
+                        details: serde_json::to_value(projection)?,
+                    });
+                }
                 let runtime = self.runtime_state();
                 let thinking = runtime.thinking_display();
                 let usage = if runtime.measured {

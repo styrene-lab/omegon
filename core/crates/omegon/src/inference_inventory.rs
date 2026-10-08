@@ -76,7 +76,9 @@ pub enum EvidenceKind {
     RuntimeObserved,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum InventorySource {
     Embedded,
     Organization,
@@ -173,6 +175,7 @@ pub struct InferenceOffering {
     pub capability_grades: BTreeMap<String, Evidenced<CapabilityGrade>>,
     pub context_input: Option<Evidenced<usize>>,
     pub context_output: Option<Evidenced<usize>>,
+    pub policy_facts: crate::inference_policy::RouteFacts,
     pub extensions: Evidenced<ExtensionMetadata>,
     pub enabled: Evidenced<bool>,
 }
@@ -216,6 +219,7 @@ pub struct OfferingPatch {
     pub capability_grades: BTreeMap<String, CapabilityGrade>,
     pub context_input: Option<Option<usize>>,
     pub context_output: Option<Option<usize>>,
+    pub policy_facts: Option<crate::inference_policy::RouteFacts>,
     pub extensions: Option<ExtensionMetadata>,
     pub enabled: Option<bool>,
 }
@@ -356,6 +360,10 @@ impl InventoryLayer {
                     capability_grades,
                     context_input: Some(Some(model.context_input)),
                     context_output: Some(Some(model.context_output)),
+                    policy_facts: Some(crate::inference_policy::registry_facts(&format!(
+                        "{}:{}",
+                        model.provider, model.id
+                    ))),
                     extensions: Some(BTreeMap::new()),
                     enabled: Some(true),
                 },
@@ -448,6 +456,9 @@ impl InventorySnapshot {
         };
         for layer in layers {
             snapshot.apply_layer(layer)?;
+        }
+        for offering in snapshot.offerings.values_mut() {
+            offering.policy_facts.inventory_generation = Some(generation);
         }
         snapshot.validate()?;
         Ok(snapshot)
@@ -823,8 +834,34 @@ fn offering_from_patch(
             .flatten()
             .map(|v| Evidenced::new(v, source, evidence)),
         extensions: Evidenced::new(patch.extensions.unwrap_or_default(), source, evidence),
+        policy_facts: admit_policy_fact_source(patch.policy_facts.unwrap_or_default(), source),
         enabled: Evidenced::new(patch.enabled.unwrap_or(true), source, evidence),
     })
+}
+
+fn admit_policy_fact_source(
+    mut facts: crate::inference_policy::RouteFacts,
+    source: InventorySource,
+) -> crate::inference_policy::RouteFacts {
+    let configured = matches!(
+        source,
+        InventorySource::Organization
+            | InventorySource::User
+            | InventorySource::Project
+            | InventorySource::Session
+    );
+    for provenance in facts
+        .capacity
+        .iter_mut()
+        .map(|fact| &mut fact.provenance)
+        .chain(facts.reasoning.iter_mut().map(|caps| &mut caps.provenance))
+    {
+        provenance.source = source;
+        if configured {
+            provenance.status = crate::inference_policy::EvidenceStatus::Configured;
+        }
+    }
+    facts
 }
 
 fn apply_offering_patch(
@@ -833,6 +870,27 @@ fn apply_offering_patch(
     source: InventorySource,
     evidence: EvidenceKind,
 ) {
+    let identity_changed = patch
+        .endpoint
+        .as_ref()
+        .is_some_and(|endpoint| *endpoint != offering.endpoint.value)
+        || patch
+            .native_model_id
+            .as_ref()
+            .is_some_and(|model| *model != offering.native_model_id.value);
+    if identity_changed && source != InventorySource::Discovery {
+        offering.policy_facts = Default::default();
+    }
+    if let Some(facts) = patch.policy_facts
+        && !(identity_changed && source == InventorySource::Discovery)
+    {
+        let facts = admit_policy_fact_source(facts, source);
+        offering.policy_facts.capacity.extend(facts.capacity);
+        if let Some(mut reasoning) = facts.reasoning {
+            reasoning.provenance.source = source;
+            offering.policy_facts.reasoning = Some(reasoning);
+        }
+    }
     // Discovery owns observations, not a previously declared route's identity.
     // A new offering still receives its identity when it is first materialized.
     if let Some(value) = patch.endpoint

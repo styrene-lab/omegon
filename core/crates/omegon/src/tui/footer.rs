@@ -53,6 +53,8 @@ pub struct FooterData {
     pub model_id: String,
     pub model_provider: String,
     pub context_percent: f32,
+    pub context_estimate_available: bool,
+    pub policy_snapshot_id: Option<String>,
     pub context_window: usize,
     pub context_class: ContextClass,
     pub actual_context_class: ContextClass,
@@ -198,7 +200,11 @@ impl FooterData {
                     Style::default().fg(t.accent()).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    format!("{}% ", self.context_percent as u32),
+                    if self.context_estimate_available {
+                        format!("~{}% ", self.context_percent as u32)
+                    } else {
+                        "usage n/a ".into()
+                    },
                     Style::default().fg(t.muted()),
                 ),
                 Span::styled(
@@ -555,7 +561,11 @@ impl FooterData {
             Span::styled(format!("{model_short} "), Style::default().fg(t.muted())),
             Span::styled("│ ", Style::default().fg(t.dim())),
             Span::styled(
-                format!("{pct}% "),
+                if self.context_estimate_available {
+                    format!("~{pct}% ")
+                } else {
+                    "usage n/a ".into()
+                },
                 Style::default().fg(widgets::percent_color(self.context_percent, t)),
             ),
             Span::styled("│ ", Style::default().fg(t.dim())),
@@ -575,6 +585,20 @@ impl FooterData {
         let mut lines: Vec<Line<'static>> = Vec::new();
 
         // Gauge bar
+        if !self.context_estimate_available {
+            frame.render_widget(
+                Paragraph::new(if self.context_window > 0 {
+                    format!(
+                        "{} budget · usage n/a",
+                        widgets::format_tokens(self.context_window)
+                    )
+                } else {
+                    "usage unavailable".into()
+                }),
+                inner,
+            );
+            return;
+        }
         let bar_w = (inner.width as usize).saturating_sub(12).min(20);
         let pct = self.context_percent.min(100.0);
         let memory_blocks = if self.memory_tokens_est > 0 && self.context_window > 0 {
@@ -664,7 +688,11 @@ impl FooterData {
             Span::styled(" · ", Style::default().fg(t.border_dim())),
             Span::styled(context_badge, Style::default().fg(ctx_class_color)),
             Span::styled(
-                format!(" {:.0}%", self.context_percent.min(100.0)),
+                if self.context_estimate_available {
+                    format!(" ~{:.0}%", self.context_percent.min(100.0))
+                } else {
+                    " usage n/a".into()
+                },
                 Style::default().fg(widgets::percent_color(self.context_percent, t)),
             ),
             Span::styled(
@@ -1105,6 +1133,7 @@ mod tests {
             model_id: "anthropic:claude-sonnet-4-6".into(),
             model_provider: "anthropic".into(),
             context_percent: 37.5,
+            context_estimate_available: true,
             context_window: 200_000,
             estimated_tokens: 75_000,
             total_facts: 10,
@@ -1173,6 +1202,7 @@ mod tests {
             model_id: "claude-sonnet-4-6".into(),
             model_provider: "anthropic".into(),
             context_percent: 45.0,
+            context_estimate_available: true,
             context_window: 200_000,
             total_facts: 150,
             turn: 5,
@@ -1272,6 +1302,7 @@ mod tests {
     fn footer_shows_context_percent() {
         let data = FooterData {
             context_percent: 75.0,
+            context_estimate_available: true,
             context_window: 200_000,
             ..Default::default()
         };
@@ -1322,6 +1353,7 @@ mod tests {
             model_id: "claude-sonnet-4-6".into(),
             model_provider: "anthropic".into(),
             context_percent: 45.0,
+            context_estimate_available: true,
             context_window: 200_000,
             total_facts: 150,
             turn: 5,
@@ -1365,6 +1397,7 @@ mod tests {
             model_id: "ollama:qwen3".into(),
             model_provider: "ollama".into(),
             context_percent: 68.0,
+            context_estimate_available: true,
             context_window: 262_144,
             thinking_level: "high".into(),
             model_tier: "B".into(),
@@ -1600,6 +1633,7 @@ mod tests {
             model_id: "openai:gpt-5.4".into(),
             model_provider: "openai".into(),
             context_percent: 68.0,
+            context_estimate_available: true,
             context_window: 131_072,
             context_class: ContextClass::Massive,
             actual_context_class: ContextClass::Compact,
@@ -1826,6 +1860,7 @@ mod tests {
             model_id: "claude-sonnet-4-6".into(),
             model_provider: "Anthropic".into(),
             context_percent: 72.0,
+            context_estimate_available: true,
             context_window: 272_000,
             context_class: ContextClass::Standard,
             total_facts: 1800,

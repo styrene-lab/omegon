@@ -758,9 +758,15 @@ impl App {
             thinking_level: Some(self.footer_data.thinking_level.clone()),
             turn: Some(self.turn),
             runtime_turn: self.runtime_turn_id,
-            est_tokens: Some(self.footer_data.estimated_tokens as u32),
+            est_tokens: self
+                .footer_data
+                .context_estimate_available
+                .then_some(self.footer_data.estimated_tokens as u32),
             actual_tokens: None, // stamped on TurnEnd via stamp_turn_tokens
-            context_percent: Some(self.footer_data.context_percent),
+            context_percent: self
+                .footer_data
+                .context_estimate_available
+                .then_some(self.footer_data.context_percent),
             persona: self
                 .augment_registry
                 .as_ref()
