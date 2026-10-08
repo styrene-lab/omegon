@@ -2,7 +2,7 @@
 schema_version = 1
 id = "omegon-shipped"
 version = "1.0.0"
-canonical_digest = "ebe6124539fba89b3d989ce60f7d41440fb7c716a8fdf574e26d34f12e2386fd"
+canonical_digest = "29bbc36f14440e86b1a20e046ec5ceab47cd0d0567204c8b1164a4267d7906a9"
 requested_capabilities = [
   "content:catalog-data",
   "content:persona-directive",
@@ -276,8 +276,8 @@ requested_capabilities = ["content:skill-metadata"]
 [[assets]]
 path = "skills/likec4/SKILL.md"
 kind = "skill"
-sha256 = "a53902034a750780006deb6e03a164908aa9797157349b1a206e276fd97cf3aa"
-size = 12231
+sha256 = "3f4ef6f62c322e66aa47b8223909efb715ff8f1c64363bbdddf50ed70fcf3c35"
+size = 12342
 requested_capabilities = ["content:skill-metadata"]
 
 [[assets]]

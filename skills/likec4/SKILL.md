@@ -1,6 +1,9 @@
 ---
 name: likec4
 description: Use when creating, reviewing, validating, or debugging C4 architecture models or LikeC4 .c4/.likec4 sources, views, predicates, and CLI workflows. Supports iterative beginner modeling from system context to focused detail.
+activation: intent_detected
+profile: [design, docs]
+triggers: [likec4, c4 architecture, architecture modeling]
 ---
 
 # C4 and LikeC4 modeling
