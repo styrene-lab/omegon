@@ -8,8 +8,9 @@ defaults and the boolean `Enabled` representation clarification. The change has
 33 scenarios and 12 implementation tasks. All 12 tasks are checked after the
 current-source regression, affected-crate, Clippy, and private headless checks
 passed. Both original independent reviewers cleared all five P2 fixes against
-the reviewed code hash below. Live Ghostty verification remains parent-owned
-after local commits; this change is not archived.
+the reviewed code hash below. Same-window live Ghostty verification subsequently
+passed on local commit `de0e18821acce3ec7e5a241601eb75d0c3597cd1`, as recorded
+below. This change is not archived.
 
 Native task/test registration and ledger reconciliation are unavailable in this
 harness. No native history was fabricated and no archival was performed.
@@ -17,8 +18,9 @@ Persisted session-v1 facts and replay payload meanings are unchanged. The live
 projection DTO is additive. Optional credential identity metadata is described
 in [design.md](design.md).
 
-The existing Ghostty session has not been rebuilt, restarted, or driven. Final
-same-terminal verification remains parent-owned. Automated reviews are complete.
+At the automated-review handoff, the existing Ghostty session had not been
+rebuilt, restarted, or driven. The subsequent live check preserved that session
+through `/quit`, then rebuilt and launched a fresh session in the same window.
 
 ## Automated evidence
 
@@ -118,8 +120,8 @@ cleared their findings: endpoint identity, fact supersession, bootstrap intent,
 supported Codex Off, and non-disableable GPT-OSS Off. These were source rechecks,
 not additional test runs. No Rust or policy source changed after clearance.
 Only verification prose and the separate packaging changelog entry were updated
-for the local commits. Final same-terminal rebuild and live verification remain
-pending with the parent.
+for the local commits. The subsequent same-terminal rebuild and live verification
+used this unchanged policy code hash.
 
 Logs are under the approved temporary directory, with prefix
 `/private/var/folders/ln/r6np9wfn1wx8r6sdnvn07sxw0000gn/T/opencode/resolved-policy-`.
@@ -191,18 +193,101 @@ host input budget is `272000-10192=261808`. Actual schemas are counted in input,
 not reserved a second time. This is a local estimate, not account entitlement or
 provider-exact tokenization.
 
-After review, the parent should preserve active operator work, rebuild through
-the established same-window procedure, verify executable identity, then inspect
-startup usage, Minimal normalization, one normal reply, capacity controls, and
-unsupported Off feedback in the recorded Ghostty terminal. Existing controls are
-listed above; no new terminal or window is needed. This record does not claim
-that live Ghostty verification occurred.
+The post-review procedure was to preserve operator work, rebuild in the same
+window, verify executable identity, then inspect startup usage, Minimal
+normalization, normal replies, capacity controls, and unsupported Off feedback.
+The live results below complete that procedure.
 
 The existing terminal receipt identifies Ghostty terminal
 `D7020F2F-64D9-4B2C-9A90-DEFEF4F0AEF4`, window `tab-group-76fdb92c0`, and
 `/dev/ttys004`. Its `.git/dev-terminal/helpers.zsh` defines `odev` as
 `direnv exec . just run --tui inline --ui active --fresh --no-splash`.
-After preserving work and reaching the shell with `/quit`, the parent can use
-that existing helper. Validate current process identity before using recorded
-PIDs; the receipt is historical. No command has been sent to that terminal by
-this implementation session.
+The helper does not forward arguments. The live check therefore used the exact
+canonical command with an explicit Astra model, as recorded below. Process IDs
+are historical evidence and must be revalidated before subsequent control.
+
+## Same-window live verification — 2026-10-08
+
+### Source, build, and ownership
+
+After all automated reviews cleared, the owned window showed an idle Astra
+session with an empty composer. `/quit` saved that session and returned to the
+existing shell, PID `14782`, on `/dev/ttys004`. The old Omegon PID `15016` and its
+`just` parent `14970` exited. No force termination was used.
+
+The following command ran once in that same shell:
+
+```sh
+direnv exec . just run --tui inline --ui active --fresh --no-splash --model openai-codex:gpt-6-astra
+```
+
+The native terminal reported a successful `dev-release` build in 2m 09s. The
+running executable was verified through its process identity and executable
+mapping as `/Users/wilson/workspace/styrene-lab/omegon/target/dev-release/omegon`:
+
+- Source: `de0e18821acce3ec7e5a241601eb75d0c3597cd1` on
+  `feat/resolved-inference-policy`; reviewed policy code hash unchanged.
+- Binary SHA-256:
+  `bd7d4eb6a00a8158c35d93fafefcd2e06f0c657f0b7029934cbfa5c4bef3dde1`.
+- Artifact modification time: `2026-10-08T20:57:17Z`.
+- Omegon PID `95800`, PGID `95753`, TTY `ttys004`. Its IPC startup timestamp is
+  `2026-10-08T20:57:20.010436Z`; the PID existed earlier as the build wrapper.
+- Ghostty terminal `D7020F2F-64D9-4B2C-9A90-DEFEF4F0AEF4`, window
+  `tab-group-76fdb92c0`, native window `598`, owner PID `694`, Ghostty `1.3.1`.
+  The application changed the window title to `Ω omegon ✦`.
+
+Only that window was captured. The established system-SDK capture procedure
+worked without permission changes. Status receipts came from the same live
+process through its existing IPC socket, with `server_pid == 95800` verified.
+Session-setting commands and both prompts were submitted through the owned
+Ghostty terminal. No replacement terminal, global installation, or site process
+was created or changed.
+
+### Observed policy and live results
+
+| Check | Observed result |
+| --- | --- |
+| Fresh startup | Effective reasoning `low`; usage and percentage unavailable until request preparation. Advertised default `272000` and maximum `872000` remained distinct. |
+| Actual host budget | Existing posture and working-set class each capped the working window at `131072`. Generation heuristic was `4096 + 2000 = 6096`, giving input budget `124976`. These narrower settings explain the difference from the full-reply fixture above. |
+| `/context reasoning minimal` | Reported `Session reasoning: low`. Status preserved requested `minimal`, normalization to low, and the 2,000-token host heuristic. Codex output coverage remained explicitly unenforced. |
+| First live prompt | `Reply exactly: policy-ready` returned `policy-ready`. Prepared input was `24850 / 124976` tokens, `19.883818%`; the composer showed approximately `24k / 124k context (20%)`. |
+| `/context reasoning provider-default` | Cleared explicit requested reasoning; declared default still resolved to low. Current request estimate became unavailable, while prior provider usage retained its original snapshot identity. |
+| `/context capacity 600000` | Stored session target `600000` for the captured OAuth route. Narrower host caps retained budget `124976`; no enlarged-context provider request was sent. |
+| `/context capacity maximum` | Materialized numeric target `872000` with metadata revision `2fdf047c9631c9ed01a31b62efb7891718a931a8`. Host caps still applied. |
+| `/context capacity reset` | Cleared the session target and restored lower-priority default selection. |
+| `/context reasoning off` | Rejected at command validation: `reasoning needs resolution: off is unsupported`; the diagnostic stated that saved intent was unchanged. No Off prompt was submitted. |
+| Restoration and second turn | Restored Minimal, with capacity still reset. `Reply exactly: policy-ready-again` returned `policy-ready-again`. The new prepared snapshot measured `24908 / 124976` tokens, `19.930227%`, with effective low. |
+
+The first and second prepared snapshot IDs were
+`d90124ae-6cf5-4f2e-a2a6-3e85d1807d69` and
+`f92578af-2847-4162-b198-bf816f2b0cc6`. Their corresponding provider measurements
+were 19,995 input / 6 output tokens and 20,016 input / 8 output tokens. Provider
+measurements remained separate from local prepared-input estimates.
+
+Final authoritative state was `busy: false`, `active_turn: idle`, queue depth
+zero, and zero tool calls. Both replies and the empty, reusable composer were
+visually verified. One observation script initially waited for `turns >= 2` and
+timed out: that field remained `1`. The second reply, distinct prepared snapshot,
+provider usage, and authoritative idle state established completion without
+resubmitting the prompt or restarting the app.
+
+The check performed two successful small live prompts, one unsupported-Off
+rejection, and one capacity reset. Project/user profile and active-profile
+hashes or absence markers were unchanged. Authentication worked without another
+login. The two contribution-scope warnings matched the pre-existing baseline.
+
+### Private evidence and retained state
+
+Evidence is under `.git/dev-terminal/resolved-policy-20261008T205427Z/`, with
+directory mode `0700` and receipt/capture mode `0600`. It includes source and
+artifact identities, native window binding, per-control semantic status, profile
+hash comparisons, and captures. Key captures are `03-build-result.png`,
+`06-first-reply.png`, `11-off-rejected.png`, and `13-second-observation.png`.
+`13-final-status.txt` and `13-final-session.json` record the final policy and
+idle state. Screenshots and runtime conversations remain machine-local.
+
+The app and dedicated window were intentionally left running. Production source
+was unchanged. Live startup created the untracked runtime cursor
+`.omegon/audit-consumer-cursor-v2.json`; it was left unstaged, alongside the
+pre-existing personal `opencode-resume` file. This evidence update changes only
+this verification document and does not claim archival or native ledger updates.
