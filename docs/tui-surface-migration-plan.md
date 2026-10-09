@@ -40,6 +40,33 @@ The migration must be reversible. Omegon's main TUI should not be destabilized b
 
 ## Candidate experiments
 
+### Experiment 0: Native-scrollback conversation shell
+
+Historical proposal from 2026-08-11, retained from the native-inline branch.
+The production presentation contract now lives in `docs/tui-presentations.md` and
+`openspec/changes/tui-dual-presentation/`. The proposal below records the earlier
+experiment, not the current implementation status.
+
+Promote the validated standalone inline-viewport probe into a production-shaped
+shell behind an explicit experimental entry point. Publish only finalized
+conversation segments into native terminal scrollback; keep the active composer
+and compact status line in a small Ratatui `Viewport::Inline` region.
+
+The next experiment must reuse production conversation projections rather than
+mock strings and must cover:
+
+- wrapped-height calculation at the current terminal width;
+- publication of user, assistant, and completed tool segments exactly once;
+- resize behavior before and after publication;
+- inline artifacts and overlays that cannot become immutable scrollback;
+- startup/restore behavior when cursor-position queries are unavailable;
+- native interaction checks in macOS Terminal, Ghostty, Kitty, and SSH.
+
+Keep this behind a separate binary or explicit experimental mode until transcript
+ordering and resize invariants have automated coverage. Do not reintroduce a
+right-side drawer as part of this experiment: changing conversation width forces
+historical reflow and undermines the stable native-scrollback model being tested.
+
 ### Experiment A: Prototype binary
 
 Create a standalone prototype that hosts:

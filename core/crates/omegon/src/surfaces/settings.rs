@@ -17,6 +17,10 @@ pub struct SettingsSurfaceSnapshot {
     pub context_choices: Vec<SettingsChoiceProjection>,
     pub max_turns: u32,
     pub tool_detail: String,
+    pub ui_presentation: String,
+    pub startup_splash: String,
+    pub tui_theme: String,
+    pub glyph_preference: String,
     pub trusted_directory_count: usize,
     pub sandbox: bool,
     pub update_channel: String,
@@ -54,6 +58,36 @@ pub struct SettingsChoiceProjection {
     pub value: String,
     pub label: String,
     pub active: bool,
+}
+
+/// Renderer-neutral terminal glyph evidence supplied by the active client.
+/// Settings owns the projection shape; terminal adapters own capability probes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlyphCapabilityProjectionInput {
+    pub detected: String,
+    pub effective: String,
+    pub confidence: String,
+    pub evidence: Vec<String>,
+    pub nerd_font_support_unconfirmed: bool,
+    pub remediation_url: String,
+}
+
+impl GlyphCapabilityProjectionInput {
+    pub fn unprobed(requested: &str) -> Self {
+        let effective = match requested {
+            "ascii" => "ascii",
+            "nerd-font" => "nerd-font",
+            _ => "unicode",
+        };
+        Self {
+            detected: "unprobed".into(),
+            effective: effective.into(),
+            confidence: "unknown".into(),
+            evidence: Vec::new(),
+            nerd_font_support_unconfirmed: requested == "nerd-font",
+            remediation_url: "https://www.nerdfonts.com/font-downloads".into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -127,6 +161,18 @@ impl SettingsSurfaceProjection {
         snapshot: &SettingsSurfaceSnapshot,
         drift: Option<&ProfileDriftProjection>,
     ) -> Self {
+        Self::from_snapshot_with_capability(
+            snapshot,
+            drift,
+            GlyphCapabilityProjectionInput::unprobed(&snapshot.glyph_preference),
+        )
+    }
+
+    pub fn from_snapshot_with_capability(
+        snapshot: &SettingsSurfaceSnapshot,
+        drift: Option<&ProfileDriftProjection>,
+        glyphs: GlyphCapabilityProjectionInput,
+    ) -> Self {
         let profile_row = |id: &str| {
             drift
                 .and_then(|projection| {
@@ -189,22 +235,7 @@ impl SettingsSurfaceProjection {
                 SettingsTabProjection {
                     id: "ui".into(),
                     label: "UI".into(),
-                    rows: vec![choice_row(
-                        "ui.tool_detail",
-                        "Tool display",
-                        &snapshot.tool_detail,
-                        "Density of tool-call summaries in interactive surfaces",
-                        SettingsMutationRouteProjection::SharedSettings,
-                        SettingsPersistenceProjection::PersistedProfile,
-                        ["lean", "compact", "detailed", "verbose"]
-                            .into_iter()
-                            .map(|value| SettingsChoiceProjection {
-                                value: value.into(),
-                                label: value.into(),
-                                active: value == snapshot.tool_detail,
-                            })
-                            .collect(),
-                    )],
+                    rows: ui_rows(snapshot, &glyphs),
                 },
                 SettingsTabProjection {
                     id: "workspace".into(),
@@ -351,6 +382,133 @@ impl SettingsSurfaceProjection {
     }
 }
 
+fn ui_rows(
+    settings: &SettingsSurfaceSnapshot,
+    glyphs: &GlyphCapabilityProjectionInput,
+) -> Vec<SettingsRowProjection> {
+    let choice =
+        |value: &'static str, label: &'static str, active: bool| SettingsChoiceProjection {
+            value: value.into(),
+            label: label.into(),
+            active,
+        };
+    let mut requested_glyphs = choice_row(
+        "ui.glyph_preference",
+        "Glyphs",
+        settings.glyph_preference.as_str(),
+        "Requested symbol profile; Auto follows detected terminal capability",
+        SettingsMutationRouteProjection::LocalUi,
+        SettingsPersistenceProjection::PersistedProfile,
+        vec![
+            choice("auto", "Auto", settings.glyph_preference == "auto"),
+            choice(
+                "nerd-font",
+                "Nerd Font",
+                settings.glyph_preference == "nerd-font",
+            ),
+            choice("unicode", "Unicode", settings.glyph_preference == "unicode"),
+            choice("ascii", "ASCII", settings.glyph_preference == "ascii"),
+        ],
+    );
+    if glyphs.nerd_font_support_unconfirmed {
+        requested_glyphs.status = SettingsStatusProjection::Warning;
+        requested_glyphs.description = format!(
+            "Nerd Font requested, but support is unconfirmed ({} confidence)",
+            glyphs.confidence
+        );
+    }
+
+    let evidence = if glyphs.evidence.is_empty() {
+        "no capability signals".to_string()
+    } else {
+        glyphs.evidence.join(", ")
+    };
+    let remediation_status = if glyphs.nerd_font_support_unconfirmed {
+        SettingsStatusProjection::Warning
+    } else {
+        SettingsStatusProjection::Normal
+    };
+    let mut remediation = row(
+        "ui.nerd_font_help",
+        "Nerd Font help",
+        if glyphs.nerd_font_support_unconfirmed {
+            "review"
+        } else {
+            "available"
+        },
+        &format!("Evidence: {evidence} · {}", glyphs.remediation_url),
+        SettingsMutationRouteProjection::ExternalAction,
+        SettingsPersistenceProjection::External,
+        SettingsEditorProjection::Action,
+    );
+    remediation.status = remediation_status;
+
+    vec![
+        choice_row(
+            "ui.presentation",
+            "Presentation",
+            settings.ui_presentation.as_str(),
+            "Overall TUI surface preset without changing runtime posture or permissions",
+            SettingsMutationRouteProjection::LocalUi,
+            SettingsPersistenceProjection::PersistedProfile,
+            ["active", "full"]
+                .into_iter()
+                .map(|value| choice(value, value, value == settings.ui_presentation))
+                .collect(),
+        ),
+        choice_row(
+            "ui.tool_detail",
+            "Tool display",
+            settings.tool_detail.as_str(),
+            "Density of tool-call summaries in interactive surfaces",
+            SettingsMutationRouteProjection::SharedSettings,
+            SettingsPersistenceProjection::PersistedProfile,
+            ["lean", "compact", "detailed", "verbose"]
+                .into_iter()
+                .map(|value| choice(value, value, value == settings.tool_detail.as_str()))
+                .collect(),
+        ),
+        choice_row(
+            "ui.startup_splash",
+            "Startup splash",
+            settings.startup_splash.as_str(),
+            "When the startup animation is shown; capability probes still run independently",
+            SettingsMutationRouteProjection::LocalUi,
+            SettingsPersistenceProjection::PersistedProfile,
+            ["first-run", "always", "never"]
+                .into_iter()
+                .map(|value| choice(value, value, value == settings.startup_splash.as_str()))
+                .collect(),
+        ),
+        choice_row(
+            "ui.theme",
+            "Theme",
+            settings.tui_theme.as_str(),
+            "Named semantic color theme applied to the interactive TUI",
+            SettingsMutationRouteProjection::LocalUi,
+            SettingsPersistenceProjection::PersistedProfile,
+            ["terminal", "alpharius", "styrene"]
+                .into_iter()
+                .map(|value| choice(value, value, value == settings.tui_theme.as_str()))
+                .collect(),
+        ),
+        requested_glyphs,
+        row(
+            "ui.glyph_effective",
+            "Effective glyphs",
+            &glyphs.effective,
+            &format!(
+                "Detected: {} · confidence: {}",
+                glyphs.detected, glyphs.confidence
+            ),
+            SettingsMutationRouteProjection::ReadOnly,
+            SettingsPersistenceProjection::ReadOnly,
+            SettingsEditorProjection::ReadOnly,
+        ),
+        remediation,
+    ]
+}
+
 fn row(
     id: &str,
     label: &str,
@@ -409,6 +567,86 @@ fn settings_row_matches_drift(row_id: &str, drift: &ProfileDriftRow) -> bool {
 mod tests {
     use super::*;
     use crate::settings::Settings;
+
+    #[test]
+    fn ui_projection_exposes_presentation_choices_and_glyph_remediation() {
+        let settings = Settings {
+            ui_presentation: crate::surfaces::layout::UiPresentationLevel::Full,
+            startup_splash: crate::settings::StartupSplashMode::Never,
+            tui_theme: crate::settings::TuiThemePreference::Styrene,
+            glyph_preference: crate::settings::GlyphPreference::NerdFont,
+            ..Default::default()
+        };
+        let capability = GlyphCapabilityProjectionInput {
+            detected: "unicode".into(),
+            effective: "nerd-font".into(),
+            confidence: "low".into(),
+            evidence: vec!["terminal:unknown".into()],
+            nerd_font_support_unconfirmed: true,
+            remediation_url: "https://www.nerdfonts.com/font-downloads".into(),
+        };
+        let projection =
+            SettingsSurfaceProjection::from_settings_with_capability(&settings, capability);
+        let ui = projection.tabs.iter().find(|tab| tab.id == "ui").unwrap();
+
+        for id in [
+            "ui.presentation",
+            "ui.tool_detail",
+            "ui.startup_splash",
+            "ui.theme",
+            "ui.glyph_preference",
+            "ui.glyph_effective",
+            "ui.nerd_font_help",
+        ] {
+            assert!(ui.rows.iter().any(|row| row.id == id), "missing {id}");
+        }
+        assert!(
+            ui.rows
+                .iter()
+                .find(|row| row.id == "ui.presentation")
+                .unwrap()
+                .choices
+                .iter()
+                .any(|choice| choice.value == "full" && choice.active)
+        );
+        assert!(
+            ui.rows
+                .iter()
+                .find(|row| row.id == "ui.startup_splash")
+                .unwrap()
+                .choices
+                .iter()
+                .any(|choice| choice.value == "never" && choice.active)
+        );
+        assert!(
+            ui.rows
+                .iter()
+                .find(|row| row.id == "ui.theme")
+                .unwrap()
+                .choices
+                .iter()
+                .any(|choice| choice.value == "styrene" && choice.active)
+        );
+        assert_eq!(
+            ui.rows
+                .iter()
+                .find(|row| row.id == "ui.glyph_preference")
+                .unwrap()
+                .status,
+            SettingsStatusProjection::Warning
+        );
+        let help = ui
+            .rows
+            .iter()
+            .find(|row| row.id == "ui.nerd_font_help")
+            .unwrap();
+        assert_eq!(help.route, SettingsMutationRouteProjection::ExternalAction);
+        assert!(help.description.contains("terminal:unknown"));
+        assert!(
+            help.description
+                .contains("https://www.nerdfonts.com/font-downloads")
+        );
+    }
 
     #[test]
     fn projection_contains_settings_tabs() {

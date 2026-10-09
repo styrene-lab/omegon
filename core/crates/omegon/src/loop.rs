@@ -163,7 +163,7 @@ pub(crate) async fn run_release_coupled(
     // this bridges it to the AgentEvent channel.
     // receive the initial status supplied by their entrypoint.
 
-    let startup_route = route.startup_route().await;
+    route.startup_route().await;
 
     let session_start = Instant::now();
     let mut controller = ControllerState::default();
@@ -194,7 +194,6 @@ pub(crate) async fn run_release_coupled(
     // immutable config.model which is frozen at startup. Starts from the
     // bridge runtime model when fallback installed one, so events emitted
     // before the first per-turn re-read still report the real model.
-    let mut active_route = startup_route;
 
     loop {
         if cancel.is_cancelled() {
@@ -217,7 +216,21 @@ pub(crate) async fn run_release_coupled(
                 constrained: is_constrained,
             });
         let tool_catalog = ToolCapabilityCatalog::from_tool_defs(&tool_defs);
-        let context_windows = context_contract.resolve_windows(config);
+        let active_route = route.turn_route().await;
+        let captured_policy = route.context_policy(!tool_defs.is_empty())?;
+        let context_windows = if let Some(policy) = &captured_policy {
+            let schemas =
+                crate::providers::estimate_policy_input(&policy.capture, "", &[], &tool_defs)?
+                    .schemas;
+            context_contract.apply_policy(policy, schemas);
+            crate::loop_context::LoopContextWindows {
+                provider_window: policy.input_budget,
+                assembly_window: policy.input_budget,
+                reply_reserve: 0,
+            }
+        } else {
+            context_contract.resolve_windows(config)
+        };
         let context_window = context_windows.assembly_window;
 
         if config.max_turns > 0 && turn > config.max_turns && !final_response_turn_due {
@@ -335,7 +348,20 @@ pub(crate) async fn run_release_coupled(
             .force_compact
             .as_ref()
             .is_some_and(|flag| flag.swap(false, std::sync::atomic::Ordering::SeqCst));
-        if forced_compact || conversation.needs_compaction(context_window, 0.75) {
+        let pressure = if let Some(policy) = &captured_policy {
+            let assembled = context_contract.compose(conversation, &tool_defs, context_window);
+            let input = crate::providers::estimate_policy_input(
+                &policy.capture,
+                &assembled.system_prompt,
+                &assembled.messages,
+                &tool_defs,
+            )?
+            .total()?;
+            input as f32 >= context_window as f32 * policy.proactive_threshold
+        } else {
+            conversation.needs_compaction(context_window, 0.75)
+        };
+        if forced_compact || pressure {
             let before_tokens = conversation.estimate_tokens() as u64;
             let trigger = if forced_compact {
                 omegon_traits::ContextCompactionTrigger::ForcedLoop
@@ -490,8 +516,7 @@ pub(crate) async fn run_release_coupled(
             "LLM context assembled"
         );
 
-        // Re-read thinking level each turn (can change mid-session via /thinking)
-        active_route = route.turn_route().await;
+        // Route/options and assembly budget share the capture made at turn start.
         route.validate_request_capabilities(&tool_defs)?;
         route.prepare(&active_route, events).await;
         let preparation = crate::loop_session::TurnRequestPreparation {
@@ -1192,13 +1217,16 @@ pub(crate) async fn run_release_coupled(
         }
 
         let estimated_tokens = conversation.estimate_tokens();
-        let context_update = context_contract.context_update(config, conversation, context_window);
-        let _ = events.send(AgentEvent::ContextUpdated {
-            tokens: context_update.tokens,
-            context_window: context_update.context_window,
-            context_class: context_update.context_class,
-            thinking_level: context_update.thinking_level,
-        });
+        if captured_policy.is_none() {
+            let context_update =
+                context_contract.context_update(config, conversation, context_window);
+            let _ = events.send(AgentEvent::ContextUpdated {
+                tokens: context_update.tokens,
+                context_window: context_update.context_window,
+                context_class: context_update.context_class,
+                thinking_level: context_update.thinking_level,
+            });
+        }
         let _ = events.send(AgentEvent::TurnEnd(Box::new(AgentEventTurnEnd {
             turn,
             turn_end_reason: if no_progress_stop {

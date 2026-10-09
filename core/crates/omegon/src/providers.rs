@@ -7,6 +7,8 @@
 //! The upstream provider APIs are the only external dependency — no npm,
 //! no Node.js, no supply chain risk from package registries.
 
+#[cfg(test)]
+mod policy_tests;
 pub(crate) mod zen;
 
 use async_trait::async_trait;
@@ -21,6 +23,8 @@ use crate::bridge::{BoundaryExpectation, LlmBridge, LlmEvent, LlmMessage, Stream
 /// Must match what Anthropic expects for subscription recognition.
 /// Update when upstream Claude Code advances.
 const CLAUDE_CODE_UA: &str = "claude-cli/2.1.258";
+const ANTHROPIC_OAUTH_SYSTEM_PREFIX: &str =
+    "You are Claude Code, Anthropic's official CLI for Claude.";
 use omegon_traits::ToolDefinition;
 
 /// Anthropic credential mode — records what credential source is active.
@@ -787,6 +791,7 @@ async fn quick_completion_internal(
         reasoning: None,
         extended_context: false,
         extra_body: std::collections::HashMap::new(),
+        ..Default::default()
     };
 
     let prepared = route.prepare_request(
@@ -1601,6 +1606,18 @@ impl AnthropicClient {
 
 #[async_trait]
 impl LlmBridge for AnthropicClient {
+    fn credential_source_class_hint(&self) -> Option<&str> {
+        Some(if self.is_oauth { "oauth" } else { "api_key" })
+    }
+    fn policy_connection(&self) -> Option<String> {
+        crate::auth::read_credential_extra("anthropic", "connectionId")
+    }
+    fn policy_transport(&self) -> Option<(String, bool)> {
+        Some((
+            crate::inference_policy::opaque_identity(&self.base_url),
+            self.base_url == "https://api.anthropic.com",
+        ))
+    }
     async fn stream(
         &self,
         system_prompt: &str,
@@ -1619,6 +1636,13 @@ impl LlmBridge for AnthropicClient {
             None if !self.is_oauth => (self.api_key.clone(), false),
             None => return Err(missing_oauth_route("anthropic", options)),
         };
+        if let Some(policy) = &options.resolved_policy {
+            let expected = &policy.capture.route.authentication;
+            anyhow::ensure!(
+                expected == "unclassified" || (expected == "oauth") == is_oauth,
+                "Anthropic authentication class changed after policy capture; prepare again"
+            );
+        }
 
         let model = options
             .model
@@ -1638,7 +1662,7 @@ impl LlmBridge for AnthropicClient {
             if is_oauth {
                 blocks.push(json!({
                     "type": "text",
-                    "text": "You are Claude Code, Anthropic's official CLI for Claude.",
+                    "text": ANTHROPIC_OAUTH_SYSTEM_PREFIX,
                     "cache_control": {"type": "ephemeral"}
                 }));
             }
@@ -1688,6 +1712,7 @@ impl LlmBridge for AnthropicClient {
             body["tools"] = Value::Array(wire_tools);
         }
         apply_anthropic_thinking(&mut body, model, options.reasoning.as_deref());
+        validate_policy_wire(options, &body)?;
 
         let msg_count = body["messages"].as_array().map(|a| a.len()).unwrap_or(0);
         let system_len = system_prompt.len();
@@ -2183,6 +2208,19 @@ impl OpenAIClient {
 
 #[async_trait]
 impl LlmBridge for OpenAIClient {
+    fn credential_source_class_hint(&self) -> Option<&str> {
+        Some("api_key")
+    }
+    fn policy_transport(&self) -> Option<(String, bool)> {
+        Some((
+            crate::inference_policy::opaque_identity(
+                self.request_url.as_deref().unwrap_or(&self.base_url),
+            ),
+            self.endpoint_id == "openai"
+                && self.request_url.is_none()
+                && self.base_url == "https://api.openai.com",
+        ))
+    }
     async fn stream(
         &self,
         system_prompt: &str,
@@ -2249,12 +2287,14 @@ impl LlmBridge for OpenAIClient {
             }
         } else if let Some(effort) = openai_reasoning_effort(options.reasoning.as_deref())
             && !has_tools
+            && self.endpoint_id != "ollama"
         {
             // OpenAI's /v1/chat/completions rejects reasoning_effort when tools
             // are present for gpt-5.4+. The model still reasons without the hint.
             body["reasoning_effort"] = json!(effort);
         }
 
+        validate_policy_wire(options, &body)?;
         let response = self
             .client
             .post(
@@ -2511,6 +2551,13 @@ impl GithubCopilotClient {
 
 #[async_trait]
 impl LlmBridge for GithubCopilotClient {
+    fn policy_transport(&self) -> Option<(String, bool)> {
+        Some((
+            crate::inference_policy::opaque_identity(&self.base_url),
+            self.base_url.trim_end_matches('/')
+                == crate::github_copilot::DEFAULT_COPILOT_API_BASE_URL,
+        ))
+    }
     async fn stream(
         &self,
         system_prompt: &str,
@@ -3048,6 +3095,12 @@ impl OpenRouterClient {
 
 #[async_trait]
 impl LlmBridge for OpenRouterClient {
+    fn policy_transport(&self) -> Option<(String, bool)> {
+        Some((
+            crate::inference_policy::opaque_identity(&self.inner.base_url),
+            self.inner.base_url.trim_end_matches('/') == "https://openrouter.ai/api",
+        ))
+    }
     async fn stream(
         &self,
         system_prompt: &str,
@@ -3135,7 +3188,7 @@ fn codex_gpt_5_6_cli_advisory(model: &str, installed: Option<SemanticVersion>) -
     ))
 }
 
-fn codex_wire_model(model: &str) -> &str {
+pub(crate) fn codex_wire_model(model: &str) -> &str {
     match model {
         // The current Codex surface documents `gpt-5.6` as the operator-facing
         // shorthand, but the reasoning selector and model catalog resolve the
@@ -3410,6 +3463,464 @@ fn extract_codex_error_detail(event: &Value) -> String {
 
 /// Shared Responses envelope; provider authentication and endpoints remain in
 /// their existing clients. Only explicit Astra routes receive Astra's rules.
+pub(crate) fn resolve_request_policy(
+    capture: &crate::inference_policy::PolicyCapture,
+    options: &StreamOptions,
+    has_tools: bool,
+) -> anyhow::Result<crate::inference_policy::ResolvedPolicy> {
+    use crate::inference_policy::*;
+    for key in [
+        "model",
+        "messages",
+        "input",
+        "instructions",
+        "system",
+        "tools",
+        "reasoning",
+        "reasoning_effort",
+        "thinking",
+        "output_config",
+        "previous_response_id",
+        "conversation",
+    ] {
+        anyhow::ensure!(
+            !options.extra_body.contains_key(key),
+            "late override of policy-owned {key} is unsupported; select it through request options before preparation"
+        );
+    }
+    let provider = if capture.native_adapter {
+        capture.route.provider.as_str()
+    } else {
+        "openai-compatible"
+    };
+    let model = capture.route.native_model.as_str();
+    let mut captured = capture.clone();
+    if provider == "moonshot" {
+        captured.facts.reasoning = Some(ReasoningCapabilities {
+            disabled: false,
+            efforts: ["minimal", "low", "medium", "high", "xhigh", "max"]
+                .map(str::to_owned)
+                .to_vec(),
+            token_bounds: None,
+            adaptive: false,
+            default: Some(ReasoningValue::Categorical("max".into())),
+            minimal_to_low: false,
+            provenance: Provenance {
+                source: crate::inference_inventory::InventorySource::Embedded,
+                authority: "Moonshot always-on reasoning adapter".into(),
+                uri: None,
+                revision: Some("builtin-v1".into()),
+                sequence: None,
+                reviewed_at: None,
+                observed_at: None,
+                valid_until: None,
+                stale: false,
+                status: EvidenceStatus::Assumed,
+            },
+        });
+    }
+    if provider == "ollama" {
+        let tokens = if let Some(value) = options
+            .extra_body
+            .get("options")
+            .and_then(|value| value.get("num_ctx"))
+        {
+            value
+                .as_u64()
+                .and_then(|value| usize::try_from(value).ok())
+                .filter(|value| *value > 0)
+                .ok_or_else(|| anyhow::anyhow!("options.num_ctx must be a positive integer"))?
+        } else if let Some(fact) = captured
+            .facts
+            .capacity
+            .iter()
+            .find(|fact| fact.field == CapacityField::TransportTotal)
+        {
+            fact.tokens
+        } else {
+            std::env::var("OMEGON_OLLAMA_NUM_CTX")
+                .ok()
+                .map(|value| value.parse::<usize>())
+                .transpose()
+                .map_err(|_| anyhow::anyhow!("OMEGON_OLLAMA_NUM_CTX must be a positive integer"))?
+                .unwrap_or(32_768)
+        };
+        anyhow::ensure!(tokens > 0, "Ollama transport context must be positive");
+        anyhow::ensure!(
+            u32::try_from(tokens).is_ok(),
+            "Ollama num_ctx exceeds the adapter's u32 range"
+        );
+        if !captured
+            .facts
+            .capacity
+            .iter()
+            .any(|fact| fact.field == CapacityField::TransportTotal)
+        {
+            captured.facts.capacity.push(CapacityFact {
+                field: CapacityField::TransportTotal,
+                tokens,
+                basis: WindowBasis::Total,
+                provenance: Provenance {
+                    source: crate::inference_inventory::InventorySource::Session,
+                    authority: "Ollama num_ctx transport".into(),
+                    uri: None,
+                    revision: None,
+                    sequence: None,
+                    reviewed_at: None,
+                    observed_at: None,
+                    valid_until: None,
+                    stale: false,
+                    status: EvidenceStatus::Configured,
+                },
+            });
+        }
+    }
+    // Adapter rules are explicit protocol contracts, not model capability booleans.
+    if matches!(provider, "ollama" | "ollama-cloud") && captured.facts.reasoning.is_none() {
+        captured.facts.reasoning = Some(ReasoningCapabilities {
+            disabled: true,
+            efforts: [
+                "minimal", "low", "medium", "high", "xhigh", "max", "enabled",
+            ]
+            .map(str::to_owned)
+            .to_vec(),
+            token_bounds: None,
+            adaptive: false,
+            default: None,
+            minimal_to_low: false,
+            provenance: Provenance {
+                source: crate::inference_inventory::InventorySource::Embedded,
+                authority: "ollama-think-adapter-v1".into(),
+                uri: None,
+                revision: Some("builtin-v1".into()),
+                sequence: None,
+                reviewed_at: None,
+                observed_at: None,
+                valid_until: None,
+                stale: false,
+                status: EvidenceStatus::Declared,
+            },
+        });
+    }
+    if matches!(provider, "ollama" | "ollama-cloud")
+        && model.to_ascii_lowercase().contains("gpt-oss")
+        && let Some(capabilities) = captured.facts.reasoning.as_mut()
+    {
+        // GPT-OSS ignores boolean think values. Its categorical adapter cannot
+        // implement Disabled, regardless of generic Ollama toggle support.
+        capabilities.disabled = false;
+        capabilities.efforts.retain(|effort| effort != "enabled");
+        capabilities.token_bounds = None;
+        capabilities.adaptive = false;
+    }
+    let parse_cap = |key: &str| -> anyhow::Result<Option<usize>> {
+        options
+            .extra_body
+            .get(key)
+            .map(|value| {
+                value
+                    .as_u64()
+                    .and_then(|n| usize::try_from(n).ok())
+                    .filter(|n| *n > 0)
+                    .ok_or_else(|| anyhow::anyhow!("{key} must be a positive integer"))
+            })
+            .transpose()
+    };
+    let mut output = OutputAccounting::default();
+    if provider == "anthropic" {
+        anyhow::ensure!(
+            !options.extra_body.contains_key("max_tokens"),
+            "Anthropic max_tokens override is not supported by this adapter"
+        );
+        output = OutputAccounting {
+            wire_field: Some("max_tokens".into()),
+            requested_cap: Some(16_384),
+            enforced_total: Some(16_384),
+            coverage: "total generation, including thinking".into(),
+        };
+    } else if provider == "openai" && model == "gpt-6-astra" {
+        if let Some(cap) = parse_cap("max_output_tokens")? {
+            output = OutputAccounting {
+                wire_field: Some("max_output_tokens".into()),
+                requested_cap: Some(cap),
+                enforced_total: Some(cap),
+                coverage: "Responses total generation, including reasoning".into(),
+            };
+        }
+    } else if provider == "openai-codex" {
+        output.requested_cap = parse_cap("max_output_tokens")?;
+        output.coverage = "NotEnforced: Codex adapter does not emit an output cap".into();
+    } else if provider == "google-antigravity" {
+        output = OutputAccounting {
+            wire_field: Some("generationConfig.maxOutputTokens".into()),
+            requested_cap: Some(65_536),
+            enforced_total: None,
+            coverage: "visible generation field; reasoning coverage unverified".into(),
+        };
+    } else {
+        for field in ["max_completion_tokens", "max_tokens", "max_output_tokens"] {
+            if let Some(cap) = parse_cap(field)? {
+                anyhow::ensure!(output.wire_field.is_none(), "conflicting output cap fields");
+                output.wire_field = Some(field.into());
+                output.requested_cap = Some(cap);
+            }
+        }
+    }
+    let mut policy = captured.resolve(options.reasoning.as_deref(), output)?;
+    let requested = options.reasoning.as_deref().map(|value| {
+        crate::settings::ThinkingLevel::parse(value).map_or(value, |level| level.as_str())
+    });
+    if matches!(provider, "ollama" | "ollama-cloud") {
+        if let Some(requested) = requested.filter(|r| *r != "provider-default") {
+            let value = ollama_think_value(model, Some(requested));
+            policy.reasoning.effective = match value {
+                Some(Value::Bool(false)) => ReasoningValue::Disabled,
+                Some(Value::Bool(true)) => ReasoningValue::Enabled,
+                Some(Value::String(effort)) => ReasoningValue::Categorical(effort),
+                _ => ReasoningValue::ProviderDefault,
+            };
+            policy.reasoning.normalization =
+                Some("explicit Ollama model-route think adapter rule".into());
+        }
+        if let Some(extra) = options.extra_body.get("think") {
+            let expected = match &policy.reasoning.effective {
+                ReasoningValue::Disabled => json!(false),
+                ReasoningValue::Enabled => json!(true),
+                ReasoningValue::Categorical(effort) => json!(effort),
+                _ => Value::Null,
+            };
+            anyhow::ensure!(
+                *extra == expected,
+                "late think override contradicts captured reasoning"
+            );
+        }
+    } else if provider == "anthropic" {
+        let mut body = json!({"max_tokens": 16_384});
+        apply_anthropic_thinking(&mut body, model, requested);
+        if let Some(thinking) = body.get("thinking") {
+            policy.reasoning.effective = match thinking["type"].as_str() {
+                Some("disabled") => ReasoningValue::Disabled,
+                Some("enabled") => {
+                    let budget = thinking["budget_tokens"].as_u64().unwrap_or(0) as usize;
+                    anyhow::ensure!(
+                        budget > 0 && budget < 16_384,
+                        "reasoning budget {budget} must be below Anthropic max_tokens 16384; choose a smaller budget or adaptive mode"
+                    );
+                    ReasoningValue::TokenBudget(budget)
+                }
+                Some("adaptive") => {
+                    let mut parameters = std::collections::BTreeMap::new();
+                    if let Some(effort) = body
+                        .pointer("/output_config/effort")
+                        .and_then(Value::as_str)
+                    {
+                        parameters.insert("effort".into(), effort.into());
+                    }
+                    if let Some(binding) = thinking.get("block_binding") {
+                        parameters.insert("block_binding".into(), binding.to_string());
+                    }
+                    ReasoningValue::Adaptive(parameters)
+                }
+                _ => ReasoningValue::ProviderDefault,
+            };
+            policy.reasoning.normalization =
+                Some("Anthropic adapter mode and parameters captured before transport".into());
+        }
+    } else if provider == "openai"
+        && model == "gpt-6-astra"
+        && requested.is_none_or(|value| value == "provider-default")
+    {
+        policy.reasoning.effective = ReasoningValue::Categorical("low".into());
+        policy.reasoning.normalization = Some("native Responses adapter explicitly emits low for absent intent; advertised API default remains unknown".into());
+    } else if provider == "moonshot" {
+        policy.reasoning.effective = ReasoningValue::Categorical("max".into());
+        policy.reasoning.normalization =
+            Some("Moonshot's adapter emits max effort for its always-on reasoning route".into());
+    } else if provider == "google-antigravity"
+        || (has_tools
+            && provider != "openai-codex"
+            && !(provider == "openai" && model == "gpt-6-astra"))
+    {
+        anyhow::ensure!(
+            !matches!(policy.reasoning.effective, ReasoningValue::Disabled),
+            "reasoning needs resolution: this adapter cannot explicitly disable reasoning for this request; choose provider-default"
+        );
+        policy.reasoning.effective = ReasoningValue::ProviderDefault;
+        policy.reasoning.normalization = Some(
+            "adapter emits no reasoning control for this request; provider default is unknown"
+                .into(),
+        );
+    }
+    Ok(policy)
+}
+
+pub(crate) fn estimate_policy_input(
+    capture: &crate::inference_policy::PolicyCapture,
+    system: &str,
+    messages: &[LlmMessage],
+    tools: &[ToolDefinition],
+) -> anyhow::Result<crate::inference_policy::VisibleInput> {
+    let provider = if capture.native_adapter {
+        capture.route.provider.as_str()
+    } else {
+        "openai-compatible"
+    };
+    let wire_messages = match provider {
+        "openai-codex" | "openai"
+            if provider == "openai-codex" || capture.route.native_model == "gpt-6-astra" =>
+        {
+            CodexClient::build_responses_input(
+                messages,
+                Some((provider, &capture.route.native_model)),
+            )?
+        }
+        "anthropic" => AnthropicClient::build_messages(messages),
+        "google-antigravity" => AntigravityClient::build_contents(messages),
+        _ => OpenAIClient::build_wire_messages("", messages),
+    };
+    let wire_tools = match provider {
+        "anthropic" => AnthropicClient::build_tools(tools, capture.route.authentication == "oauth"),
+        "openai-codex" => build_responses_tools(provider, tools),
+        "openai" if capture.route.native_model == "gpt-6-astra" => build_responses_tools(provider, tools),
+        "google-antigravity" => AntigravityClient::build_tools(tools).unwrap_or_default(),
+        _ => tools.iter().map(|tool| {
+            let parameters = provider_function_parameters(provider, &tool.parameters).unwrap_or_else(|| {
+                if capture.schema_dialect == "open_ai" {
+                    crate::tool_schema::normalize(&tool.parameters, crate::tool_schema::SchemaDialect::OpenAI)
+                } else { tool.parameters.clone() }
+            });
+            json!({"type":"function", "function":{"name":tool.name,"description":tool.description,"parameters":parameters}})
+        }).collect(),
+    };
+    let schema_tokens = if wire_tools.is_empty() {
+        0
+    } else {
+        crate::util::estimate_chars_to_tokens(serde_json::to_vec(&wire_tools)?.len())
+    };
+    let prefix_chars = if provider == "anthropic" && capture.route.authentication == "oauth" {
+        ANTHROPIC_OAUTH_SYSTEM_PREFIX.len()
+    } else {
+        0
+    };
+    Ok(crate::inference_policy::VisibleInput {
+        system: crate::util::estimate_chars_to_tokens(
+            system
+                .len()
+                .checked_add(prefix_chars)
+                .ok_or_else(|| anyhow::anyhow!("system input estimate overflow"))?,
+        ),
+        schemas: schema_tokens,
+        history_and_attachments: if messages.is_empty() {
+            0
+        } else {
+            crate::util::estimate_chars_to_tokens(serde_json::to_vec(&wire_messages)?.len())
+        },
+    })
+}
+
+fn validate_policy_wire(options: &StreamOptions, body: &Value) -> anyhow::Result<()> {
+    use crate::inference_policy::ReasoningValue;
+    let Some(policy) = &options.resolved_policy else {
+        return Ok(());
+    };
+    let route = &policy.capture.route;
+    let adapter_provider = if policy.capture.native_adapter {
+        route.provider.as_str()
+    } else {
+        "openai-compatible"
+    };
+    let expected_model = if adapter_provider == "openai-codex" {
+        codex_wire_model(&route.native_model)
+    } else {
+        &route.native_model
+    };
+    let actual_model = body["model"]
+        .as_str()
+        .map(|model| model.strip_prefix("models/").unwrap_or(model));
+    anyhow::ensure!(
+        actual_model == Some(expected_model),
+        "final wire model contradicts captured route; prepare again"
+    );
+    let body = if adapter_provider == "google-antigravity" {
+        body.get("request").unwrap_or(body)
+    } else {
+        body
+    };
+    if adapter_provider == "ollama"
+        && let Some(cap) = policy
+            .configured_constraints
+            .get(&crate::inference_policy::CapacityField::TransportTotal)
+    {
+        anyhow::ensure!(
+            body.pointer("/options/num_ctx").and_then(Value::as_u64) == Some(cap.tokens as u64),
+            "final wire num_ctx contradicts the captured transport window; prepare again"
+        );
+    }
+    if let (Some(field), Some(cap)) = (&policy.output.wire_field, policy.output.requested_cap) {
+        let actual = if field.contains('.') {
+            body.pointer(&format!("/{}", field.replace('.', "/")))
+        } else {
+            body.get(field)
+        };
+        anyhow::ensure!(
+            actual.and_then(Value::as_u64) == Some(cap as u64),
+            "final wire output cap contradicts captured {field}; prepare again"
+        );
+    }
+    let wire_effort = if adapter_provider == "openai-codex"
+        || (adapter_provider == "openai" && route.native_model == "gpt-6-astra")
+    {
+        body.pointer("/reasoning/effort")
+    } else {
+        body.get("reasoning_effort")
+    }
+    .and_then(Value::as_str);
+    let valid = match (&policy.reasoning.effective, adapter_provider) {
+        (ReasoningValue::Disabled, "ollama" | "ollama-cloud") => body["think"] == false,
+        (ReasoningValue::Enabled, "ollama" | "ollama-cloud") => body["think"] == true,
+        (ReasoningValue::Categorical(effort), "ollama" | "ollama-cloud") => {
+            body["think"] == *effort
+        }
+        (ReasoningValue::Disabled, "anthropic") => {
+            body.pointer("/thinking/type").and_then(Value::as_str) == Some("disabled")
+        }
+        (ReasoningValue::TokenBudget(tokens), "anthropic") => {
+            body.pointer("/thinking/budget_tokens")
+                .and_then(Value::as_u64)
+                == Some(*tokens as u64)
+        }
+        (ReasoningValue::Adaptive(parameters), "anthropic") => {
+            body.pointer("/thinking/type").and_then(Value::as_str) == Some("adaptive")
+                && parameters.get("effort").is_none_or(|effort| {
+                    body.pointer("/output_config/effort")
+                        .and_then(Value::as_str)
+                        == Some(effort)
+                })
+                && parameters.get("block_binding").is_none_or(|binding| {
+                    body.pointer("/thinking/block_binding")
+                        .is_some_and(|actual| {
+                            serde_json::from_str::<Value>(binding)
+                                .is_ok_and(|expected| expected == *actual)
+                        })
+                })
+        }
+        (ReasoningValue::Categorical(effort), _) => wire_effort == Some(effort),
+        (ReasoningValue::ProviderDefault, _) => {
+            body.get("reasoning").is_none()
+                && body.get("reasoning_effort").is_none()
+                && body.get("think").is_none()
+                && body.get("thinking").is_none()
+        }
+        (ReasoningValue::Disabled, _) => wire_effort == Some("none"),
+        _ => false,
+    };
+    anyhow::ensure!(
+        valid,
+        "final wire reasoning contradicts captured effective reasoning; choose a supported route mode and prepare again"
+    );
+    Ok(())
+}
+
 fn build_responses_body(
     provider: &str,
     model: &str,
@@ -3418,6 +3929,18 @@ fn build_responses_body(
     tools: &[ToolDefinition],
     options: &StreamOptions,
 ) -> anyhow::Result<Value> {
+    if model == "gpt-6-astra" {
+        let capture = options.policy_capture.clone().unwrap_or_else(|| {
+            crate::inference_policy::capture_route(
+                &format!("{provider}:{model}"),
+                None,
+                None,
+                None,
+                None,
+            )
+        });
+        resolve_request_policy(&capture, options, !tools.is_empty())?;
+    }
     let input = CodexClient::build_responses_input(messages, Some((provider, model)))?;
     let mut body = json!({
         "model": model, "store": false, "stream": true,
@@ -3462,6 +3985,7 @@ fn build_responses_body(
             include.retain(|item| item.as_str() != Some("message.output_text.logprobs"));
         }
     }
+    validate_policy_wire(options, &body)?;
     Ok(body)
 }
 
@@ -3540,19 +4064,39 @@ fn build_responses_tools(provider: &str, tools: &[ToolDefinition]) -> Vec<Value>
 fn model_reasoning_effort(model: &str, reasoning: Option<&str>) -> Option<&'static str> {
     if model == "gpt-6-astra" {
         return Some(match reasoning {
-            None | Some("off" | "none" | "minimal" | "low") => "low",
+            None | Some("provider-default" | "minimal" | "low") => "low",
             Some("medium") => "medium",
             Some("high") => "high",
             Some("xhigh") => "xhigh",
             Some("max") => "max",
-            _ => "medium",
+            _ => return None,
         });
     }
     openai_reasoning_effort(reasoning)
 }
 
+fn codex_connection_identity(account: &str) -> String {
+    let slot = crate::auth::read_credential_extra("openai-codex", "connectionId")
+        .unwrap_or_else(|| "legacy-account".into());
+    crate::inference_policy::opaque_identity(&format!("{slot}:{account}"))
+}
+
 #[async_trait]
 impl LlmBridge for CodexClient {
+    fn credential_source_class_hint(&self) -> Option<&str> {
+        Some("oauth")
+    }
+    fn policy_transport(&self) -> Option<(String, bool)> {
+        Some((
+            crate::inference_policy::opaque_identity(&self.base_url),
+            self.base_url == CODEX_BASE_URL,
+        ))
+    }
+    fn policy_connection(&self) -> Option<String> {
+        let account = crate::auth::read_credential_extra("openai-codex", "accountId")
+            .unwrap_or_else(|| self.account_id.clone());
+        Some(codex_connection_identity(&account))
+    }
     async fn stream(
         &self,
         system_prompt: &str,
@@ -3596,6 +4140,12 @@ impl LlmBridge for CodexClient {
                     .default_model("openai-codex")
                     .expect("embedded Codex default")
             });
+        if let Some(policy) = &options.resolved_policy {
+            anyhow::ensure!(
+                policy.capture.route.connection == codex_connection_identity(&account_id),
+                "Codex connection changed after policy capture; prepare again for the new connection"
+            );
+        }
 
         let wire_model = codex_wire_model(model);
         let body = build_responses_body(
@@ -4128,12 +4678,12 @@ fn ollama_cloud_base_url() -> &'static str {
 /// "low" | "medium" | "high" and ignores booleans. We therefore send string
 /// levels for GPT-OSS and a simple boolean for other models.
 fn ollama_think_value(model: &str, reasoning: Option<&str>) -> Option<Value> {
-    let level = reasoning?;
+    let level = reasoning.filter(|value| *value != "provider-default")?;
+    let is_gpt_oss = model.to_ascii_lowercase().contains("gpt-oss");
     if level.eq_ignore_ascii_case("off") {
-        return None;
+        return (!is_gpt_oss).then_some(Value::Bool(false));
     }
 
-    let is_gpt_oss = model.to_ascii_lowercase().contains("gpt-oss");
     if is_gpt_oss {
         let mapped = match level {
             "minimal" | "low" => "low",
@@ -4153,7 +4703,7 @@ fn ollama_think_value(model: &str, reasoning: Option<&str>) -> Option<Value> {
 /// "minimal" is not a valid OpenAI effort level — map it to "low".
 fn openai_reasoning_effort(reasoning: Option<&str>) -> Option<&'static str> {
     match reasoning? {
-        "off" => None,
+        "off" | "none" => Some("none"),
         "minimal" | "low" => Some("low"),
         "medium" => Some("medium"),
         "high" => Some("high"),
@@ -4161,11 +4711,27 @@ fn openai_reasoning_effort(reasoning: Option<&str>) -> Option<&'static str> {
         // Before Max became a distinct setting, its CLI alias selected High.
         // Astra's model-specific mapping above preserves its native max effort.
         "max" => Some("high"),
-        _ => Some("medium"),
+        _ => None,
     }
 }
 
 fn apply_anthropic_thinking(body: &mut Value, model: &str, reasoning: Option<&str>) {
+    let reasoning = reasoning.filter(|value| *value != "provider-default");
+    if reasoning == Some("off") {
+        body["thinking"] = json!({"type": "disabled"});
+        return;
+    }
+    if let Some(tokens) = reasoning
+        .and_then(|r| r.strip_prefix("budget:"))
+        .and_then(|n| n.parse::<usize>().ok())
+    {
+        body["thinking"] = json!({"type": "enabled", "budget_tokens": tokens});
+        return;
+    }
+    if reasoning == Some("adaptive") {
+        body["thinking"] = json!({"type": "adaptive"});
+        return;
+    }
     if anthropic_uses_bound_adaptive_thinking(model) {
         body["thinking"] = json!({
             "type": "adaptive",
@@ -4250,18 +4816,17 @@ fn anthropic_manual_budget_tokens(reasoning: Option<&str>) -> Option<u32> {
 }
 
 fn anthropic_supports_adaptive_thinking(model: &str) -> bool {
-    let model_id = model_id_from_spec(model);
-    let qualified_id = format!("anthropic:{model_id}");
-    if let Some(info) = crate::model_registry::ModelRegistry::global().model_info(&qualified_id) {
-        return info.supports_reasoning;
-    }
-
-    let model = model_id.to_ascii_lowercase();
-    // Fallback for prerelease Anthropic families before the registry is updated.
-    model.contains("claude-sonnet-4-")
-        || model.contains("claude-opus-4-")
-        || model.contains("claude-fable-")
-        || model.contains("claude-mythos-")
+    matches!(
+        model_id_from_spec(model),
+        "claude-sonnet-4-6"
+            | "claude-sonnet-5"
+            | "claude-opus-4-6"
+            | "claude-opus-4-7"
+            | "claude-opus-4-8"
+            | "claude-opus-5"
+            | "claude-fable-5-1"
+            | "claude-mythos-5-1"
+    )
 }
 
 fn anthropic_should_use_adaptive_thinking(model: &str, reasoning: &str) -> bool {
@@ -4496,6 +5061,20 @@ impl OllamaCloudClient {
 
 #[async_trait]
 impl LlmBridge for OpenAICompatClient {
+    fn policy_transport(&self) -> Option<(String, bool)> {
+        Some((
+            crate::inference_policy::opaque_identity(
+                self.inner
+                    .request_url
+                    .as_deref()
+                    .unwrap_or(&self.inner.base_url),
+            ),
+            self.inner.request_url.is_none()
+                && compat_base_url(&self.provider_id).is_some_and(|base| {
+                    base.trim_end_matches('/') == self.inner.base_url.trim_end_matches('/')
+                }),
+        ))
+    }
     async fn stream(
         &self,
         system_prompt: &str,
@@ -4533,10 +5112,21 @@ impl LlmBridge for OpenAICompatClient {
         // For Ollama: inject num_ctx and keep_alive so the model doesn't
         // silently truncate the prompt at Ollama's default 2048-token KV cache.
         if self.provider_id == "ollama" {
-            let num_ctx = std::env::var("OMEGON_OLLAMA_NUM_CTX")
-                .ok()
-                .and_then(|v| v.parse::<u32>().ok())
-                .unwrap_or(32_768);
+            let num_ctx = options
+                .resolved_policy
+                .as_ref()
+                .and_then(|policy| {
+                    policy
+                        .configured_constraints
+                        .get(&crate::inference_policy::CapacityField::TransportTotal)
+                        .map(|fact| fact.tokens as u32)
+                })
+                .unwrap_or_else(|| {
+                    std::env::var("OMEGON_OLLAMA_NUM_CTX")
+                        .ok()
+                        .and_then(|v| v.parse::<u32>().ok())
+                        .unwrap_or(32_768)
+                });
             let keep_alive =
                 std::env::var("OMEGON_OLLAMA_KEEP_ALIVE").unwrap_or_else(|_| "30m".to_string());
             let model_id = opts
@@ -4565,6 +5155,12 @@ impl LlmBridge for OpenAICompatClient {
 
 #[async_trait]
 impl LlmBridge for OllamaCloudClient {
+    fn policy_transport(&self) -> Option<(String, bool)> {
+        Some((
+            crate::inference_policy::opaque_identity(&self.base_url),
+            self.base_url.trim_end_matches('/') == ollama_cloud_base_url(),
+        ))
+    }
     async fn stream(
         &self,
         system_prompt: &str,
@@ -4619,6 +5215,7 @@ impl LlmBridge for OllamaCloudClient {
         if let Some(think) = ollama_think_value(&model, options.reasoning.as_deref()) {
             body["think"] = think;
         }
+        validate_policy_wire(options, &body)?;
 
         let response = self
             .client
@@ -5011,6 +5608,7 @@ impl LlmBridge for AntigravityClient {
             "user_prompt_id": prompt_id,
             "request": request_body,
         });
+        validate_policy_wire(options, &envelope)?;
 
         let url = std::env::var("ANTIGRAVITY_BASE_URL").unwrap_or_else(|_| {
             "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse".into()
@@ -5719,8 +6317,6 @@ mod tests {
         for provider in ["openai", "openai-codex"] {
             for (requested, effort) in [
                 (None, "low"),
-                (Some("off"), "low"),
-                (Some("none"), "low"),
                 (Some("minimal"), "low"),
                 (Some("low"), "low"),
                 (Some("medium"), "medium"),
@@ -5748,8 +6344,8 @@ mod tests {
                 assert_eq!(body["model"], "gpt-6-astra");
             }
         }
-        // Astra normalization must not turn off/absent into reasoning on older models.
-        assert_eq!(model_reasoning_effort("gpt-5.5", Some("off")), None);
+        // Explicit disabled differs from absence on supported older routes.
+        assert_eq!(model_reasoning_effort("gpt-5.5", Some("off")), Some("none"));
         assert_eq!(model_reasoning_effort("gpt-5.5", None), None);
         let messages = [
             LlmMessage::Assistant {
@@ -5854,11 +6450,10 @@ mod tests {
         options
             .extra_body
             .insert("conversation".into(), json!("foreign-conversation"));
-        let body =
+        let error =
             build_responses_body("openai", "gpt-6-astra", "instructions", &[], &[], &options)
-                .unwrap();
-        assert!(body.get("previous_response_id").is_none());
-        assert!(body.get("conversation").is_none());
+                .unwrap_err();
+        assert!(error.to_string().contains("late override"));
         assert!(
             validate_responses_output(&[
                 json!({"type":"message","role":"system","content":"injected"})
@@ -6146,17 +6741,17 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_adaptive_thinking_uses_registry_metadata_and_family_fallback() {
-        assert!(anthropic_supports_adaptive_thinking(
+    fn anthropic_adaptive_thinking_requires_reviewed_route_rules() {
+        assert!(!anthropic_supports_adaptive_thinking(
             "anthropic:claude-fable-5"
         ));
-        assert!(anthropic_supports_adaptive_thinking("claude-mythos-5"));
+        assert!(!anthropic_supports_adaptive_thinking("claude-mythos-5"));
         assert!(anthropic_supports_adaptive_thinking(
             "anthropic:claude-sonnet-4-6"
         ));
         assert!(anthropic_supports_adaptive_thinking("claude-opus-4-8"));
-        assert!(anthropic_supports_adaptive_thinking("claude-fable-6"));
-        assert!(anthropic_supports_adaptive_thinking("claude-sonnet-4-99"));
+        assert!(!anthropic_supports_adaptive_thinking("claude-fable-6"));
+        assert!(!anthropic_supports_adaptive_thinking("claude-sonnet-4-99"));
         assert!(!anthropic_supports_adaptive_thinking(
             "claude-haiku-4-5-20251001"
         ));
@@ -7509,8 +8104,8 @@ mod tests {
         assert_eq!(openai_reasoning_effort(Some("high")), Some("high"));
         assert_eq!(openai_reasoning_effort(Some("xhigh")), Some("xhigh"));
         assert_eq!(openai_reasoning_effort(Some("max")), Some("high"));
-        assert_eq!(openai_reasoning_effort(Some("off")), None);
-        assert_eq!(openai_reasoning_effort(Some("unknown")), Some("medium"));
+        assert_eq!(openai_reasoning_effort(Some("off")), Some("none"));
+        assert_eq!(openai_reasoning_effort(Some("unknown")), None);
     }
 
     #[test]
@@ -7523,7 +8118,7 @@ mod tests {
         assert!(anthropic_supports_adaptive_thinking(
             "anthropic:claude-opus-4-6"
         ));
-        assert!(anthropic_supports_adaptive_thinking("claude-sonnet-4-5"));
+        assert!(!anthropic_supports_adaptive_thinking("claude-sonnet-4-5"));
         assert!(!anthropic_should_use_adaptive_thinking(
             "anthropic:claude-sonnet-4-6",
             "minimal"
@@ -7595,8 +8190,26 @@ mod tests {
 
         let mut off = json!({});
         apply_anthropic_thinking(&mut off, "claude-fable-5-1", Some("off"));
-        assert_eq!(off["thinking"]["type"], "adaptive");
+        assert_eq!(off["thinking"]["type"], "disabled");
         assert!(off.get("output_config").is_none());
+        let capture = crate::inference_policy::capture_route(
+            "anthropic:claude-fable-5-1",
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(
+            resolve_request_policy(
+                &capture,
+                &StreamOptions {
+                    reasoning: Some("off".into()),
+                    ..Default::default()
+                },
+                false
+            )
+            .is_err()
+        );
 
         for (level, effort) in [
             ("low", "low"),

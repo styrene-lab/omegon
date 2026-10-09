@@ -163,6 +163,40 @@ fn render_app_to_string(app: &mut App, width: u16, height: u16) -> String {
     text
 }
 
+#[test]
+fn resolved_policy_composer_uses_captured_full_input_and_invalidates_on_switch() {
+    use crate::inference_policy::{VisibleInput, capture_route};
+    let mut settings = Settings::new("openai-codex:gpt-6-astra");
+    settings.set_thinking(ThinkingLevel::Minimal);
+    settings.context_window = 110_192;
+    let mut capture = capture_route(&settings.model, None, None, None, None);
+    capture.intent = settings.inference_intent();
+    let mut policy = capture
+        .resolve(Some("minimal"), Default::default())
+        .unwrap();
+    assert_eq!(policy.input_budget, 100_000);
+    policy
+        .validate_input(VisibleInput {
+            system: 10_000,
+            schemas: 1_000,
+            history_and_attachments: 39_000,
+        })
+        .unwrap();
+    settings.selected_policy_capture = Some(capture);
+    settings.last_inference_policy = Some(std::sync::Arc::new(policy));
+    let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
+    app.apply_ui_preset(UiSurfaces::lean());
+    app.footer_data.context_window = 872_000;
+    let rendered = render_app_to_string(&mut app, 160, 8);
+    assert!(rendered.contains("50k / 100k context (50%)"), "{rendered}");
+    assert!(rendered.contains("thinking low"), "{rendered}");
+    assert_eq!(app.footer_data.context_window, 100_000);
+    app.update_settings(|settings| settings.set_model("openai:gpt-6-astra"));
+    let switched = render_app_to_string(&mut app, 160, 8);
+    assert!(switched.contains("usage unavailable"), "{switched}");
+    assert!(!switched.contains("(50%)"), "{switched}");
+}
+
 fn draw_published_stream(app: &mut App, width: u16, height: u16) -> String {
     let publication = app.publish_stream_presentation();
     let rendered = render_app_to_string(app, width, height);
@@ -8395,7 +8429,7 @@ fn recovery_hint_no_match() {
 #[test]
 fn editor_top_line_shows_engine_block_details() {
     let mut settings = Settings::new("anthropic:claude-sonnet-4-6");
-    settings.thinking = ThinkingLevel::High;
+    settings.set_thinking(ThinkingLevel::High);
     let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
     app.apply_ui_preset(UiSurfaces::lean());
     app.footer_data.harness.capability_grade = "B".into();
@@ -8411,14 +8445,14 @@ fn editor_top_line_shows_engine_block_details() {
         "{rendered}"
     );
     assert!(!rendered.contains("󰿃 B"), "{rendered}");
-    assert!(rendered.contains("thinking high"), "{rendered}");
-    assert!(rendered.contains("50% of 1.0M context"), "{rendered}");
+    assert!(rendered.contains("thinking adaptive"), "{rendered}");
+    assert!(rendered.contains("usage unavailable"), "{rendered}");
 }
 
 #[test]
 fn editor_top_line_preserves_route_when_context_would_overflow() {
     let mut settings = Settings::new("openai-codex:gpt-5.5");
-    settings.thinking = ThinkingLevel::Minimal;
+    settings.set_thinking(ThinkingLevel::Minimal);
     let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
     app.apply_ui_preset(UiSurfaces::lean());
     app.footer_data.context_window = 1_048_576;
@@ -8432,7 +8466,7 @@ fn editor_top_line_preserves_route_when_context_would_overflow() {
 #[test]
 fn composer_context_is_readable_without_a_gauge() {
     let mut settings = Settings::new("anthropic:claude-sonnet-4-6");
-    settings.thinking = ThinkingLevel::High;
+    settings.set_thinking(ThinkingLevel::High);
     let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
     app.apply_ui_preset(UiSurfaces::lean());
     app.footer_data.harness.capability_grade = "B".into();
@@ -8444,7 +8478,7 @@ fn composer_context_is_readable_without_a_gauge() {
 
     let rendered = render_app_to_string(&mut app, 180, 18);
 
-    assert!(rendered.contains("50% of 1.0M context"), "{rendered}");
+    assert!(rendered.contains("usage unavailable"), "{rendered}");
     assert!(!rendered.contains("▕████░░░░▏"), "{rendered}");
     assert!(!rendered.contains("ctx:cmp→msv"), "{rendered}");
     assert!(!rendered.contains("κ ▰"), "{rendered}");
@@ -8454,7 +8488,7 @@ fn composer_context_is_readable_without_a_gauge() {
 #[test]
 fn composer_preserves_the_actual_model_variant() {
     let mut settings = Settings::new("openai-codex:gpt-5.6-sol");
-    settings.thinking = ThinkingLevel::Low;
+    settings.set_thinking(ThinkingLevel::Low);
     let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
     app.apply_ui_preset(UiSurfaces::lean());
     app.footer_data.harness.capability_grade = "B".into();
@@ -8492,7 +8526,7 @@ fn live_action_visible_in_each_fullscreen_detail() {
 #[test]
 fn active_turn_keeps_model_identity_and_separate_activity() {
     let mut settings = Settings::new("openai-codex:gpt-5.5");
-    settings.thinking = ThinkingLevel::High;
+    settings.set_thinking(ThinkingLevel::High);
     let mut app = App::new(std::sync::Arc::new(std::sync::Mutex::new(settings)));
     app.apply_ui_preset(UiSurfaces::lean());
     app.footer_data.harness.capability_grade = "S".into();
@@ -9069,6 +9103,51 @@ fn slash_new_is_context_reset_alias() {
         rx.try_recv().unwrap(),
         TuiCommand::ContextClear { .. }
     ));
+}
+
+#[test]
+fn resolved_policy_tui_commands_reach_registered_control_owner() {
+    for (input, expected) in [
+        (
+            "/context capacity 600000",
+            crate::operator_commands::InterfaceControlRequest::ContextCapacity {
+                value: "600000".into(),
+            },
+        ),
+        (
+            "/context reasoning minimal",
+            crate::operator_commands::InterfaceControlRequest::ContextReasoning {
+                value: "minimal".into(),
+            },
+        ),
+        (
+            "/context status",
+            crate::operator_commands::InterfaceControlRequest::ContextStatus,
+        ),
+    ] {
+        let mut app = test_app();
+        let (tx, mut rx) = test_tx_with_rx();
+        assert!(matches!(
+            app.handle_slash_command(input, &tx),
+            SlashResult::Handled
+        ));
+        let TuiCommand::ExecuteControl { request, .. } = rx.try_recv().unwrap() else {
+            panic!("policy command did not reach the shared owner")
+        };
+        use crate::operator_commands::InterfaceControlRequest;
+        match (request, expected) {
+            (
+                InterfaceControlRequest::ContextCapacity { value: actual },
+                InterfaceControlRequest::ContextCapacity { value: expected },
+            )
+            | (
+                InterfaceControlRequest::ContextReasoning { value: actual },
+                InterfaceControlRequest::ContextReasoning { value: expected },
+            ) => assert_eq!(actual, expected),
+            (InterfaceControlRequest::ContextStatus, InterfaceControlRequest::ContextStatus) => {}
+            (actual, expected) => panic!("expected {expected:?}, got {actual:?}"),
+        }
+    }
 }
 
 #[test]
@@ -11784,7 +11863,7 @@ fn inline_composer_has_a_compact_readable_frame() {
     app.update_settings(|settings| {
         settings.model = "anthropic:claude-sonnet-4-6".into();
         settings.provider_connected = true;
-        settings.thinking = crate::settings::ThinkingLevel::Off;
+        settings.set_thinking(crate::settings::ThinkingLevel::Off);
         settings.context_window = 200_000;
     });
     app.footer_data.context_percent = 25.0;
@@ -11796,7 +11875,7 @@ fn inline_composer_has_a_compact_readable_frame() {
     );
     assert_eq!(area.height, 3);
     assert!(rendered.contains("claude-sonnet-4-6"), "{rendered}");
-    assert!(rendered.contains("25% of 200k"), "{rendered}");
+    assert!(rendered.contains("usage unavailable"), "{rendered}");
     assert!(rendered.contains("thinking off"), "{rendered}");
     assert!(rendered.contains("│ Ask anything"), "{rendered}");
     assert!(

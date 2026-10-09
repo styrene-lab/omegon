@@ -43,7 +43,8 @@ jobs:
   rust-build:
     name: Rust build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Cold debug/feature checks and the separate release build share this budget.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
       - name: Install Nix for toolchain resolution

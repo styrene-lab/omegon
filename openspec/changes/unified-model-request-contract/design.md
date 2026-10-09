@@ -8,8 +8,24 @@ Implementation owner: `feat/unified-model-request-preparation`, based on
 
 The proposal, this research ledger, and `docs/unified-model-request-contract.md`
 were copied from the uncommitted draft in the sibling `omegon-likec4` worktree.
-That draft remains unchanged. The historical research below retains its original
-revision and uncertainty. No diagram assets were imported.
+The historical research below retains its original revision and uncertainty.
+No diagram assets were imported.
+
+## Post-merge acceptance — 2026-10-07
+
+PR #247 merged this implementation at `13760f25`. The user subsequently authorized
+landing and lifecycle and architecture reconciliation. The internal envelope and
+all three flows are accepted; independent review and the recorded author gates
+passed. Later regression evidence covers the composed provider-repair head
+`a08d526`, whose merge is `024a8616`, rather than the original request-contract head.
+See [verification](verification.md#post-merge-acceptance--2026-10-07).
+
+The parent architecture model now includes
+`omegon.host.memory → omegon.host.inference: Requests bounded memory extraction`
+in `hostComponents`. The shared preparation contract spans existing flow adapters
+and needs no new component. The
+[design node](../../../docs/unified-model-request-contract.md#architecture-model-references)
+records model provenance and immutable implementation evidence.
 
 ## Implementation choices
 
@@ -48,9 +64,13 @@ revision and uncertainty. No diagram assets were imported.
 
 These are implementation choices within the accepted direction. Scenario verification,
 self-review, and independent code review are complete with no blocking findings.
-The parent user approved split commits and PR creation; final lifecycle acceptance
-remains pending. Lifecycle tools are not exposed in this session. Files are
-reconciled directly without ledger mutation, test registration, or archive.
+The subsequent landing and reconciliation authorization supersedes the original
+PR-creation-only handoff. Native lifecycle tools are not exposed in this session.
+Factual artifacts are reconciled directly; native task/test registration, ledger
+reconciliation, and archival remain pending. The design node retains its existing
+`implementing` status to avoid claiming a tool-backed transition. The
+[closure concern](../../../docs/lifecycle-closure-reconciliation.md) records the
+late-registration and archive-semantics gaps.
 The verification record names tests and gate outcomes. No provider-task cleanup stronger
 than the existing receiver/owner contract is implied by dropping a future.
 
@@ -63,7 +83,7 @@ sets the accepted stream to blocking mode before its existing 15-second read
 timeout. This test-only correction is separate from request preparation behavior;
 its CLI deadline, request assertions, and process-group cleanup are unchanged.
 
-## Historical proposal research
+## Historical proposal research — 2026-10-07, before implementation
 
 The following research was drafted before implementation authorization. Source inspection used
 Omegon commit `7b2da402073d84e54f3caffbb13845a007161c62` on
@@ -277,4 +297,6 @@ owned by `omegon-opsx/src/design_artifacts.rs`.
 The original draft explicitly declared `proposed`. The implementation copy removes
 that declaration so artifact-derived state follows its specs and tasks. Global
 OpenSpec read-only validation checks structure but cannot validate Omegon ledger
-reconciliation or prove behavioral acceptance. No archive action is authorized.
+reconciliation or prove behavioral acceptance. Closure is now authorized, but no
+archive action has been performed. The source-backed closure concern above records
+the remaining native limitation.

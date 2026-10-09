@@ -145,7 +145,7 @@ pub(crate) fn strip_terminal_control(input: &str) -> String {
             }
             continue;
         }
-        if ch.is_control() && ch != '\t' {
+        if ch.is_control() && ch != '\t' && ch != '\n' {
             continue;
         }
         out.push(ch);
@@ -158,9 +158,12 @@ mod terminal_control_tests {
     use super::*;
 
     #[test]
-    fn strip_terminal_control_removes_csi_and_osc() {
-        let input = "pre\x1b[31mred\x1b[0m mid\x1b]0;title\x07 post";
-        assert_eq!(strip_terminal_control(input), "prered mid post");
+    fn strip_terminal_control_removes_csi_and_osc_without_collapsing_lines() {
+        let input = "pre\x1b[31mred\x1b[0m mid\x1b]0;title\x07 post\n\nnext line";
+        assert_eq!(
+            strip_terminal_control(input),
+            "prered mid post\n\nnext line"
+        );
     }
 
     #[test]
@@ -178,6 +181,18 @@ fn first_arg_line(args: &str) -> String {
 
 fn json_arg(args: &str) -> Option<serde_json::Value> {
     serde_json::from_str::<serde_json::Value>(args).ok()
+}
+
+fn json_u64(value: &serde_json::Value) -> Option<u64> {
+    value
+        .as_u64()
+        .or_else(|| {
+            value
+                .as_f64()
+                .filter(|number| *number >= 0.0)
+                .map(|number| number as u64)
+        })
+        .or_else(|| value.as_str()?.parse().ok())
 }
 
 fn json_string_field<'a>(value: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
@@ -282,18 +297,21 @@ pub(crate) fn summarize_tool_args(tool_name: &str, args: Option<&str>) -> Option
                     .map(str::to_string)
                     .or_else(|| summarize_json_paths(&value));
                 if let Some(path) = path {
-                    let mut extras = Vec::new();
-                    if let Some(offset) = value.get("offset").and_then(|v| v.as_u64()) {
-                        extras.push(format!("@{offset}"));
-                    }
-                    if let Some(limit) = value.get("limit").and_then(|v| v.as_u64()) {
-                        extras.push(format!("limit {limit}"));
-                    }
-                    return if extras.is_empty() {
-                        Some(path)
-                    } else {
-                        Some(format!("{path} · {}", extras.join(" · ")))
+                    let offset = value.get("offset").and_then(json_u64);
+                    let limit = value.get("limit").and_then(json_u64);
+                    let range = match (offset, limit) {
+                        (Some(offset), Some(limit)) if limit > 0 => {
+                            let first = offset.max(1);
+                            let last = first.saturating_add(limit - 1);
+                            Some(format!("lines {first}–{last}"))
+                        }
+                        (Some(offset), _) => Some(format!("from line {}", offset.max(1))),
+                        (None, Some(limit)) => Some(format!("first {limit} lines")),
+                        (None, None) => None,
                     };
+                    return range
+                        .map(|range| format!("{path} · {range}"))
+                        .or(Some(path));
                 }
             }
             fallback()
@@ -302,12 +320,15 @@ pub(crate) fn summarize_tool_args(tool_name: &str, args: Option<&str>) -> Option
             if let Some(value) = json_arg(args)
                 && let Some(path) = json_string_field(&value, &["path", "file"])
             {
-                let bytes = value
+                let extent = value
                     .get("content")
                     .and_then(|v| v.as_str())
-                    .map(|content| format!(" · {} bytes", content.len()))
+                    .map(|content| {
+                        let lines = content.lines().count();
+                        format!(" · {lines} line{}", if lines == 1 { "" } else { "s" })
+                    })
                     .unwrap_or_default();
-                return Some(format!("{path}{bytes}"));
+                return Some(format!("{path}{extent}"));
             }
             fallback()
         }
@@ -516,6 +537,13 @@ fn summarize_tool_result(tool_name: &str, result: Option<&str>) -> Option<String
         .map(|line| clean_inline_text(line.trim()))
         .find(|line| !line.is_empty());
 
+    if matches!(tool_name, "read" | "view") {
+        return Some(format!(
+            "{line_count} line{}",
+            if line_count == 1 { "" } else { "s" }
+        ));
+    }
+
     if matches!(tool_name, "context_status") {
         let summary_line = lines
             .iter()
@@ -556,15 +584,23 @@ fn summarize_tool_result(tool_name: &str, result: Option<&str>) -> Option<String
     }
 
     if matches!(tool_name, "edit")
-        && let Some(line) = lines
-            .iter()
-            .map(|line| clean_inline_text(line.trim()))
-            .find(|line| {
-                line.to_ascii_lowercase()
-                    .contains("successfully replaced text")
-            })
+        && lines.iter().any(|line| {
+            let lower = line.trim().to_ascii_lowercase();
+            lower.contains("successfully replaced text") || lower.starts_with("changed ")
+        })
     {
-        return Some(crate::util::truncate(&line, 96));
+        return None;
+    }
+
+    if matches!(tool_name, "write")
+        && lines.iter().any(|line| {
+            let line = line.trim();
+            (line.starts_with("Created ") || line.starts_with("Wrote "))
+                && line.contains(" lines, ")
+                && line.ends_with(" bytes)")
+        })
+    {
+        return None;
     }
 
     if matches!(tool_name, "commit")
@@ -714,13 +750,6 @@ fn summarize_numbered_memory_facts(lines: &[&str]) -> Option<Vec<String>> {
             .take(2)
             .map(|(topic, count)| format!("{topic} {count}")),
     );
-
-    if let Some(preview) = facts
-        .iter()
-        .find_map(|fact| (!fact.preview.is_empty()).then_some(fact.preview))
-    {
-        cells.push(format!("top: {}", crate::util::truncate(preview, 56)));
-    }
 
     Some(cells)
 }
@@ -3339,14 +3368,79 @@ mod tests {
     }
 
     #[test]
+    fn summarize_read_args_show_human_line_range() {
+        let summary = summarize_tool_args(
+            "read",
+            Some(r#"{"path":"src/lib.rs","offset":218,"limit":345}"#),
+        )
+        .expect("summary");
+
+        assert_eq!(summary, "src/lib.rs · lines 218–562");
+    }
+
+    #[tokio::test]
+    async fn summarize_read_range_matches_tool_one_based_offset() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), "first\nsecond\nthird\nfourth\n").unwrap();
+        for offset in [0, 1, 2] {
+            let result = crate::tools::read::execute(file.path(), Some(offset), Some(2))
+                .await
+                .unwrap();
+            let first = result.details["offset"].as_u64().unwrap();
+            let count = result.details["shownLines"].as_u64().unwrap();
+            let args = serde_json::json!({
+                "path": file.path(), "offset": offset, "limit": 2
+            })
+            .to_string();
+            let summary = summarize_tool_args("read", Some(&args)).unwrap();
+            assert_eq!(
+                summary,
+                format!(
+                    "{} · lines {}–{}",
+                    file.path().display(),
+                    first,
+                    first + count - 1
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn summarize_read_result_reports_single_line_without_previewing_content() {
+        let summary = summarize_tool_result("read", Some("}")).expect("summary");
+
+        assert_eq!(summary, "1 line");
+    }
+
+    #[test]
+    fn mutation_success_results_do_not_repeat_argument_summary() {
+        assert_eq!(
+            summarize_tool_result("edit", Some("Successfully replaced text in src/lib.rs.")),
+            None
+        );
+        assert_eq!(
+            summarize_tool_result("write", Some("Wrote src/lib.rs (3 lines, 42 bytes)")),
+            None
+        );
+    }
+
+    #[test]
+    fn summarize_write_args_show_path_and_line_extent() {
+        let summary = summarize_tool_args(
+            "write",
+            Some(r#"{"path":"src/lib.rs","content":"one\ntwo\nthree\n"}"#),
+        )
+        .expect("summary");
+
+        assert_eq!(summary, "src/lib.rs · 3 lines");
+    }
+
+    #[test]
     fn summarize_memory_result_counts_recalled_facts_with_context() {
         let result = "1. [abc123] (Architecture, 120%) First fact\n2. [def456] (Decisions, 90%) Second fact\n3. [fedcba] (Architecture, 80%) Third fact";
         let summary = summarize_tool_result("memory_recall", Some(result)).expect("summary");
 
-        assert_eq!(
-            summary,
-            "read · 3 hits · Architecture 2 · Decisions 1 · top: First fact"
-        );
+        assert_eq!(summary, "read · 3 hits · Architecture 2 · Decisions 1");
     }
 
     #[test]
@@ -3366,9 +3460,8 @@ mod tests {
         assert_eq!(cells[1], "read · 3 hits");
         assert_eq!(cells[2], "Architecture 2");
         assert_eq!(cells[3], "Decisions 1");
-        assert_eq!(cells[4], "top: First fact");
-        assert_eq!(cells[5], "0.0s");
-        assert_eq!(cells.len(), 6);
+        assert_eq!(cells[4], "0.0s");
+        assert_eq!(cells.len(), 5);
     }
 
     #[test]
@@ -3980,8 +4073,7 @@ mod tests {
             text.contains("/Users/wilson/project/src/ops/forge.rs"),
             "{text}"
         );
-        assert!(text.contains("@40"), "{text}");
-        assert!(text.contains("limit"), "{text}");
+        assert!(text.contains("lines 40–59"), "{text}");
         assert!(text.contains("3 lines"), "{text}");
         assert!(!text.contains(DETAILS_HINT_LABEL), "{text}");
     }

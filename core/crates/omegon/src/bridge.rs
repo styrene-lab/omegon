@@ -284,6 +284,11 @@ pub struct StreamOptions {
     /// Used by OpenAICompatClient to inject provider-specific options
     /// (e.g. `options: { num_ctx }` and `keep_alive` for Ollama).
     pub extra_body: std::collections::HashMap<String, serde_json::Value>,
+    /// Route/settings inputs captured before context assembly.
+    pub policy_capture: Option<crate::inference_policy::PolicyCapture>,
+    pub resolved_policy: Option<std::sync::Arc<crate::inference_policy::ResolvedPolicy>>,
+    /// Interactive projection owner; auxiliary requests never acquire it.
+    pub policy_sink: Option<crate::settings::SharedSettings>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -294,6 +299,7 @@ pub struct EndpointRouteProvenance {
     pub inventory_generation: u64,
     pub contribution_generation_id: String,
     pub schema_dialect: String,
+    pub connection_id: Option<String>,
 }
 
 /// Abstraction over how we call LLM providers.
@@ -301,6 +307,28 @@ pub struct EndpointRouteProvenance {
 /// Test: MockBridge (scripted responses).
 #[async_trait]
 pub trait LlmBridge: Send + Sync {
+    /// Opaque endpoint identity and whether embedded native-route facts apply.
+    fn policy_transport(&self) -> Option<(String, bool)> {
+        None
+    }
+    fn policy_connection(&self) -> Option<String> {
+        None
+    }
+    fn policy_capture(&self, model: &str) -> crate::inference_policy::PolicyCapture {
+        let mut capture = crate::inference_policy::capture_route(
+            model,
+            self.selected_model_hint(),
+            self.native_model_hint(),
+            self.credential_source_class_hint(),
+            self.endpoint_route_provenance_hint(),
+        );
+        crate::inference_policy::bind_transport(
+            &mut capture,
+            self.policy_transport(),
+            self.policy_connection(),
+        );
+        capture
+    }
     /// Validate model-level request capabilities before lease persistence or
     /// transport dispatch. Native bridges accept by default; admitted route
     /// wrappers enforce offering evidence.

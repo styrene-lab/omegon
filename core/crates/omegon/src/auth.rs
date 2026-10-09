@@ -1013,6 +1013,9 @@ pub fn write_credentials(provider: &str, creds: &OAuthCredentials) -> anyhow::Re
         let before_keys = auth_json_provider_keys(&auth);
         let auth_key = auth_json_key(provider);
         auth[auth_key] = serde_json::to_value(creds)?;
+        // A new login/import is a new connection. Refresh preserves this ID.
+        auth[auth_key]["connectionId"] = json!(uuid::Uuid::new_v4().to_string());
+        auth[auth_key]["credentialGeneration"] = json!(uuid::Uuid::new_v4().to_string());
         ensure_auth_json_key_invariants("write_credentials", auth_key, &before_keys, &auth)?;
         trace_auth_json_key_delta("write_credentials", auth_key, &before_keys, &auth);
         atomic_write_auth_json(&path, &auth)?;
@@ -2170,6 +2173,8 @@ fn write_credentials_with_extra(
     with_auth_json_lock(&path, || {
         let mut auth = read_auth_json_for_update(&path, "write_credentials_with_extra", provider)?;
         let mut entry = serde_json::to_value(creds)?;
+        entry["connectionId"] = json!(uuid::Uuid::new_v4().to_string());
+        entry["credentialGeneration"] = json!(uuid::Uuid::new_v4().to_string());
         if let Some(id) = account_id {
             entry["accountId"] = json!(id);
         }
@@ -2201,6 +2206,10 @@ fn refreshed_credential_entry(
     existing_entry: Option<&Value>,
 ) -> anyhow::Result<Value> {
     let mut entry = serde_json::to_value(creds)?;
+    entry["credentialGeneration"] = json!(uuid::Uuid::new_v4().to_string());
+    if let Some(connection) = existing_entry.and_then(|entry| entry.get("connectionId")) {
+        entry["connectionId"] = connection.clone();
+    }
     if provider == "openai-codex" {
         let account_id = extract_jwt_claim(
             &creds.access,
@@ -2218,6 +2227,24 @@ fn refreshed_credential_entry(
         }
     }
     Ok(entry)
+}
+
+#[test]
+fn resolved_policy_credential_refresh_preserves_connection_without_fabricating_legacy_identity() {
+    let creds = OAuthCredentials {
+        cred_type: "oauth".into(),
+        access: "new-access".into(),
+        refresh: "new-refresh".into(),
+        expires: 123,
+    };
+    let existing = json!({"connectionId":"connection-A", "credentialGeneration":"generation-A"});
+    let refreshed = refreshed_credential_entry("anthropic", &creds, Some(&existing)).unwrap();
+    assert_eq!(refreshed["connectionId"], "connection-A");
+    assert_ne!(refreshed["credentialGeneration"], "generation-A");
+    let legacy = refreshed_credential_entry("anthropic", &creds, None).unwrap();
+    assert!(legacy.get("connectionId").is_none());
+    let decoded: OAuthCredentials = serde_json::from_value(refreshed).unwrap();
+    assert_eq!(decoded.access, creds.access);
 }
 
 #[cfg(test)]

@@ -624,6 +624,26 @@ impl App {
                                 menu.state.move_down(&menu.projection);
                             }
                         }
+                        KeyCode::PageUp => {
+                            if let Some(menu) = self.active_menu.as_mut() {
+                                menu.state.move_page(&menu.projection, -1);
+                            }
+                        }
+                        KeyCode::PageDown => {
+                            if let Some(menu) = self.active_menu.as_mut() {
+                                menu.state.move_page(&menu.projection, 1);
+                            }
+                        }
+                        KeyCode::Home => {
+                            if let Some(menu) = self.active_menu.as_mut() {
+                                menu.state.move_home();
+                            }
+                        }
+                        KeyCode::End => {
+                            if let Some(menu) = self.active_menu.as_mut() {
+                                menu.state.move_end(&menu.projection);
+                            }
+                        }
                         KeyCode::Tab => {
                             if let Some(menu) = self.active_menu.as_mut() {
                                 menu.state.next_tab(&menu.projection);

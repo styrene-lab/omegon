@@ -892,16 +892,58 @@ impl OmegonAcpAgent {
             );
         }
 
-        let thinking_options: Vec<SessionConfigSelectOption> = [
+        let effective = self
+            .worker
+            .borrow()
+            .as_ref()
+            .and_then(|worker| {
+                worker
+                    .settings
+                    .lock()
+                    .ok()
+                    .map(|settings| settings.inference_projection())
+            })
+            .map_or_else(
+                || "default/unknown".to_string(),
+                |policy| {
+                    if policy.needs_resolution.is_some() {
+                        "needs resolution".into()
+                    } else {
+                        policy.effective_reasoning
+                    }
+                },
+            );
+        let mut thinking_options: Vec<SessionConfigSelectOption> = [
+            ("provider-default", "Provider default"),
             ("off", "Off"),
             ("minimal", "Minimal"),
             ("low", "Low"),
             ("medium", "Medium"),
             ("high", "High"),
+            ("xhigh", "Extra high"),
+            ("max", "Maximum"),
         ]
         .iter()
-        .map(|(id, name)| SessionConfigSelectOption::new(*id, *name))
+        .map(|(id, name)| {
+            SessionConfigSelectOption::new(
+                *id,
+                if *id == current_thinking {
+                    format!("{name} → {effective}")
+                } else {
+                    (*name).to_string()
+                },
+            )
+        })
         .collect();
+        if !thinking_options
+            .iter()
+            .any(|option| option.value.0.as_ref() == current_thinking)
+        {
+            thinking_options.push(SessionConfigSelectOption::new(
+                current_thinking.to_string(),
+                format!("{current_thinking} → {effective}"),
+            ));
+        }
 
         let context_options: Vec<SessionConfigSelectOption> = crate::settings::ContextClass::all()
             .iter()
@@ -963,7 +1005,9 @@ impl OmegonAcpAgent {
                     thinking_options,
                 )),
             )
-            .description("Reasoning effort for subsequent turns")
+            .description(format!(
+                "Requested intent for subsequent turns; effective reasoning: {effective}"
+            ))
             .category(SessionConfigOptionCategory::ThoughtLevel),
             SessionConfigOption::new(
                 "profile",
@@ -1139,7 +1183,9 @@ impl OmegonAcpAgent {
         {
             return (
                 g.model.clone(),
-                g.thinking.as_str().to_string(),
+                g.reasoning_intent
+                    .clone()
+                    .unwrap_or_else(|| "provider-default".into()),
                 g.posture.effective.as_str().to_string(),
                 g.effective_requested_class().short().to_ascii_lowercase(),
                 g.profile_name
@@ -1149,7 +1195,7 @@ impl OmegonAcpAgent {
         }
         (
             self.model.clone(),
-            "minimal".into(),
+            "provider-default".into(),
             "fabricator".into(),
             "standard".into(),
             "built-in-default".into(),
@@ -1967,7 +2013,18 @@ impl OmegonAcpAgent {
         } else {
             StopReason::EndTurn
         };
-        Ok(PromptResponse::new(stop_reason))
+        let mut response = PromptResponse::new(stop_reason);
+        if let Some(worker) = self.worker.borrow().as_ref()
+            && let Ok(settings) = worker.settings.lock()
+            && let Ok(policy) = serde_json::to_value(settings.inference_projection())
+        {
+            response.meta = Some(
+                [("omegon/inferencePolicy".into(), policy)]
+                    .into_iter()
+                    .collect(),
+            );
+        }
+        Ok(response)
     }
 
     async fn cancel(&self, args: CancelNotification) -> Result<()> {
@@ -4968,7 +5025,7 @@ mod extension_metadata_tests {
         assert_eq!(response["acp"]["transport"], "stdio");
         assert_eq!(response["acp"]["connected"], false);
         assert_eq!(response["agent"]["model"], "anthropic:claude-opus-4-6");
-        assert_eq!(response["agent"]["thinking"], "minimal");
+        assert_eq!(response["agent"]["thinking"], "provider-default");
         assert_eq!(response["agent"]["posture"], "fabricator");
         assert_eq!(response["memory"]["scope"], "project");
     }

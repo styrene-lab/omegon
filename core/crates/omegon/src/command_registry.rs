@@ -433,7 +433,16 @@ pub(crate) const BUILTIN_COMMANDS: &[BuiltinCommandSpec] = &[
         "context",
         "open context menu or manage context lifecycle",
         &[
-            "status", "compact", "reset", "clear", "request", "standard", "extended", "massive",
+            "status",
+            "capacity",
+            "reasoning",
+            "compact",
+            "reset",
+            "clear",
+            "request",
+            "standard",
+            "extended",
+            "massive",
         ],
     ),
     BuiltinCommandSpec::cli_queue_mutation(

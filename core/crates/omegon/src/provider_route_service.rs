@@ -320,6 +320,7 @@ pub(crate) struct ResolvedProviderRoute {
     native_model: String,
     endpoint_provenance: Option<crate::bridge::EndpointRouteProvenance>,
     admitted_capabilities: Option<AdmittedModelCapabilities>,
+    policy_facts: Option<crate::inference_policy::RouteFacts>,
     bridge: Box<dyn LlmBridge>,
 }
 
@@ -330,11 +331,33 @@ struct RoutedBridge {
     native_model: String,
     endpoint_provenance: Option<crate::bridge::EndpointRouteProvenance>,
     admitted_capabilities: Option<AdmittedModelCapabilities>,
+    policy_facts: Option<crate::inference_policy::RouteFacts>,
     inner: Box<dyn LlmBridge>,
 }
 
 #[async_trait::async_trait]
 impl LlmBridge for RoutedBridge {
+    fn policy_capture(&self, _model: &str) -> crate::inference_policy::PolicyCapture {
+        let mut capture = crate::inference_policy::capture_route(
+            &self.serving_model,
+            Some(&self.selected_model),
+            Some(&self.native_model),
+            Some(&self.credential_source_class),
+            self.endpoint_provenance.as_ref(),
+        );
+        if let Some(facts) = &self.policy_facts {
+            capture.facts = facts.clone();
+            capture.inventory_generation =
+                facts.inventory_generation.or(capture.inventory_generation);
+        }
+        bind_policy_transport(
+            &mut capture,
+            self.inner.as_ref(),
+            &self.credential_source_class,
+            self.endpoint_provenance.is_none(),
+        );
+        capture
+    }
     fn validate_request_capabilities(
         &self,
         tools: &[omegon_traits::ToolDefinition],
@@ -397,6 +420,7 @@ impl ResolvedProviderRoute {
             native_model: self.native_model,
             endpoint_provenance: self.endpoint_provenance,
             admitted_capabilities: self.admitted_capabilities,
+            policy_facts: self.policy_facts,
             inner: self.bridge,
         })
     }
@@ -438,26 +462,81 @@ impl ResolvedProviderRoute {
             inputs.tools,
             inputs.options,
         )?;
-        PreparedModelRequest::prepare(
-            self.bridge.as_ref(),
-            inputs,
+        PreparedModelRequest::prepare(self, inputs, Some(&self.native_model), |_| {
+            let lease = route_lease(
+                &self.selected_model,
+                &self.native_model,
+                Some(&self.credential_source_class),
+                None,
+                self.endpoint_provenance.as_ref(),
+            )?;
+            owner.record(&lease)
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl LlmBridge for ResolvedProviderRoute {
+    fn policy_capture(&self, _model: &str) -> crate::inference_policy::PolicyCapture {
+        let mut capture = crate::inference_policy::capture_route(
+            &self.serving_model,
+            Some(&self.selected_model),
             Some(&self.native_model),
-            |_| {
-                let lease = route_lease(
-                    &self.selected_model,
-                    &self.native_model,
-                    Some(&self.credential_source_class),
-                    None,
-                    self.endpoint_provenance.as_ref(),
-                )?;
-                owner.record(&lease)
-            },
-        )
+            Some(&self.credential_source_class),
+            self.endpoint_provenance.as_ref(),
+        );
+        if let Some(facts) = &self.policy_facts {
+            capture.facts = facts.clone();
+            capture.inventory_generation =
+                facts.inventory_generation.or(capture.inventory_generation);
+        }
+        bind_policy_transport(
+            &mut capture,
+            self.bridge.as_ref(),
+            &self.credential_source_class,
+            self.endpoint_provenance.is_none(),
+        );
+        capture
+    }
+
+    async fn stream(
+        &self,
+        system: &str,
+        messages: &[LlmMessage],
+        tools: &[omegon_traits::ToolDefinition],
+        options: &StreamOptions,
+    ) -> anyhow::Result<tokio::sync::mpsc::Receiver<LlmEvent>> {
+        self.bridge.stream(system, messages, tools, options).await
     }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct ProviderRouteService;
+
+fn bind_policy_transport(
+    capture: &mut crate::inference_policy::PolicyCapture,
+    bridge: &dyn LlmBridge,
+    source: &str,
+    native: bool,
+) {
+    let stored = native && source.starts_with("stored_");
+    if stored {
+        capture.credential_generation =
+            crate::auth::read_credential_extra(&capture.route.provider, "credentialGeneration");
+    }
+    let connection = if native {
+        bridge.policy_connection().or_else(|| {
+            if stored {
+                crate::auth::read_credential_extra(&capture.route.provider, "connectionId")
+            } else {
+                None
+            }
+        })
+    } else {
+        None
+    };
+    crate::inference_policy::bind_transport(capture, bridge.policy_transport(), connection);
+}
 
 #[async_trait::async_trait]
 pub(crate) trait ProviderRouteServiceContract: Send + Sync {
@@ -615,6 +694,7 @@ impl ProviderRouteServiceContract for ProviderRouteService {
             ),
             provider_supports_tools,
         });
+        route.policy_facts = Some(offering.policy_facts.clone());
         Some(route)
     }
 
@@ -791,6 +871,7 @@ struct AdmittedManifestEndpointRoute {
     base_url: String,
     secret_ref: String,
     admitted_capabilities: AdmittedModelCapabilities,
+    policy_facts: crate::inference_policy::RouteFacts,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -916,6 +997,7 @@ fn admit_manifest_endpoint_route(
             ),
             provider_supports_tools: true,
         },
+        policy_facts: offering.policy_facts.clone(),
     })
 }
 
@@ -930,6 +1012,10 @@ fn construct_manifest_endpoint_route(
         credential_source_class: "declared_bearer_secret".into(),
         native_model,
         endpoint_provenance: Some(crate::bridge::EndpointRouteProvenance {
+            connection_id: Some(crate::inference_policy::opaque_identity(&format!(
+                "{}:{}",
+                plan.endpoint_id, plan.secret_ref
+            ))),
             selected_provider_id: plan.selected_provider_id.clone(),
             endpoint_id: plan.endpoint_id,
             adapter_id: plan.adapter_id,
@@ -938,6 +1024,7 @@ fn construct_manifest_endpoint_route(
             schema_dialect: "open_ai".into(),
         }),
         admitted_capabilities: Some(plan.admitted_capabilities),
+        policy_facts: Some(plan.policy_facts),
         bridge: Box::new(crate::providers::OpenAICompatClient::new_manifest(
             api_key,
             plan.base_url,
@@ -972,7 +1059,11 @@ fn validate_admitted_request(
         }
         validate_capability(admitted.tools, "tool")?;
     }
-    if options.reasoning.is_some() {
+    if options
+        .reasoning
+        .as_deref()
+        .is_some_and(|intent| !matches!(intent, "off" | "none" | "provider-default"))
+    {
         validate_capability(admitted.reasoning, "reasoning")?;
     }
     Ok(())
@@ -1020,6 +1111,7 @@ async fn resolve_provider_route(
                 native_model: serving_model.clone(),
                 endpoint_provenance: None,
                 admitted_capabilities: None,
+                policy_facts: None,
                 bridge: resolution.bridge,
             });
         }
@@ -1194,6 +1286,13 @@ pub(crate) async fn loop_startup_route(
         |provenance| provenance.contribution_generation_id.clone(),
     );
     let (normalizer_contribution_id, normalizer_generation_id) = tool_schema_normalizer_identity();
+    if let Some(shared) = &policy.settings
+        && let Ok(mut settings) = shared.lock()
+    {
+        let mut capture = bridge.policy_capture(&serving_model);
+        capture.intent = settings.inference_intent();
+        settings.selected_policy_capture = Some(capture);
+    }
     LoopRoute {
         provider_id,
         schema_dialect,
@@ -1219,28 +1318,20 @@ pub(crate) async fn loop_turn_route(
 ) -> LoopRoute {
     let mut route = loop_startup_route(bridge, setup, policy).await;
     route.options = base.clone();
-    route.options.reasoning = policy.settings.as_ref().and_then(|settings| {
-        let guard = settings.lock().ok()?;
-        match guard.thinking {
-            crate::settings::ThinkingLevel::Off => None,
-            level => Some(level.as_str().to_string()),
-        }
-    });
+    let captured_settings = policy
+        .settings
+        .as_ref()
+        .and_then(|settings| settings.lock().ok().map(|s| s.clone()));
+    route.options.reasoning = captured_settings
+        .as_ref()
+        .and_then(|s| s.reasoning_intent.clone());
     if bridge.endpoint_route_provenance_hint().is_some() {
         route.options.model = Some(route.serving_model.clone());
+        capture_turn_policy(bridge, policy, captured_settings.as_ref(), &mut route);
         return route;
     }
-    route.serving_model = if let Some(serving_model) = setup.serving_model().await {
-        serving_model
-    } else {
-        policy.bridge_model.clone().unwrap_or_else(|| {
-            policy
-                .settings
-                .as_ref()
-                .and_then(|settings| settings.lock().ok().map(|guard| guard.model.clone()))
-                .unwrap_or_else(|| policy.selected_model.clone())
-        })
-    };
+    // The bridge/setup route was captured once above. A second model lookup
+    // could join a new selection to the old options and assembly budget.
     route.provider_id = crate::providers::infer_provider_id(&route.serving_model);
     let contribution = crate::provider_contributions::registry()
         .get(&route.provider_id)
@@ -1251,7 +1342,34 @@ pub(crate) async fn loop_turn_route(
         route.normalizer_generation_id,
     ) = tool_schema_normalizer_identity();
     route.options.model = Some(route.serving_model.clone());
+    capture_turn_policy(bridge, policy, captured_settings.as_ref(), &mut route);
     route
+}
+
+fn capture_turn_policy(
+    bridge: &dyn LlmBridge,
+    policy: &LoopRoutePolicy,
+    settings: Option<&crate::settings::Settings>,
+    route: &mut LoopRoute,
+) {
+    let mut capture = bridge.policy_capture(&route.serving_model);
+    if let Some(settings) = settings {
+        capture.intent = settings.inference_intent();
+        if bridge.selected_model_hint().is_some()
+            && !settings.model.is_empty()
+            && crate::providers::canonical_model_spec(&settings.model)
+                != crate::providers::canonical_model_spec(&route.selected_model)
+        {
+            capture.selection_error = Some("model selection changed while capturing the serving route; wait for route reconciliation and prepare again".into());
+        }
+    }
+    route.options.policy_capture = Some(capture.clone());
+    route.options.policy_sink = policy.settings.clone();
+    if let Some(shared) = &policy.settings
+        && let Ok(mut settings) = shared.lock()
+    {
+        settings.selected_policy_capture = Some(capture);
+    }
 }
 
 pub(crate) async fn prepare_loop_route(
@@ -1560,6 +1678,20 @@ pub(crate) async fn dispatch_loop_route(
         },
     )?;
     let durable_route = prepared.evidence().clone();
+    let projection =
+        crate::surfaces::inference_policy::project(Ok(Some(prepared.policy())), true, None);
+    let _ = request
+        .events
+        .send(omegon_traits::AgentEvent::ContextUpdated {
+            tokens: projection.estimated_visible_input.unwrap_or(0) as u64,
+            context_window: projection.assembly_budget.unwrap_or(0) as u64,
+            context_class: crate::settings::ContextClass::from_tokens(
+                prepared.policy().input_budget,
+            )
+            .label()
+            .into(),
+            thinking_level: projection.effective_reasoning,
+        });
 
     let mut attempt = 0u32;
     let message_id = Uuid::new_v4();
@@ -1583,6 +1715,7 @@ pub(crate) async fn dispatch_loop_route(
             .await
             {
                 Ok(message) => {
+                    prepared.record_usage(message.provider_tokens);
                     return Ok(LoopRouteDispatch {
                         message,
                         durable_route,
@@ -2804,6 +2937,7 @@ mod tests {
                 credential_source_class: "test".into(),
                 endpoint_provenance: None,
                 admitted_capabilities,
+                policy_facts: None,
                 inner: Box::new(CountingBridge(calls.clone())),
             };
             let options = StreamOptions {
@@ -2859,6 +2993,7 @@ mod tests {
                     provider_supports_tools,
                 }),
                 inner: Box::new(CountingBridge(calls.clone())),
+                policy_facts: None,
             };
             let options = StreamOptions::default();
             for advertised in [&tools[..], &[][..]] {
@@ -3523,6 +3658,7 @@ mod tests {
     fn session_manifest_provenance_uses_a_new_fact_without_widening_lease_v1() {
         let (directory, authority, scope, request) = staged_request();
         let provenance = crate::bridge::EndpointRouteProvenance {
+            connection_id: None,
             selected_provider_id: "private-chat".into(),
             endpoint_id: "private-endpoint".into(),
             adapter_id: "chat-completions".into(),
@@ -3612,7 +3748,7 @@ mod tests {
             crate::settings::ThinkingLevel::XHigh,
             crate::settings::ThinkingLevel::Max,
         ] {
-            shared.lock().unwrap().thinking = level;
+            shared.lock().unwrap().set_thinking(level);
             let route = loop_turn_route(&bridge, &setup, &policy, &StreamOptions::default()).await;
             assert_eq!(route.options.reasoning.as_deref(), Some(level.as_str()));
             assert_eq!(route.options.model.as_deref(), Some(model));
@@ -3623,6 +3759,7 @@ mod tests {
     async fn manifest_compaction_uses_native_identity_and_endpoint_evidence() {
         let bridge = ManifestCompactionBridge {
             provenance: crate::bridge::EndpointRouteProvenance {
+                connection_id: None,
                 selected_provider_id: "private-chat".into(),
                 endpoint_id: "private-endpoint".into(),
                 adapter_id: "chat-completions".into(),
@@ -3969,6 +4106,7 @@ mod tests {
             endpoint_provenance: None,
             admitted_capabilities: None,
             bridge: Box::new(PreparationBridge::default()),
+            policy_facts: None,
         };
         let options = StreamOptions {
             model: Some(route.serving_model.clone()),
@@ -4033,6 +4171,7 @@ mod tests {
             endpoint_provenance: None,
             admitted_capabilities: None,
             bridge: Box::new(PreparationBridge::default()),
+            policy_facts: None,
         };
         let options = StreamOptions::default();
         let result = route.prepare_request(
@@ -4137,6 +4276,7 @@ mod tests {
                 provider_supports_tools: true,
             }),
             inner: Box::new(CountingBridge(calls.clone())),
+            policy_facts: None,
         };
         let tools = [omegon_traits::ToolDefinition {
             name: "read".into(),
@@ -4172,6 +4312,7 @@ mod tests {
                 provider_supports_tools: true,
             }),
             inner: Box::new(CountingBridge(calls.clone())),
+            policy_facts: None,
         };
         let options = StreamOptions {
             reasoning: Some("high".into()),
@@ -4202,6 +4343,7 @@ mod tests {
                 provider_supports_tools: false,
             }),
             inner: Box::new(CountingBridge(calls.clone())),
+            policy_facts: None,
         };
         let tools = [omegon_traits::ToolDefinition {
             name: "read".into(),
@@ -5518,6 +5660,7 @@ mod tests {
             endpoint_provenance: None,
             admitted_capabilities: None,
             bridge: Box::new(CountingBridge(dispatches.clone())),
+            policy_facts: None,
         };
 
         let result = route

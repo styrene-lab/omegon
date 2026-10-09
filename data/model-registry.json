@@ -940,6 +940,20 @@
       "id": "gpt-6-astra",
       "provider": "openai",
       "name": "GPT-6 Astra",
+      "inferencePolicy": {
+        "defaultWindow": 272000,
+        "maximumWindow": 1050000,
+        "maximumInput": 922000,
+        "maximumTotal": 1050000,
+        "maximumOutput": 128000,
+        "basis": "total",
+        "source": "https://developers.openai.com/api/docs/models/gpt-6-astra.md",
+        "revision": null,
+        "reviewedAt": "2026-10-08",
+        "efforts": ["low", "medium", "high", "xhigh", "max"],
+        "defaultEffort": null,
+        "disabled": false
+      },
       "contextInput": 1050000,
       "contextOutput": 128000,
       "capabilities": [
@@ -1390,6 +1404,20 @@
       "id": "gpt-6-astra",
       "provider": "openai-codex",
       "name": "GPT-6 Astra",
+      "inferencePolicy": {
+        "defaultWindow": 272000,
+        "maximumWindow": 872000,
+        "maximumInput": null,
+        "maximumTotal": null,
+        "maximumOutput": null,
+        "basis": "unspecified",
+        "source": "https://github.com/openai/codex/blob/2fdf047c9631c9ed01a31b62efb7891718a931a8/codex-rs/models-manager/models.json",
+        "revision": "2fdf047c9631c9ed01a31b62efb7891718a931a8",
+        "reviewedAt": "2026-10-08",
+        "efforts": ["low", "medium", "high", "xhigh", "max"],
+        "defaultEffort": "low",
+        "disabled": false
+      },
       "contextInput": 872000,
       "contextOutput": 128000,
       "capabilities": [

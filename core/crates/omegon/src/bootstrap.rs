@@ -43,12 +43,7 @@ pub fn initialize_shared_settings(init: &SettingsInit<'_>) -> SharedSettings {
     let profile = loaded_profile.profile.clone();
 
     if let Ok(mut s) = shared.lock() {
-        s.profile_source = loaded_profile.source;
-        if init.apply_profile_posture {
-            profile.apply_to_with_posture(&mut s, init.cwd);
-        } else {
-            profile.apply_to(&mut s);
-        }
+        loaded_profile.apply_to_runtime(&mut s, init.cwd, init.apply_profile_posture);
 
         // An omitted model retains the saved selection. Explicit CLI selection
         // wins over profile state, including an unavailable explicit model.
@@ -70,6 +65,9 @@ pub fn initialize_shared_settings(init: &SettingsInit<'_>) -> SharedSettings {
         // Resource posture sets defaults, but explicit persisted settings win
         // unless the operator passed an explicit CLI posture override.
         if init.cli_posture.is_none() {
+            if profile.thinking_level.is_some() {
+                s.reasoning_intent = profile.thinking_level.clone();
+            }
             if let Some(thinking) = profile
                 .thinking_level
                 .as_deref()
@@ -95,7 +93,7 @@ pub fn initialize_shared_settings(init: &SettingsInit<'_>) -> SharedSettings {
             .ok()
             .and_then(|v| settings::ThinkingLevel::parse(&v))
         {
-            s.thinking = thinking;
+            s.set_thinking(thinking);
         }
         if let Some(class) = std::env::var("OMEGON_CHILD_CONTEXT_CLASS")
             .ok()
@@ -390,6 +388,48 @@ mod tests {
             settings::ThinkingLevel::High,
             "explicit profile thinking should survive slim posture defaults"
         );
+    }
+
+    #[test]
+    fn resolved_policy_bootstrap_preserves_raw_profile_intent_across_layout_postures() {
+        let _env = crate::auth::TEST_AUTH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".omegon")).unwrap();
+        let path = tmp.path().join(".omegon/profile.json");
+        for intent in ["budget:4096", "provider-default", "high"] {
+            let stored = serde_json::json!({"thinkingLevel":intent}).to_string();
+            std::fs::write(&path, &stored).unwrap();
+            for (full, slim) in [(true, false), (false, true)] {
+                for cli_posture in [None, Some("architect")] {
+                    let shared = initialize_shared_settings(&SettingsInit {
+                        model: "anthropic:claude-sonnet-4-6",
+                        cwd: tmp.path(),
+                        cli_posture,
+                        slim,
+                        full,
+                        max_turns: 50,
+                        apply_profile_posture: true,
+                    });
+                    let settings = shared.lock().unwrap();
+                    if cli_posture.is_none() {
+                        assert_eq!(settings.reasoning_intent.as_deref(), Some(intent));
+                        if intent == "high" {
+                            assert_eq!(settings.thinking, settings::ThinkingLevel::High);
+                        }
+                    } else {
+                        assert_eq!(
+                            settings.reasoning_intent.as_deref(),
+                            Some(settings.thinking.as_str())
+                        );
+                        assert_ne!(settings.reasoning_intent.as_deref(), Some(intent));
+                    }
+                    assert_eq!(std::fs::read_to_string(&path).unwrap(), stored);
+                }
+            }
+        }
     }
 
     #[test]

@@ -22,6 +22,9 @@ use serde_json::Value;
 use crate::inference_inventory::{
     EndpointId, EvidenceKind, InventoryLayer, InventorySource, Modality, OfferingId, OfferingPatch,
 };
+use crate::inference_policy::{
+    CapacityFact, CapacityField, EvidenceStatus, Provenance, RouteFacts, WindowBasis,
+};
 
 /// Conservative context defaults for offerings discovery knows exist but the
 /// registry has never curated. Selectable explicitly, excluded from autonomous
@@ -85,6 +88,9 @@ pub struct DiscoveredModel {
     pub display_name: Option<String>,
     pub context_input: Option<usize>,
     pub context_output: Option<usize>,
+    /// Additive semantic evidence. Old cached records leave these facts unknown.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policy_capacity: Vec<CapacityFact>,
     /// Provider-asserted capability flags (e.g. Copilot `capabilities.supports`).
     pub capabilities: BTreeMap<String, bool>,
     /// True when the id is structurally an embedding/internal model that can
@@ -148,6 +154,34 @@ fn classify_non_chat(id: &str) -> bool {
 
 // ── Parsers (pure, fixture-testable) ────────────────────────────────────────
 
+fn capacity_observation(
+    field: CapacityField,
+    basis: WindowBasis,
+    tokens: Option<usize>,
+    term: &str,
+) -> Vec<CapacityFact> {
+    tokens
+        .into_iter()
+        .map(|tokens| CapacityFact {
+            field,
+            tokens,
+            basis,
+            provenance: Provenance {
+                source: InventorySource::Discovery,
+                authority: term.into(),
+                uri: None,
+                revision: None,
+                sequence: None,
+                reviewed_at: None,
+                observed_at: None,
+                valid_until: None,
+                stale: false,
+                status: EvidenceStatus::Discovered,
+            },
+        })
+        .collect()
+}
+
 /// OpenAI wire shape: `{"data": [{"id": "...", "owned_by": "..."}]}`.
 /// Groq extends entries with `context_window`; parse it when present.
 pub fn parse_openai_compatible(body: &Value) -> Vec<DiscoveredModel> {
@@ -167,6 +201,16 @@ pub fn parse_openai_compatible(body: &Value) -> Vec<DiscoveredModel> {
                 non_chat: classify_non_chat(&id),
                 id,
                 context_input,
+                policy_capacity: capacity_observation(
+                    CapacityField::MaximumWindow,
+                    WindowBasis::Unspecified,
+                    context_input,
+                    if entry.get("context_window").is_some() {
+                        "context_window"
+                    } else {
+                        "context_length"
+                    },
+                ),
                 ..Default::default()
             })
         })
@@ -205,6 +249,21 @@ pub fn parse_openrouter(body: &Value) -> Vec<DiscoveredModel> {
                 display_name,
                 context_input,
                 context_output,
+                policy_capacity: [
+                    capacity_observation(
+                        CapacityField::MaximumWindow,
+                        WindowBasis::Unspecified,
+                        context_input,
+                        "context_length",
+                    ),
+                    capacity_observation(
+                        CapacityField::MaximumOutput,
+                        WindowBasis::Unspecified,
+                        context_output,
+                        "top_provider.max_completion_tokens",
+                    ),
+                ]
+                .concat(),
                 capabilities: BTreeMap::new(),
                 non_chat,
             })
@@ -268,6 +327,21 @@ pub fn parse_google(body: &Value) -> Vec<DiscoveredModel> {
                 display_name,
                 context_input,
                 context_output,
+                policy_capacity: [
+                    capacity_observation(
+                        CapacityField::MaximumInput,
+                        WindowBasis::Input,
+                        context_input,
+                        "inputTokenLimit",
+                    ),
+                    capacity_observation(
+                        CapacityField::MaximumOutput,
+                        WindowBasis::Unspecified,
+                        context_output,
+                        "outputTokenLimit",
+                    ),
+                ]
+                .concat(),
                 capabilities: BTreeMap::new(),
                 non_chat,
             })
@@ -344,6 +418,21 @@ pub fn parse_copilot(body: &Value) -> Vec<DiscoveredModel> {
                 display_name,
                 context_input,
                 context_output,
+                policy_capacity: [
+                    capacity_observation(
+                        CapacityField::MaximumWindow,
+                        WindowBasis::Unspecified,
+                        context_input,
+                        "capabilities.limits.max_context_window_tokens",
+                    ),
+                    capacity_observation(
+                        CapacityField::MaximumOutput,
+                        WindowBasis::Unspecified,
+                        context_output,
+                        "capabilities.limits.max_output_tokens",
+                    ),
+                ]
+                .concat(),
                 capabilities,
                 non_chat,
             })
@@ -417,6 +506,23 @@ pub fn build_discovery_layer(
             };
             if let Some(name) = &model.display_name {
                 patch.display_name = Some(name.clone());
+            }
+            if !model.policy_capacity.is_empty() {
+                let mut capacity = model.policy_capacity.clone();
+                for fact in &mut capacity {
+                    fact.provenance.authority = format!(
+                        "discovery:{}:{}:{}",
+                        result.endpoint_id, model.id, fact.provenance.authority
+                    );
+                    fact.provenance.observed_at = Some(result.fetched_at);
+                    fact.provenance.valid_until = result.fetched_at.checked_add(result.ttl_secs);
+                    fact.provenance.stale =
+                        unix_now().saturating_sub(result.fetched_at) > result.ttl_secs;
+                }
+                patch.policy_facts = Some(RouteFacts {
+                    capacity,
+                    ..Default::default()
+                });
             }
             if let Some(ctx) = model.context_input {
                 patch.context_input = Some(Some(ctx));
@@ -822,6 +928,7 @@ mod tests {
                     display_name: Some((*id).into()),
                     context_input: Some(*context_input),
                     context_output: Some(*context_output),
+                    policy_capacity: Vec::new(),
                     capabilities: BTreeMap::from([("tools".into(), true), ("vision".into(), true)]),
                     non_chat: false,
                 })

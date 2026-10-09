@@ -26,6 +26,8 @@ use std::sync::Arc;
 
 pub mod runtime_contributions;
 pub use runtime_contributions::*;
+pub mod inference_policy;
+pub use inference_policy::*;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Runtime capability declaration contract

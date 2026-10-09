@@ -24,8 +24,27 @@ displayName: String(length > 0)?
 /// Last used model selection.
 lastUsedModel: ModelRef?
 
-/// Thinking level for reasoning-capable models.
-thinkingLevel: ("off"|"minimal"|"low"|"medium"|"high"|"xhigh"|"max")?
+/// Route-validated reasoning intent: provider-default, off, portable effort,
+/// budget:<positive tokens>, or adaptive. Unsupported intent needs resolution.
+thinkingLevel: String(length > 0)?
+
+/// Explicit numeric consent is bound to the stable route from /context status.
+/// Endpoint and connection identities are opaque and contain no credentials.
+class InferenceRouteKey {
+  provider: String(length > 0)
+  connection: String(length > 0)
+  authentication: String(length > 0)
+  endpoint: String(length > 0)
+  native_model: String(length > 0)
+}
+
+class RouteContextTarget {
+  route: InferenceRouteKey
+  tokens: Int(this > 0)
+  maximum_revision: String?
+}
+
+routeContextTargets: Listing<RouteContextTarget>?
 
 /// Maximum agent turns per invocation.
 maxTurns: Int(this > 0)?
@@ -104,3 +123,12 @@ uiTerminal: ("inline"|"fullscreen")?
 
 /// Detail independent of terminal layout. Legacy om/lean/slim resolve to active.
 uiPresentation: ("active"|"full"|"om"|"lean"|"slim")?
+
+/// Named palettes are opt-in. Missing preserves terminal-inherited colors.
+tuiTheme: ("terminal"|"alpharius"|"styrene")?
+
+/// Requested symbols, independent of detected terminal capability.
+glyphPreference: ("auto"|"nerd-font"|"unicode"|"ascii")?
+
+/// Startup animation preference, independent of terminal capability probes.
+startupSplash: ("first-run"|"always"|"never")?

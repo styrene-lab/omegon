@@ -1,0 +1,42 @@
+{
+  "name": "styrene",
+  "vars": {
+    "primary": "#a78bfa",
+    "primaryMuted": "#7c5fc7",
+    "primaryBright": "#c4b5fd",
+    "fg": "#e5e7eb",
+    "mutedFg": "#9ca3af",
+    "dimFg": "#6b7280",
+    "bg": "#09090b",
+    "cardBg": "#111116",
+    "surfaceBg": "#0d0d12",
+    "borderColor": "#3f3f52",
+    "borderDim": "#292936",
+    "green": "#34d399",
+    "red": "#fb7185",
+    "orange": "#fb923c",
+    "yellow": "#facc15",
+    "footerBg": "#0d0d12",
+    "userMsgBg": "#15131d",
+    "toolErrorBg": "#291218"
+  },
+  "colors": {
+    "accent": "primary",
+    "border": "borderColor",
+    "borderMuted": "borderDim",
+    "success": "green",
+    "error": "red",
+    "warning": "orange",
+    "muted": "mutedFg",
+    "dim": "dimFg",
+    "text": "fg",
+    "userMessageBg": "userMsgBg",
+    "toolSuccessBg": "cardBg",
+    "toolErrorBg": "toolErrorBg",
+    "toolDiffAdded": "green",
+    "toolDiffRemoved": "red",
+    "toolDiffAddedBg": "#0b231b",
+    "toolDiffRemovedBg": "#2a1017",
+    "footerBg": "footerBg"
+  }
+}

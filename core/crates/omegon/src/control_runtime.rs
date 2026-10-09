@@ -224,6 +224,16 @@ pub fn control_request_from_slash(
         crate::runtime_commands::CanonicalSlashCommand::ContextStatus => {
             ControlRequest::ContextStatus
         }
+        crate::runtime_commands::CanonicalSlashCommand::ContextCapacity(value) => {
+            ControlRequest::ContextCapacity {
+                value: value.clone(),
+            }
+        }
+        crate::runtime_commands::CanonicalSlashCommand::ContextReasoning(value) => {
+            ControlRequest::ContextReasoning {
+                value: value.clone(),
+            }
+        }
         crate::runtime_commands::CanonicalSlashCommand::ContextCompact => {
             ControlRequest::ContextCompact
         }
@@ -1019,7 +1029,40 @@ pub async fn execute_control(
         ControlRequest::NotesClear => notes_clear_response(ctx.agent).await,
         ControlRequest::CheckinView => checkin_view_response(ctx.agent, ctx.runtime_state).await,
         ControlRequest::ContextStatus => {
+            {
+                let bridge = ctx.bridge.read().await;
+                let mut settings = ctx.shared_settings.lock().unwrap();
+                if !bridge.route_is_disconnected() {
+                    settings.selected_policy_capture = Some(bridge.policy_capture(&settings.model));
+                }
+            }
             context_status_response(ctx.runtime_state, ctx.shared_settings).await
+        }
+        ControlRequest::ContextCapacity { value } => {
+            {
+                let bridge = ctx.bridge.read().await;
+                let mut settings = ctx.shared_settings.lock().unwrap();
+                if !bridge.route_is_disconnected() {
+                    settings.selected_policy_capture = Some(bridge.policy_capture(&settings.model));
+                }
+            }
+            match crate::session_settings_commands::set_context_capacity(ctx.shared_settings, &value) {
+                Ok(message) => SlashCommandResponse { accepted: true, output: Some(message) },
+                Err(message) => SlashCommandResponse { accepted: false, output: Some(message) },
+            }
+        }
+        ControlRequest::ContextReasoning { value } => {
+            let mut settings = ctx.shared_settings.lock().unwrap();
+            let mut candidate = settings.clone();
+            candidate.reasoning_intent = (value != "provider-default").then_some(value.clone());
+            let projection = candidate.inference_projection();
+            if let Some(error) = projection.needs_resolution {
+                SlashCommandResponse { accepted: false, output: Some(error) }
+            } else {
+                settings.reasoning_intent = candidate.reasoning_intent;
+                if let Some(level) = settings::ThinkingLevel::parse(&value) { settings.thinking = level; }
+                SlashCommandResponse { accepted: true, output: Some(format!("Session reasoning: {}", projection.effective_reasoning)) }
+            }
         }
         ControlRequest::ContextCompact => {
             context_compact_response(
@@ -1917,7 +1960,7 @@ pub async fn set_thinking_response(
             output: Some("failed to acquire settings lock".to_string()),
         };
     };
-    s.thinking = level;
+    s.set_thinking(level);
     SlashCommandResponse {
         accepted: true,
         output: Some(format!(
@@ -2647,55 +2690,17 @@ pub async fn checkin_view_response(
 }
 
 pub async fn context_status_response(
-    runtime_state: &InteractiveAgentState,
+    _runtime_state: &InteractiveAgentState,
     shared_settings: &settings::SharedSettings,
 ) -> SlashCommandResponse {
-    let est = runtime_state.conversation.estimate_tokens();
-    let settings = shared_settings.lock().unwrap();
-    let ctx_window = settings.context_window;
-    let pct = if ctx_window > 0 {
-        ((est as f64 / ctx_window as f64) * 100.0).min(100.0) as u32
-    } else {
-        0
-    };
-
-    // Per-category breakdown from prompt telemetry
-    let telemetry = runtime_state.context_manager.last_prompt_telemetry();
-    let base_tokens = crate::util::estimate_chars_to_tokens(telemetry.base_prompt_chars);
-    let hud_tokens = crate::util::estimate_chars_to_tokens(telemetry.session_hud_chars);
-    let intent_tokens = crate::util::estimate_chars_to_tokens(telemetry.intent_chars);
-    let external_tokens = crate::util::estimate_chars_to_tokens(telemetry.external_injection_chars);
-    let tool_guidance_tokens = crate::util::estimate_chars_to_tokens(telemetry.tool_guidance_chars);
-    let file_guidance_tokens = crate::util::estimate_chars_to_tokens(telemetry.file_guidance_chars);
-    let injection_total = external_tokens + tool_guidance_tokens + file_guidance_tokens;
-    let conversation_tokens =
-        est.saturating_sub(base_tokens + hud_tokens + intent_tokens + injection_total);
-    let telemetry_total =
-        base_tokens + hud_tokens + intent_tokens + injection_total + conversation_tokens;
-
-    let requested_class = settings.effective_requested_class();
-    let actual_class = settings.context_class;
-    let thinking = settings.thinking;
-    let model = settings.model.clone();
-
+    let projection = shared_settings.lock().unwrap().inference_projection();
     SlashCommandResponse {
         accepted: true,
-        output: Some(
-            context_status_projection(
-                est,
-                ctx_window,
-                pct,
-                requested_class,
-                actual_class,
-                &model,
-                thinking,
-                telemetry_total,
-            )
-            .render_markdown(),
-        ),
+        output: Some(crate::surfaces::inference_policy::status(&projection)),
     }
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 fn context_status_projection(
     est: usize,
@@ -2785,7 +2790,7 @@ pub async fn context_compact_response(
         let s = shared_settings.lock().unwrap();
         crate::bridge::StreamOptions {
             model: Some(s.model.clone()),
-            reasoning: Some(s.thinking.as_str().to_string()),
+            reasoning: None, // Compaction owns its model policy, not live chat effort.
             extended_context: false,
             ..Default::default()
         }
@@ -3583,7 +3588,7 @@ pub async fn set_thinking_daemon_response(
             output: Some("failed to acquire settings lock".to_string()),
         };
     };
-    s.thinking = level;
+    s.set_thinking(level);
     drop(s);
     SlashCommandResponse {
         accepted: true,
@@ -3938,14 +3943,15 @@ pub async fn profile_apply_response(
     route_controller: Option<Arc<crate::route::RouteController>>,
     events_tx: &broadcast::Sender<AgentEvent>,
 ) -> SlashCommandResponse {
-    let profile = settings::Profile::load(&agent.cwd);
+    let loaded = settings::Profile::load_with_source(&agent.cwd);
+    let profile = loaded.profile.clone();
     let old_model = shared_settings
         .lock()
         .ok()
         .map(|s| s.model.clone())
         .unwrap_or_default();
     if let Ok(mut s) = shared_settings.lock() {
-        profile.apply_to_with_posture(&mut s, &agent.cwd);
+        loaded.apply_to_runtime(&mut s, &agent.cwd, true);
     }
 
     let resolved_model = match apply_profile_model_intent(&profile, route_controller.as_ref()).await
@@ -4075,9 +4081,9 @@ pub async fn profile_apply_daemon_response(
     shared_settings: &settings::SharedSettings,
     cwd: &Path,
 ) -> SlashCommandResponse {
-    let profile = settings::Profile::load(cwd);
+    let loaded = settings::Profile::load_with_source(cwd);
     if let Ok(mut s) = shared_settings.lock() {
-        profile.apply_to_with_posture(&mut s, cwd);
+        loaded.apply_to_runtime(&mut s, cwd, true);
         s.provider_connected = crate::auth::provider_connected_for_model(&s.model);
         SlashCommandResponse {
             accepted: true,
@@ -6528,6 +6534,7 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
         let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings {
             thinking: crate::settings::ThinkingLevel::High,
+            reasoning_intent: Some("high".into()),
             requested_context_class: Some(crate::settings::ContextClass::Massive),
             ..Default::default()
         }));
@@ -6611,6 +6618,7 @@ mod tests {
         std::fs::write(&profile_path, r#"{"thinkingLevel":"low"}"#).unwrap();
         let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings {
             thinking: crate::settings::ThinkingLevel::High,
+            reasoning_intent: Some("high".into()),
             ..Default::default()
         }));
 

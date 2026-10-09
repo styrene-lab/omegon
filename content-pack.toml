@@ -2,7 +2,7 @@
 schema_version = 1
 id = "omegon-shipped"
 version = "1.0.0"
-canonical_digest = "71ffd6e13ed4bd5207c401322488a1f6cb05bef6910ea626910342c4687f2570"
+canonical_digest = "29bbc36f14440e86b1a20e046ec5ceab47cd0d0567204c8b1164a4267d7906a9"
 requested_capabilities = [
   "content:catalog-data",
   "content:persona-directive",
@@ -274,6 +274,20 @@ size = 5607
 requested_capabilities = ["content:skill-metadata"]
 
 [[assets]]
+path = "skills/likec4/SKILL.md"
+kind = "skill"
+sha256 = "3f4ef6f62c322e66aa47b8223909efb715ff8f1c64363bbdddf50ed70fcf3c35"
+size = 12342
+requested_capabilities = ["content:skill-metadata"]
+
+[[assets]]
+path = "skills/likec4/references/sources.md"
+kind = "skill"
+sha256 = "8eb734f30aea16a9bc46cc619aed950bbfce9e8d52285f668ae71e55c556015e"
+size = 5432
+requested_capabilities = ["content:skill-metadata"]
+
+[[assets]]
 path = "skills/manifest.txt"
 kind = "skill"
 sha256 = "0b0528b522547b37d89918af1d708a57fbcc086fa33cd8175f438ede3b3baf53"
@@ -299,6 +313,34 @@ path = "skills/python/SKILL.md"
 kind = "skill"
 sha256 = "35553c7ae681c72a506e9fc1605153a97b52700ca0b229539c8b7750b9a246ee"
 size = 5673
+requested_capabilities = ["content:skill-metadata"]
+
+[[assets]]
+path = "skills/ratatui-tui/SKILL.md"
+kind = "skill"
+sha256 = "39f553a69cf4e964a1adacad32349b11c948263aead6171004d303eaafa04275"
+size = 6724
+requested_capabilities = ["content:skill-metadata"]
+
+[[assets]]
+path = "skills/ratatui-tui/references/architecture.md"
+kind = "skill"
+sha256 = "443458ed81ef645d8a0fd78bf54e33cb12975b2ce10fa10adc39d4a2c9d5b917"
+size = 2172
+requested_capabilities = ["content:skill-metadata"]
+
+[[assets]]
+path = "skills/ratatui-tui/references/ecosystem-candidates.md"
+kind = "skill"
+sha256 = "83b47282029463f10654932bdbb3f7a18ea17cbf72f68bb04e520d7cf977aa65"
+size = 3908
+requested_capabilities = ["content:skill-metadata"]
+
+[[assets]]
+path = "skills/ratatui-tui/scripts/resolve_stack.py"
+kind = "skill"
+sha256 = "b42299f9e0f4fa5b7a69de58bed7f8d01c4b7d66a0c6782f3a0b21eb2ce84e8d"
+size = 5113
 requested_capabilities = ["content:skill-metadata"]
 
 [[assets]]

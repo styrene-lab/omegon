@@ -79,6 +79,8 @@ pub enum CanonicalSlashCommand {
     NotesClear,
     CheckinView,
     ContextStatus,
+    ContextCapacity(String),
+    ContextReasoning(String),
     ContextCompact,
     ContextClear,
     ContextRequest {
@@ -462,6 +464,8 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             let (sub, rest) = args.split_once(' ').unwrap_or((args, ""));
             match sub {
                 "status" => Some(CanonicalSlashCommand::ContextStatus),
+                "capacity" => Some(CanonicalSlashCommand::ContextCapacity(rest.trim().into())),
+                "reasoning" => Some(CanonicalSlashCommand::ContextReasoning(rest.trim().into())),
                 "compact" | "compress" => Some(CanonicalSlashCommand::ContextCompact),
                 "clear" | "reset" | "new" => Some(CanonicalSlashCommand::ContextClear),
                 "request" => {

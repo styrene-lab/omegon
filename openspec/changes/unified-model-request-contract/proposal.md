@@ -3,8 +3,28 @@
 Implementation authorized by the user after PR #246 merged at
 `1828d6c5a6f78eceae9e811e9ba39e4ccf4f59d4`. The accepted direction is a validated
 internal request envelope over the existing route service, covering all three
-flows below. Independent code review found no blockers. The user approved PR
-creation; final lifecycle acceptance remains pending.
+flows below. Independent code review found no blockers. PR #247 merged the
+implementation at `13760f256662de5cbb8089d38990f7db3c93d89d`.
+
+## Post-merge acceptance — 2026-10-07
+
+The user subsequently authorized landing and lifecycle and architecture
+reconciliation. The shared internal envelope and all three implemented flows are
+accepted. [Verification](verification.md#post-merge-acceptance--2026-10-07) records
+the original tests, later provider-head regression evidence, and exact
+`77996814` headless acceptance. Exact-head CI remains blocked by a Rust-build
+timeout; these results do not validate a later rebased TUI tip.
+
+All 12 implementation tasks remain checked. Native administrative closure is
+pending, and the change is not archived. The
+[closure concern](../../../docs/lifecycle-closure-reconciliation.md) explains why
+standalone archive readiness is insufficient for native ledger reconciliation.
+
+## Historical proposal — 2026-10-07, before implementation
+
+The problem statement, candidate vocabulary, and plan below retain their original
+pre-implementation perspective. Post-merge acceptance above supersedes that
+perspective where it describes work as proposed.
 
 ## Intent
 
@@ -150,5 +170,5 @@ validation uses the owning crate's focused tests and landing gates.
    for this migration. No additional durable fact or persisted-schema change is used.
 
 The user accepted the envelope boundary and the complete first scope. Implementation
-choices and remaining review concerns are recorded in design.md. Delta specs and
-tasks describe the intended implementation, not an accepted baseline.
+choices are recorded in design.md. Delta specs and completed tasks describe the
+accepted implementation; baseline reconciliation remains pending native closure.

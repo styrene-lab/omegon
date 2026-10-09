@@ -35,6 +35,8 @@ pub struct EngineProjection {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContextProjection {
+    pub snapshot_id: Option<String>,
+    pub estimate_available: bool,
     pub percent: f32,
     pub window: usize,
     pub class: String,

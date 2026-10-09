@@ -192,10 +192,28 @@ pub struct JsonTheme {
 }
 
 impl JsonTheme {
-    /// Load from a JSON theme file. Returns None if loading fails.
-    pub fn load(path: &std::path::Path) -> Option<Self> {
-        let content = std::fs::read_to_string(path).ok()?;
-        let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+    const REQUIRED_SLOTS: [&'static str; 17] = [
+        "bg",
+        "cardBg",
+        "surfaceBg",
+        "borderColor",
+        "borderDim",
+        "fg",
+        "mutedFg",
+        "dimFg",
+        "primary",
+        "primaryMuted",
+        "primaryBright",
+        "green",
+        "red",
+        "orange",
+        "userMsgBg",
+        "toolErrorBg",
+        "footerBg",
+    ];
+
+    fn from_json(content: &str) -> Option<Self> {
+        let json: serde_json::Value = serde_json::from_str(content).ok()?;
 
         let vars_obj = json.get("vars")?.as_object()?;
         let mut raw_vars: HashMap<String, String> = HashMap::new();
@@ -237,7 +255,18 @@ impl JsonTheme {
             }
         }
 
+        if Self::REQUIRED_SLOTS
+            .iter()
+            .any(|slot| !resolved.contains_key(*slot))
+        {
+            return None;
+        }
         Some(Self { vars: resolved })
+    }
+
+    /// Load and validate a JSON theme file.
+    pub fn load(path: &std::path::Path) -> Option<Self> {
+        Self::from_json(&std::fs::read_to_string(path).ok()?)
     }
 
     fn get(&self, key: &str) -> Color {
@@ -283,10 +312,10 @@ impl Theme for JsonTheme {
     }
 
     fn success(&self) -> Color {
-        self.muted()
+        self.get("green")
     }
     fn error(&self) -> Color {
-        self.get("orange")
+        self.get("red")
     }
     fn warning(&self) -> Color {
         self.get("orange")
@@ -374,10 +403,10 @@ impl Theme for Alpharius {
     }
 
     fn success(&self) -> Color {
-        self.muted()
+        Color::Rgb(76, 175, 80)
     }
     fn error(&self) -> Color {
-        self.warning()
+        Color::Rgb(220, 72, 72)
     }
     fn warning(&self) -> Color {
         Color::Rgb(200, 100, 24)
@@ -521,8 +550,36 @@ impl Theme for TerminalTheme {
     }
 }
 
-pub fn default_theme() -> Box<dyn Theme> {
+const BUNDLED_ALPHARIUS: &str = include_str!("../../../../../themes/alpharius.json");
+const BUNDLED_STYRENE: &str = include_str!("../../../../../themes/styrene.json");
+
+fn bundled_theme(preference: crate::settings::TuiThemePreference) -> Option<JsonTheme> {
+    JsonTheme::from_json(match preference {
+        crate::settings::TuiThemePreference::Terminal => return None,
+        crate::settings::TuiThemePreference::Alpharius => BUNDLED_ALPHARIUS,
+        crate::settings::TuiThemePreference::Styrene => BUNDLED_STYRENE,
+    })
+}
+
+/// Resolve a stable theme preference from compile-time bundled resources.
+/// Terminal-inherited colors remain the default and the safe fallback.
+pub fn theme_by_preference(preference: crate::settings::TuiThemePreference) -> Box<dyn Theme> {
+    if preference == crate::settings::TuiThemePreference::Terminal {
+        return Box::new(TerminalTheme);
+    }
+    if let Some(theme) = bundled_theme(preference) {
+        return Box::new(theme);
+    }
+    tracing::error!(
+        theme = preference.as_str(),
+        "bundled TUI theme failed validation; using terminal fallback"
+    );
     Box::new(TerminalTheme)
+}
+
+/// Load the configured default theme.
+pub fn default_theme() -> Box<dyn Theme> {
+    theme_by_preference(crate::settings::TuiThemePreference::default())
 }
 
 #[cfg(test)]
@@ -582,11 +639,52 @@ mod tests {
         let t = Alpharius;
         assert_ne!(t.bg(), t.fg());
         assert_ne!(t.accent(), t.success());
-        assert_eq!(t.success(), t.muted());
-        assert_eq!(t.error(), t.warning());
+        assert_ne!(t.success(), t.muted());
+        assert_ne!(t.error(), t.warning());
         assert_eq!(t.caution(), t.warning());
         assert_ne!(t.warning(), t.accent());
         assert_ne!(t.card_bg(), t.surface_bg());
+    }
+
+    #[test]
+    fn bundled_registry_resolves_every_named_theme_without_reset_slots() {
+        for preference in [
+            crate::settings::TuiThemePreference::Alpharius,
+            crate::settings::TuiThemePreference::Styrene,
+        ] {
+            let theme = theme_by_preference(preference);
+            for color in [
+                theme.bg(),
+                theme.card_bg(),
+                theme.surface_bg(),
+                theme.border(),
+                theme.border_dim(),
+                theme.fg(),
+                theme.muted(),
+                theme.dim(),
+                theme.accent(),
+                theme.accent_muted(),
+                theme.accent_bright(),
+                theme.success(),
+                theme.error(),
+                theme.warning(),
+                theme.footer_bg(),
+                theme.user_msg_bg(),
+                theme.tool_error_bg(),
+            ] {
+                assert_ne!(
+                    color,
+                    Color::Reset,
+                    "{} has an invalid slot",
+                    preference.as_str()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn incomplete_json_theme_is_rejected() {
+        assert!(JsonTheme::from_json(r##"{"vars":{"bg":"#000000"}}"##).is_none());
     }
 
     #[test]
@@ -604,8 +702,8 @@ mod tests {
             let theme = JsonTheme::load(&path).expect("should load alpharius.json");
             assert_ne!(theme.bg(), Color::Reset, "bg should be loaded");
             assert_ne!(theme.accent(), Color::Reset, "accent should be loaded");
-            assert_eq!(theme.success(), theme.muted());
-            assert_eq!(theme.error(), theme.warning());
+            assert_ne!(theme.success(), theme.muted());
+            assert_ne!(theme.error(), theme.warning());
             assert_eq!(theme.caution(), theme.warning());
             // Verify known values from the file
             assert_eq!(

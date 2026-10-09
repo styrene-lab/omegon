@@ -98,6 +98,8 @@ pub struct SharedContextMetrics {
     pub context_window: usize,
     pub context_class: String,
     pub thinking_level: String,
+    /// True after the runtime has assembled or explicitly reset context at least once.
+    pub measured: bool,
 }
 
 impl SharedContextMetrics {
@@ -107,6 +109,7 @@ impl SharedContextMetrics {
             context_window: 200000,
             context_class: "unknown".to_string(),
             thinking_level: "unknown".to_string(),
+            measured: false,
         }))
     }
 
@@ -129,6 +132,7 @@ impl SharedContextMetrics {
         self.context_window = context_window;
         self.context_class = context_class.to_string();
         self.thinking_level = thinking_level.to_string();
+        self.measured = true;
     }
 }
 
@@ -161,6 +165,7 @@ struct ContextRuntimeState {
     tokens_used: usize,
     context_window: usize,
     usage_percent: u32,
+    measured: bool,
     context_class: String,
     thinking_level: String,
     requested_class: String,
@@ -178,6 +183,7 @@ impl ContextRuntimeState {
             tokens_used: metrics.tokens_used,
             context_window: metrics.context_window,
             usage_percent: metrics.usage_percent(),
+            measured: metrics.measured,
             context_class: metrics.context_class.clone(),
             thinking_level: metrics.thinking_level.clone(),
             requested_class: metrics.context_class.clone(),
@@ -751,17 +757,37 @@ impl Feature for ContextProvider {
     ) -> anyhow::Result<ToolResult> {
         match tool_name {
             crate::tool_registry::context::CONTEXT_STATUS => {
+                if let Some(settings) = &self.settings {
+                    let projection = settings
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("settings lock poisoned"))?
+                        .inference_projection();
+                    return Ok(ToolResult {
+                        content: vec![ContentBlock::Text {
+                            text: crate::surfaces::inference_policy::status(&projection),
+                        }],
+                        details: serde_json::to_value(projection)?,
+                    });
+                }
                 let runtime = self.runtime_state();
                 let thinking = runtime.thinking_display();
+                let usage = if runtime.measured {
+                    format!(
+                        "{}/{} tokens ({}%)",
+                        runtime.tokens_used, runtime.context_window, runtime.usage_percent
+                    )
+                } else {
+                    format!(
+                        "pending first context assembly (window: {} tokens)",
+                        runtime.context_window
+                    )
+                };
                 let result_text = format!(
-                    "Context: {}/{} tokens ({}%)
+                    "Context: {usage}
 Class: {}
 Requested Class: {}
 Assembly Budget: {} tokens
 Thinking Level: {}",
-                    runtime.tokens_used,
-                    runtime.context_window,
-                    runtime.usage_percent,
                     runtime.context_class,
                     runtime.requested_class,
                     runtime.assembly_budget,
@@ -1181,6 +1207,28 @@ mod tests {
             ContentBlock::Text { text } => text,
             other => panic!("unexpected content block: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn context_status_marks_unmeasured_startup_state_as_pending() {
+        let metrics = SharedContextMetrics::new();
+        let provider = ContextProvider::new(metrics, new_shared_command_tx());
+        let result = provider
+            .execute(
+                crate::tool_registry::context::CONTEXT_STATUS,
+                "call-pending",
+                json!({}),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .expect("tool result");
+        let text = expect_text(&result);
+
+        assert!(
+            text.contains("Context: pending first context assembly"),
+            "{text}"
+        );
+        assert!(!text.contains("0/200000 tokens (0%)"), "{text}");
     }
 
     #[tokio::test]
