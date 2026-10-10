@@ -22,7 +22,7 @@ use crate::bridge::{BoundaryExpectation, LlmBridge, LlmEvent, LlmMessage, Stream
 /// Claude Code CLI version for OAuth user-agent header.
 /// Must match what Anthropic expects for subscription recognition.
 /// Update when upstream Claude Code advances.
-const CLAUDE_CODE_UA: &str = "claude-cli/2.1.258";
+const CLAUDE_CODE_UA: &str = "claude-cli/2.1.296";
 const ANTHROPIC_OAUTH_SYSTEM_PREFIX: &str =
     "You are Claude Code, Anthropic's official CLI for Claude.";
 use omegon_traits::ToolDefinition;
