@@ -18,10 +18,15 @@ ownership. Stage 2 owns remaining scoped procedure/asset migration and request,
 route, capture, and compact-schema integration evidence. Live behavioral trials
 and landing gates follow integration and review.
 
-**Final acceptance:** both independent reviews cleared the candidate, and all six
+**Prior candidate acceptance:** both independent reviews cleared the candidate, and all six
 bounded real-model probes passed. Tasks are **9/9** complete. See the final section
 for request evidence, the token-accounting finding, cleanup, and the unperformed
 native closure and parent-controlled Git handoff.
+
+**Current correction checkpoint:** PR #252 exposed a schema-budget regression.
+The bounded description-only correction below awaits independent parent review
+and new-head CI. The exact local release ladder passes the schema budget but
+reports a separate macOS host-size overage; it is not an overall passing gate.
 
 ## Stage 1 consumer inventory and migration
 
@@ -725,3 +730,97 @@ The accounting undercount is separately documented in
 **Before 1.0** and status **not fixed**. Native lifecycle closure remains separate.
 PR checks and merge evidence belong to the actual publication head and GitHub PR;
 this pre-commit note does not claim they have completed.
+
+## PR #252 schema-budget correction — awaiting independent review
+
+CI on `0e0206abc129b63a1457aa527b1aa4bb35c5f721` completed with 30 passing checks
+and one failure: [Additive composition ladder](https://github.com/styrene-lab/omegon/actions/runs/38017846317/job/114112008375).
+The Linux full-product schema metric was **8,959**, exceeding **8,800** by 159.
+The parent authorized a bounded source correction, with no budget relaxation and
+independent review required before merge.
+
+The metric is not provider-reported token usage. `runtime_composition.rs` sums
+`estimate_tool_schema_tokens` over callable definitions by owner. The estimate
+uses the tool name, top-level description and serialized parameter-schema byte
+length, divided by four per tool. The baseline and permitted delta remain
+8,672 + 128. The deferred text-continuation accounting defect is unrelated.
+
+### Correction and preservation
+
+Nine top-level descriptions are shorter across six existing owners: cleave
+assessment/execution, delegation, request-context, design/OpenSpec, memory
+store/recall, and local inference. The core and all production bytes outside
+those descriptions are unchanged. Tool names, parameter schemas, admission,
+capabilities, profiles, budget fixtures and counting code are unchanged.
+
+The change removes redundant phrasing and action inventories already represented
+by unchanged enum values. It retains top-level procedure where parameter
+descriptions are stripped:
+
+- Self-contained child scope/facts/dependencies/expected outcomes, worker roles,
+  reliable optional routing, result reconciliation and duplicate-dispatch limits.
+- Authorized workflow scope, runtime-owned approval/parallel limits, committed
+  result harvesting, and adopted OpenSpec progress reconciliation.
+- Assumption questions, stale-node archival, branching/focus, scenarios and tests
+  before implementation, and verified design/task reconciliation before archive.
+- Durable current-state facts, source pointers, recall/superseding/reinforcement,
+  transient-content exclusions, and exclusion of facts better kept in documents.
+- Optional Ollama use, lack of parent context, complete task input, admitted and
+  conditional startup, and result verification, especially accuracy-critical work.
+
+The existing production compact-schema preservation test gains assertions for
+these boundaries. Existing assertions remain. No procedure is moved into stripped
+parameter descriptions or restored as an automatic system appendix. Scry model
+discovery/no-guessing guidance and installed reference contracts are untouched.
+
+### Measured validation
+
+All Cargo work used canonical `direnv exec .`, Rust 1.95, and
+`RUST_TEST_THREADS=1`, serially. Long gates ran in a private headless PTY, without
+input to the operator's terminal.
+
+| Check | Result for correction |
+|---|---|
+| Pre-edit native `composition-inspect --profile full` with synthetic HOME/workspace and the verified old dev-release binary | 8,972 schema tokens, including a macOS render owner contribution of 213 versus CI Linux's 200 |
+| `just test-filter scoped_procedures_survive_production_compact_schema_output` | Passed with expanded semantic preservation assertions |
+| `just test-crate omegon` | 5,430 unit passes and 27 libtest-reported integration passes; zero failures; 12 ignored; prior documented opt-in early-return limitations still apply |
+| `just clippy-changed --base HEAD` against `0e0206abc` | Passed, including format check |
+| `python3 scripts/check_composition_matrix.py --artifact-ladder --cargo-profile release --budget-output <private receipt>` | Executed the release ladder. Schema metric **8,771**, below 8,800 by **29**; 68 callable capabilities retained. Overall exit **1** for the separate native host-size metric below |
+
+The exact local ladder measured the macOS full-product host at **42,300,336 bytes**,
+against a **42,296,896-byte** limit: **3,440 bytes over**. All other reported artifact
+budgets passed. This local host-size failure remains explicit; it is not waived,
+fixed, or claimed to be preexisting. The new Linux CI run must independently
+establish its own result. No unchanged rerun or threshold increase can establish
+that result.
+
+The first full-crate attempt used an unnecessarily long private TMPDIR and failed
+three Unix-socket proxy tests with `SUN_LEN` errors. Restoring the canonical
+environment's normal macOS TMPDIR resolved them: the focused proxy tests and full
+crate gate passed. No product fix was made for that harness-path error. Intermediate
+wording checks and their receipts are retained; the `*-review` receipts identify
+the final tested source.
+
+### Source and runtime identity
+
+The revised 38-path candidate digest is
+`7108368fac1be06835dd8a1479e06a8dda4116a38d72d08fd5c3f4d3dd916569`.
+The seven-file Rust correction diff against `0e0206abc` has SHA-256
+`c1c3c516caeeeb6ee0397906a636d00b653445834bddbe498d46ca616374e197`.
+The isolated composition release artifact SHA-256 is
+`9d4db3d82efc6346035db40d7cb11953544aa59444493b6a42d9fa26611ae979`.
+This artifact lives under `target/composition/full-product/release/` and was not
+installed or launched in the operator's terminal.
+
+The original dev-release binary remains byte-identical at
+`3660f43e644147c1753738eaee3101b1a12a88a62187ebdba12a165a5bbaed15`.
+It does **not** contain this correction. The six model probes and manual LGTM
+remain evidence for the previous candidate; no new paid probe or manual runtime
+acceptance is claimed. Core policy bytes/hash remain unchanged.
+
+Private correction receipts are under
+`.git/dev-terminal/unified-prompt-schema-fix-6lt3hm9v/`: `review-identity.json`,
+`budgets-review.json`, final gate logs/exit files, and the description-only diff
+inventory. The parent must review the stable correction before merge. Native
+ledger transitions, archival, the token-accounting fix, and new consolidation
+work remain outside this correction.

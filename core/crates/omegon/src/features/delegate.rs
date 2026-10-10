@@ -1647,7 +1647,7 @@ impl Feature for DelegateFeature {
             ToolDefinition {
                 name: crate::tool_registry::delegate::DELEGATE.to_string(),
                 label: "Delegate Subagent Task".to_string(),
-                description: "Spawn one subagent for a bounded side quest; use cleave for coordinated multi-scope work when admitted and authorized. Supply a self-contained task, file scope, relevant facts, and expected outcome. Retrieve and reconcile results before claiming completion; do not dispatch duplicate tasks. Omit `model` for the safest same-provider default; only route to a known-good local or cheaper model after reliability is established. Worker profiles: scout (read/search only), patch (small scoped edits), verify (run tests/checks without edits).".to_string(),
+                description: "Delegate a bounded side quest; use admitted, authorized cleave for multi-scope work. Supply a self-contained task, file scope, facts and expected outcome. Retrieve and reconcile results before completion; do not dispatch duplicates. Omit `model` for the safest same-provider default; local/cheaper models require proven reliability. Profiles: scout (read/search only), patch (small scoped edits), verify (tests/checks, no edits).".to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {

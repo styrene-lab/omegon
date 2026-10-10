@@ -2252,7 +2252,7 @@ impl Feature for CleaveFeature {
             ToolDefinition {
                 name: crate::tool_registry::cleave::CLEAVE_ASSESS.into(),
                 label: "cleave_assess".into(),
-                description: "Assess whether coordinated multi-scope work benefits from decomposition. Returns complexity score, matched pattern, and decision (execute/cleave). A bounded side quest is better suited to one delegate when admitted and authorized; the score is not authorization to dispatch.".into(),
+                description: "Assess coordinated multi-scope decomposition; return complexity score, matched pattern, and execute/cleave decision. Prefer one admitted, authorized delegate for a bounded side quest. Scores do not authorize dispatch.".into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -2272,7 +2272,7 @@ impl Feature for CleaveFeature {
             ToolDefinition {
                 name: crate::tool_registry::cleave::CLEAVE_RUN.into(),
                 label: "cleave_run".into(),
-                description: "Execute an authorized coordinated multi-scope plan: create child git worktrees, dispatch, harvest committed results, and merge branches. Supply self-contained child descriptions, file scopes, dependencies, and expected outcomes. Reconcile child results before claiming completion and do not dispatch duplicate work. For an adopted OpenSpec workflow, reconcile tasks.md and register progress through its lifecycle tools. Approval and child/parallel limits remain runtime-owned.".into(),
+                description: "Run authorized multi-scope work: create child git worktrees, dispatch, harvest committed results, merge branches. Children need self-contained descriptions, file scopes, dependencies and expected outcomes. Reconcile child results before completion; do not dispatch duplicate work. Adopted OpenSpec: reconcile tasks.md and register lifecycle progress. Runtime owns approvals and child/parallel limits.".into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {

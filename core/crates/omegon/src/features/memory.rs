@@ -657,11 +657,10 @@ impl Feature for MemoryFeature {
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_STORE.into(),
                 label: "memory_store".into(),
-                description: "Store a durable fact in Omegon runtime memory. Facts persist across sessions. \
-Use this for stable architectural decisions, constraints, bug patterns, project conventions, and durable tradeoffs. \
-Before storing, prefer memory_recall to check whether an active fact already covers the point; use memory_supersede for stale facts \
-and rely on reinforcement for exact duplicates instead of storing paraphrases. Do not store transient observations, generic task chatter, \
-or facts better represented as Flynt/project documents. Store conclusions and current state, not investigation steps or transitions; include a source pointer instead of copying lengthy source details.".into(),
+                description: "Store durable facts across sessions: architecture, decisions, constraints, bug patterns, project conventions, and tradeoffs. \
+Prefer memory_recall to check existing facts; memory_supersede stale facts and reinforce exact duplicates rather than paraphrasing. \
+Store conclusions and current state with a source pointer, not lengthy copies, investigation steps, transitions, transient observations, or task chatter. \
+Exclude facts better kept in Flynt/project documents.".into(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "required": ["section", "content"],
@@ -683,8 +682,7 @@ or facts better represented as Flynt/project documents. Store conclusions and cu
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_RECALL.into(),
                 label: "memory_recall".into(),
-                description: "Search project memory for facts relevant to a query. Returns ranked results. \
-Use it when relevant prior decisions or project knowledge could resolve a concrete information gap.".into(),
+                description: "Recall ranked project facts when prior decisions or knowledge could resolve a concrete information gap.".into(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "required": ["query"],

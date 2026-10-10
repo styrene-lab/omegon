@@ -500,7 +500,7 @@ impl ToolProvider for LocalInferenceProvider {
             ToolDefinition {
                 name: crate::tool_registry::local_inference::ASK_LOCAL_MODEL.into(),
                 label: "Ask Local Model".into(),
-                description: "Ask an on-device Ollama model to handle a sub-task. It cannot see the parent conversation: supply all necessary context in the prompt. If this task needs local inference and Ollama is stopped, use the admitted manage_ollama start action. Verify returned work, especially accuracy-critical conclusions; local routing is optional, not a required workflow.".into(),
+                description: "Optional on-device Ollama: cannot see the parent conversation; supply all necessary context. If needed for this task and stopped, start Ollama via admitted manage_ollama. Verify results, especially accuracy-critical conclusions.".into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {

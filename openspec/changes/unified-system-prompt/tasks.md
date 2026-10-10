@@ -5,6 +5,12 @@ full verification scope; partial checkpoint work does not complete an entire tas
 See [implementation.md](implementation.md) for evidence and remaining work.
 Native registration has not occurred.
 
+The checked tasks record the accepted candidate and its live trials. A subsequent
+PR #252 schema-budget correction has separate validation and remains pending
+independent parent review and new-head CI. Its exact native release ladder passes
+the schema budget but fails the macOS host-size budget; see the final section of
+`implementation.md`. The prior 9/9 record is not a claim of correction merge readiness.
+
 ## 1. One core with preserved scoped contracts
 <!-- specs: prompt/common-policy, runtime-contributions/content-packs -->
 

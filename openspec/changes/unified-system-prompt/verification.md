@@ -163,8 +163,28 @@ the workflow's text-policy continuation omits 4,139 tokens from those summaries.
 That accounting finding is preserved for follow-up without a product change.
 
 Exact results, process/build/route identities, actual commands, private evidence
-paths, cleanup, and final unchanged source digest are in the final section of
+paths, cleanup, and the accepted source digest are in the live-acceptance section of
 `implementation.md`. All six process trees are cleaned up and the dedicated shell
-remains available. Tasks are 9/9 complete. Native registration, transitions,
-archival and baseline merging remain unavailable/unperformed; parent-controlled
-source staging and commits remain pending.
+remains available. Those acceptance tasks are 9/9 complete. Native registration,
+transitions, archival and baseline merging remain unavailable/unperformed.
+
+## Subsequent CI correction
+
+PR #252 at `0e0206abc` failed the additive ladder's schema budget: 8,959 > 8,800
+on Linux. The parent authorized concise equivalent wording in the already changed
+tool contracts. Nine descriptions changed; core policy, schemas, admission and
+budgets did not. The compact-schema test now checks additional preserved semantic
+obligations rather than relying on source-only assertions.
+
+The revised candidate is
+`7108368fac1be06835dd8a1479e06a8dda4116a38d72d08fd5c3f4d3dd916569`.
+Focused preservation tests, the full `omegon` crate gate and changed-crate Clippy
+passed. The exact local release ladder measured 8,771 schema tokens, leaving 29
+tokens under the unchanged limit, with 68 callable capabilities. It nevertheless
+exited 1 because the macOS host binary exceeded its separate size limit by 3,440
+bytes. That gate is not claimed as passing. See the final implementation section
+for complete metrics, identities, commands and harness-path correction history.
+
+Independent parent review and new-head CI remain pending. The earlier live binary
+was not rebuilt or restarted and does not contain the wording correction. No new
+real-model acceptance is claimed, and the deferred accounting bug remains unfixed.
