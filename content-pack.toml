@@ -2,7 +2,7 @@
 schema_version = 1
 id = "omegon-shipped"
 version = "1.0.0"
-canonical_digest = "29bbc36f14440e86b1a20e046ec5ceab47cd0d0567204c8b1164a4267d7906a9"
+canonical_digest = "e579e91c7c58c59b2a252e832c4a6eb571e9315fda13adfb07013f53b4cd87d6"
 requested_capabilities = [
   "content:catalog-data",
   "content:persona-directive",
@@ -169,41 +169,6 @@ size = 506
 requested_capabilities = ["content:catalog-data"]
 
 [[assets]]
-path = "data/extension-authoring-context.md"
-kind = "prompt"
-sha256 = "b7973d0597d02bc3b57633b1d2c31868f5a51356d9d4acc76c6035393fdb85c3"
-size = 5693
-requested_capabilities = ["content:prompt-template"]
-
-[[assets]]
-path = "data/lex-capabilities.md"
-kind = "prompt"
-sha256 = "f23f754b14a80e17749737acf3e601f1955d106d1692a63fa18c14ff08a0c8fb"
-size = 994
-requested_capabilities = ["content:prompt-template"]
-
-[[assets]]
-path = "data/scry-extension-context.md"
-kind = "prompt"
-sha256 = "48ba7fc87256c57adb3a116dabcb9a84ff0c08ce1912b8d87d3fc435aa7fb535"
-size = 1971
-requested_capabilities = ["content:prompt-template"]
-
-[[assets]]
-path = "data/tool-limitations.md"
-kind = "prompt"
-sha256 = "d80e2bbac39131f43a0abbeffa1d827e8577f203a06488a946cfc4e56f6afb66"
-size = 1983
-requested_capabilities = ["content:prompt-template"]
-
-[[assets]]
-path = "data/vox-extension-context.md"
-kind = "prompt"
-sha256 = "d3b6d5c1ed6e555229ee4c04ba966e5b192876b1f533a05d79ad608a8d8c0fe3"
-size = 1654
-requested_capabilities = ["content:prompt-template"]
-
-[[assets]]
 path = "prompts/init.md"
 kind = "prompt"
 sha256 = "74ab89b938df2e68f7209b69911195d6f361c8ae7690270dd2251aef2b9e44ce"
@@ -250,6 +215,20 @@ path = "skills/codebase-init/SKILL.md"
 kind = "skill"
 sha256 = "c4f9c198253940f0c8193f1ca71c84607a114bb6ba6ad31c20e55188bbdbd33c"
 size = 5943
+requested_capabilities = ["content:skill-metadata"]
+
+[[assets]]
+path = "skills/extension-authoring/SKILL.md"
+kind = "skill"
+sha256 = "c82b445aa542acd6785077d48c3c728620078105b72058c76f35f90754401603"
+size = 1130
+requested_capabilities = ["content:skill-metadata"]
+
+[[assets]]
+path = "skills/extension-authoring/references/authoring.md"
+kind = "skill"
+sha256 = "543a9acab719352c2fadb63684c0e3b54b45b3a96d3953764e6cfb520a148573"
+size = 5855
 requested_capabilities = ["content:skill-metadata"]
 
 [[assets]]
@@ -304,8 +283,8 @@ requested_capabilities = ["content:skill-metadata"]
 [[assets]]
 path = "skills/openspec/SKILL.md"
 kind = "skill"
-sha256 = "2834ed7edf2aef8b58ebcf4af9008bfb30d03f84b16972275fe0b9383a50e57f"
-size = 14885
+sha256 = "ae7b7a67b5076cc09f99e09f5dec7c8a5ba28a16541b0752ae1fa8523afe0dbc"
+size = 14910
 requested_capabilities = ["content:skill-metadata"]
 
 [[assets]]
@@ -351,6 +330,20 @@ size = 4425
 requested_capabilities = ["content:skill-metadata"]
 
 [[assets]]
+path = "skills/scry/SKILL.md"
+kind = "skill"
+sha256 = "8f28c93e7481ce86fda6f12d9312229d9e93bb1f6a9efb19f48ae8e91d74d37b"
+size = 1137
+requested_capabilities = ["content:skill-metadata"]
+
+[[assets]]
+path = "skills/scry/references/usage.md"
+kind = "skill"
+sha256 = "5ba5b9ce9f778791cc05111573e7c00ac3ef9df6dd351f1e9052edd4f93ccc4e"
+size = 2128
+requested_capabilities = ["content:skill-metadata"]
+
+[[assets]]
 path = "skills/security/SKILL.md"
 kind = "skill"
 sha256 = "891ad78ef0aa1ece19d6150040f2eb2912473a1369c98d94270f08272928d361"
@@ -360,8 +353,8 @@ requested_capabilities = ["content:skill-metadata"]
 [[assets]]
 path = "skills/style/SKILL.md"
 kind = "skill"
-sha256 = "9021cb4ead733f60e94f9e1e9883b520928ab5ab2f89fb27aef3e142001c0c3a"
-size = 10629
+sha256 = "930c2377ae4e2f1ea76b2143d1eb42a611a1e5803a7a468a17ae74250f212d84"
+size = 10808
 requested_capabilities = ["content:skill-metadata"]
 
 [[assets]]
