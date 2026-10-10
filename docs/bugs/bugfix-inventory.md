@@ -7,6 +7,49 @@ tags = ["bugs", "backlog", "providers", "credentials", "tui"]
 
 Confirmed or operator-observed defects deferred from the main Omegon work. Entries record the observed behavior, expected behavior, and investigation scope without prematurely prescribing an implementation.
 
+## Text-policy continuation omits provider usage from run totals
+
+**Type:** Bugfix
+
+**Status:** Confirmed; not fixed
+
+**Target:** Before 1.0
+
+**Surface:** Agent-loop usage events and headless run summaries
+
+### Observed failure
+
+Provider-reported usage reaches the durable response receipt correctly. However, the
+`text_policy_continuation` branch continues before emitting `TurnEnd`. The headless
+run summary sums usage from `TurnEnd` events and therefore omits that response.
+This is an aggregation defect, not a provider tokenization or estimation error.
+
+The unified-prompt authorized-workflow probe recorded 26,641 tokens across six
+provider responses, but its run summary reported 22,502. The omitted response
+contained 4,092 input tokens and 47 output tokens: a 4,139-token undercount.
+The subsequent continuation response was counted.
+
+Source owners: `core/crates/omegon/src/loop.rs` (`text_only_recovery` continuation),
+`core/crates/omegon/src/main.rs` (`TurnEnd` usage accumulation), and
+`core/crates/omegon/src/provider_route_service.rs` (response receipts).
+Private reproduction evidence is retained under
+`.git/dev-terminal/unified-prompt-live-u0lgoi_l/04-authorized-workflow/`;
+that directory is not part of the distributed repository.
+
+### Acceptance criteria
+
+- Account for each completed provider response exactly once, including responses
+  that trigger text-policy continuation, independently of turn-completion events.
+- Add a regression that reconciles reported input and output totals with provider
+  usage receipts across ordinary completion and text-policy continuation.
+- Confirm the triggering response and subsequent response are both counted,
+  without duplication.
+- Check other usage consumers for the same event dependency before declaring
+  their totals correct. The observed failure establishes the headless-run defect,
+  not the scope of every session or UI counter.
+
+Tracking only; implementation is deferred to the pre-1.0 fix.
+
 ## Assignable designs
 
 - [Inactive-provider credential expiry notifications](inactive-provider-credential-expiry-notifications.md) — relevance-aware severity, status, and notification deduplication.
