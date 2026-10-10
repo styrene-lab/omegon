@@ -18,13 +18,6 @@ KINDS = {
     "workflows": ("workflow", "content:workflow-template"),
     "catalog": ("catalog", "content:catalog-data"),
 }
-DATA_PROMPTS = (
-    "data/extension-authoring-context.md",
-    "data/lex-capabilities.md",
-    "data/scry-extension-context.md",
-    "data/tool-limitations.md",
-    "data/vox-extension-context.md",
-)
 CAPABILITIES = sorted(capability for _, capability in KINDS.values())
 DOMAIN = b"omegon-content-pack-v1\0"
 
@@ -45,16 +38,6 @@ def assets() -> list[dict[str, object]]:
                 "size": len(payload),
                 "capability": capability,
             })
-    for relative in DATA_PROMPTS:
-        path = ROOT / relative
-        payload = path.read_bytes()
-        result.append({
-            "path": relative,
-            "kind": "prompt",
-            "sha256": hashlib.sha256(payload).hexdigest(),
-            "size": len(payload),
-            "capability": "content:prompt-template",
-        })
     return sorted(result, key=lambda asset: str(asset["path"]))
 
 

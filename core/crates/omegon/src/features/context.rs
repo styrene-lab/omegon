@@ -695,7 +695,7 @@ impl Feature for ContextProvider {
             ToolDefinition {
                 name: crate::tool_registry::context::REQUEST_CONTEXT.into(),
                 label: "Request Context".into(),
-                description: "Request a compact context pack before making multiple exploratory tool calls. Best for session orientation and recent runtime evidence; returns curated summaries, not raw dumps.".into(),
+                description: "Request a compact context pack for session orientation or recent runtime evidence; returns curated summaries, not raw dumps. Use direct read/search when the exact target is already known.".into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {

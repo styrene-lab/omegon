@@ -364,7 +364,7 @@ struct Cli {
     #[arg(long)]
     persona: Option<String>,
 
-    /// Enable slim runtime mode — reduce prompt and tool surface for quick interactive work.
+    /// Enable slim resource posture and tool surface for quick interactive work.
     #[arg(long)]
     slim: bool,
 

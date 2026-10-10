@@ -57,8 +57,8 @@ pub struct ChildAgentRuntimeProfile {
     pub preloaded_files: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub persona: Option<String>,
-    /// Force slim mode on the child (compact schemas, lazy tool injection,
-    /// reduced prompt surface). Delegate workers always set this.
+    /// Force slim resource posture on the child (including lazy tool injection).
+    /// Delegate workers always set this; common host policy remains complete.
     #[serde(default)]
     pub slim: bool,
 

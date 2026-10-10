@@ -1053,8 +1053,7 @@ impl AgentSetup {
 
         // ─── Native features ────────────────────────────────────────────
         // ─── Persona system ────────────────────────────────────────────
-        let mut persona_registry =
-            crate::plugins::registry::AugmentRegistry::new(crate::prompt::load_lex_imperialis());
+        let mut persona_registry = crate::plugins::registry::AugmentRegistry::new();
         persona_registry.loading_health = bus.contribution_health();
         let child_skills = crate::parse_csv_env("OMEGON_CHILD_SKILLS");
         if child_skills.is_empty() {
@@ -1566,24 +1565,8 @@ impl AgentSetup {
 
         // ─── System prompt + context ────────────────────────────────────
         // Build the base prompt from bus tool definitions.
-        // Slim and constrained modes use compact schemas (stripped parameter
-        // descriptions) to reduce token overhead by ~30-40%.
-        let (slim_mode, current_model) = settings
-            .as_ref()
-            .and_then(|s| s.lock().ok().map(|g| (g.is_slim(), g.model.clone())))
-            .unwrap_or((false, String::new()));
-        let model_tier = crate::routing::infer_model_grade_band(&current_model);
-        let prompt_mode = if matches!(
-            model_tier,
-            crate::routing::CapabilityGradeBand::Mid | crate::routing::CapabilityGradeBand::Leaf
-        ) {
-            prompt::PromptMode::Constrained
-        } else if slim_mode {
-            prompt::PromptMode::Slim
-        } else {
-            prompt::PromptMode::Full
-        };
-        let compact_schemas = true; // Always compact — stripped descriptions don't affect model behavior
+        // Schema compaction is independent of posture and common host policy.
+        let compact_schemas = true;
         let tool_defs = bus.tool_definitions_mode(compact_schemas);
         let tool_count = tool_defs.len();
         let tool_tokens: usize = tool_defs
@@ -1599,15 +1582,7 @@ impl AgentSetup {
                 .ok()
                 .map(|settings| settings.automation_level)
         });
-        let assembly = match automation_level {
-            Some(level) => prompt::build_base_prompt_for_mode_with_subagent_policy(
-                &cwd,
-                &tool_defs,
-                prompt_mode,
-                crate::autonomy::subagent_policy_for_automation(level),
-            ),
-            None => prompt::build_base_prompt_for_mode(&cwd, &tool_defs, prompt_mode),
-        };
+        let assembly = prompt::build_base_prompt_with_breakdown(&cwd);
         let base_prompt = match assembly {
             Ok(assembly) => assembly.prompt,
             Err(error) => {
@@ -1623,9 +1598,12 @@ impl AgentSetup {
             tool_tokens,
             prompt_tokens,
             compact = compact_schemas,
-            mode = ?prompt_mode,
+            core_source = prompt::CORE_SOURCE,
+            core_version = prompt::CORE_VERSION,
             "token budget: {} tools ~{}tok, system prompt ~{}tok",
-            tool_count, tool_tokens, prompt_tokens,
+            tool_count,
+            tool_tokens,
+            prompt_tokens,
         );
 
         // Context providers: the bus collects context from features, but we
@@ -1633,6 +1611,11 @@ impl AgentSetup {
         // budget management, priority sorting). Pass no standalone providers —
         // the bus will provide context via collect_context().
         let mut context_manager = ContextManager::new(base_prompt, vec![]);
+        context_manager.bind_subagent_settings(settings.clone());
+        if let Some(level) = automation_level {
+            context_manager
+                .set_subagent_policy(crate::autonomy::subagent_policy_for_automation(level));
+        }
         // Wire embedding service for semantic context relevance scoring
         if let Some(svc) = embed_service {
             context_manager.set_embed_service(svc);
@@ -1695,6 +1678,10 @@ impl AgentSetup {
             ConversationState::new()
         };
 
+        let slim_mode = settings
+            .as_ref()
+            .and_then(|settings| settings.lock().ok().map(|settings| settings.is_slim()))
+            .unwrap_or(false);
         if slim_mode {
             conversation.set_slim_mode(true);
         }

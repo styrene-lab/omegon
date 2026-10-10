@@ -661,7 +661,7 @@ impl Feature for MemoryFeature {
 Use this for stable architectural decisions, constraints, bug patterns, project conventions, and durable tradeoffs. \
 Before storing, prefer memory_recall to check whether an active fact already covers the point; use memory_supersede for stale facts \
 and rely on reinforcement for exact duplicates instead of storing paraphrases. Do not store transient observations, generic task chatter, \
-or facts better represented as Flynt/project documents.".into(),
+or facts better represented as Flynt/project documents. Store conclusions and current state, not investigation steps or transitions; include a source pointer instead of copying lengthy source details.".into(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "required": ["section", "content"],
@@ -684,8 +684,7 @@ or facts better represented as Flynt/project documents.".into(),
                 name: crate::tool_registry::memory::MEMORY_RECALL.into(),
                 label: "memory_recall".into(),
                 description: "Search project memory for facts relevant to a query. Returns ranked results. \
-Use this PROACTIVELY at the start of any non-trivial task to surface relevant context before acting. \
-Also use it when you notice a gap — if you're unsure whether something was already decided, search first.".into(),
+Use it when relevant prior decisions or project knowledge could resolve a concrete information gap.".into(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "required": ["query"],

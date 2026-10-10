@@ -11,6 +11,9 @@ visibility = "private"
 
 # Omegon Extension Authoring Reference
 
+Task-scoped reference for the extension-authoring skill. Examples apply only to
+authorized development work; check the current SDK compatibility contract first.
+
 ## Quick Start
 
 ```bash

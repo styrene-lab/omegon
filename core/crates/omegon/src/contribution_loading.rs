@@ -205,6 +205,136 @@ impl GuardedContributionMutationDirectory {
         anyhow::bail!("guarded contribution mutation requires Unix")
     }
 
+    /// Merge an admitted manifest's files without deleting unmanaged entries.
+    /// Validate the complete per-contribution plan first, then publish the entry
+    /// file last so a fresh entry never points at supporting files not yet written.
+    /// Returns (entry existed, any inventoried bytes changed).
+    #[cfg(unix)]
+    pub(crate) fn merge_manifest_files(
+        &self,
+        raw_name: &[u8],
+        files: &[(&Path, &[u8])],
+        entry_name: &[u8],
+    ) -> anyhow::Result<(bool, bool)> {
+        omegon_maintenance_contracts::validate_child_name(raw_name)?;
+        omegon_maintenance_contracts::validate_child_name(entry_name)?;
+        anyhow::ensure!(
+            files.len() <= 10_000,
+            "contribution manifest exceeds file limit"
+        );
+        self.validate_binding()?;
+        let existing = open_child_directory(&self.directory, raw_name)?;
+        let mut seen = std::collections::BTreeSet::new();
+        let mut total = 0usize;
+        let mut plan = Vec::new();
+        let mut entry_existed = false;
+        let mut has_entry = false;
+        for (path, bytes) in files {
+            let components = path
+                .components()
+                .map(|component| {
+                    let std::path::Component::Normal(name) = component else {
+                        anyhow::bail!("manifest destination is not confined: {}", path.display());
+                    };
+                    let name = name.as_encoded_bytes();
+                    omegon_maintenance_contracts::validate_child_name(name)?;
+                    Ok(name.to_vec())
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?;
+            anyhow::ensure!(
+                !components.is_empty() && components.len() <= 32,
+                "invalid manifest path depth"
+            );
+            anyhow::ensure!(
+                seen.insert(components.clone()),
+                "duplicate manifest destination"
+            );
+            total = total
+                .checked_add(bytes.len())
+                .ok_or_else(|| anyhow::anyhow!("manifest byte limit overflow"))?;
+            anyhow::ensure!(
+                total <= MAX_SNAPSHOT_BYTES,
+                "contribution manifest exceeds byte limit"
+            );
+            let parents = components[..components.len() - 1]
+                .iter()
+                .map(Vec::as_slice)
+                .collect::<Vec<_>>();
+            let current = match existing.as_ref() {
+                Some(directory) => match open_relative_directory(directory, &parents)? {
+                    Some(parent) => {
+                        read_file_at(&parent, components.last().unwrap(), MAX_SNAPSHOT_BYTES)?
+                    }
+                    None => None,
+                },
+                None => None,
+            };
+            let is_entry = components.len() == 1 && components[0] == entry_name;
+            if is_entry {
+                has_entry = true;
+                entry_existed = current.is_some();
+            }
+            plan.push((
+                components,
+                *bytes,
+                current.as_deref() != Some(*bytes),
+                is_entry,
+            ));
+        }
+        anyhow::ensure!(has_entry, "contribution manifest has no entry file");
+        for path in &seen {
+            for depth in 1..path.len() {
+                anyhow::ensure!(
+                    !seen.contains(&path[..depth]),
+                    "manifest file conflicts with a parent directory"
+                );
+            }
+        }
+        let changed = plan.iter().any(|(_, _, changed, _)| *changed);
+        if !changed {
+            return Ok((entry_existed, false));
+        }
+        let directory = open_or_create_child_directory(&self.directory, raw_name)?.0;
+        let identity = omegon_maintenance_contracts::path_identity(&directory)?;
+        plan.sort_by_key(|(_, _, _, is_entry)| *is_entry);
+        for (components, bytes, changed, _) in plan {
+            if !changed {
+                continue;
+            }
+            self.validate_binding()?;
+            let parents = components[..components.len() - 1]
+                .iter()
+                .map(Vec::as_slice)
+                .collect::<Vec<_>>();
+            let parent = open_or_create_relative_directory(&directory, &parents)?;
+            let name = components.last().unwrap();
+            // Recheck type/no-follow constraints before the atomic replacement.
+            read_file_at(&parent, name, MAX_SNAPSHOT_BYTES)?;
+            replace_file_at(&parent, name, bytes, 0o600)?;
+            parent.sync_all()?;
+            let current = open_child_directory(&self.directory, raw_name)?.ok_or_else(|| {
+                anyhow::anyhow!("contribution disappeared during manifest install")
+            })?;
+            anyhow::ensure!(
+                omegon_maintenance_contracts::path_identity(&current)? == identity,
+                "contribution identity changed during manifest install"
+            );
+        }
+        directory.sync_all()?;
+        self.validate_binding()?;
+        Ok((entry_existed, true))
+    }
+
+    #[cfg(not(unix))]
+    pub(crate) fn merge_manifest_files(
+        &self,
+        _raw_name: &[u8],
+        _files: &[(&Path, &[u8])],
+        _entry_name: &[u8],
+    ) -> anyhow::Result<(bool, bool)> {
+        anyhow::bail!("guarded contribution mutation requires Unix")
+    }
+
     #[cfg(unix)]
     pub(crate) fn import_directory(
         &self,

@@ -1,7 +1,7 @@
 +++
 id = "0c4d39b9-816f-4fe1-a8eb-a8337b6523c8"
 name = "openspec"
-description = "Spec-driven development lifecycle for non-trivial changes"
+description = "Spec-driven lifecycle for changes that explicitly adopt OpenSpec"
 tags = []
 aliases = ["opsx"]
 activation = "lifecycle_gated"
@@ -13,11 +13,11 @@ project_signals = ["openspec/changes", "openspec/baseline"]
 
 > **Load this skill** when working with OpenSpec changes, writing specs, generating tasks, or verifying implementations against specifications.
 
-OpenSpec is a lifecycle-heavy skill. Use it only when the OpenSpec/lifecycle tool group is exposed or when the operator explicitly asks to work from OpenSpec files. If lifecycle tools are hidden, enable the relevant group with `manage_tools` before calling tool names such as `openspec_manage`, or operate directly on `openspec/changes/**` files and state that tool-backed lifecycle reconciliation was not performed.
+Use this skill when the task or an applicable authorized project workflow adopts OpenSpec. Available tools, installed skills, and OpenSpec directories alone do not authorize starting a lifecycle. If lifecycle tools are hidden, enable the relevant group with `manage_tools` before calling tool names such as `openspec_manage`, or operate directly on `openspec/changes/**` files and state that tool-backed lifecycle reconciliation was not performed.
 
 ## Overview
 
-OpenSpec is Omegon's specification layer for spec-and-test-driven development. It ensures that every non-trivial change follows the lifecycle:
+OpenSpec is Omegon's specification layer for spec-and-test-driven development. Changes that adopt OpenSpec follow this lifecycle:
 
 ```
 propose → specced → planned → testing → implementing → verifying → archived
