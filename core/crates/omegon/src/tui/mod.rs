@@ -936,9 +936,7 @@ impl App {
             last_tool_name: None,
             completed_tool_name: None,
             replay_splash: false,
-            augment_registry: Some(crate::plugins::registry::AugmentRegistry::new(
-                crate::prompt::load_lex_imperialis(),
-            )),
+            augment_registry: Some(crate::plugins::registry::AugmentRegistry::new()),
             session_row: statusline::SessionRow::default(),
             workbench_state: WorkbenchState::default(),
             project_browser: None,

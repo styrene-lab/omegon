@@ -11,6 +11,9 @@ visibility = "private"
 
 # Scry Image Generation Extension
 
+Task-scoped reference for the Scry skill. Use only the actual admitted Scry
+contracts during an authorized image task; this inventory grants no capability.
+
 The scry extension gives you local image generation capabilities using diffusion models (FLUX, Stable Diffusion, SDXL). Images are generated on the user's machine — no external API calls.
 
 ## Available tools

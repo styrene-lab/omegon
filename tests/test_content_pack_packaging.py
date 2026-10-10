@@ -56,6 +56,10 @@ class ContentPackPackagingTests(unittest.TestCase):
             'const LEX: &str = include_str!("../../../../data/lex-imperialis.md");',
         )
         self.assertEqual(len(lex_from_unapproved_owner), 1)
+        self.assertEqual(len(guard.scan_source(
+            ROOT / "core/crates/omegon/src/prompt.rs",
+            'const LEX: &str = include_str!("../../../../data/lex-imperialis.md");',
+        )), 1, "retired Lex must not regain a host embedding exception")
 
         lex = (ROOT / "data/lex-imperialis.md").read_text()
         self.assertTrue(all(f"## {number}." in lex for number in ("I", "II", "III", "IV", "V", "VI")))
@@ -100,8 +104,9 @@ class ContentPackPackagingTests(unittest.TestCase):
                 self.assertEqual(names, expected_names)
                 self.assertIn("share/omegon/content-packs/omegon-shipped/prompts/init.md", names)
                 self.assertIn("share/omegon/content-packs/omegon-shipped/prompts/session-compaction.md", names)
-                self.assertIn("share/omegon/content-packs/omegon-shipped/data/vox-extension-context.md", names)
-                self.assertIn("share/omegon/content-packs/omegon-shipped/data/lex-capabilities.md", names)
+                self.assertIn("share/omegon/content-packs/omegon-shipped/skills/scry/references/usage.md", names)
+                self.assertIn("share/omegon/content-packs/omegon-shipped/skills/extension-authoring/references/authoring.md", names)
+                self.assertFalse(any("/data/" in name for name in names), "retired automatic bundles are not prompt templates")
                 self.assertIn("share/omegon/content-packs/omegon-shipped/skills/rust/SKILL.md", names)
                 self.assertIn("share/omegon/content-packs/omegon-shipped/catalog/styrene.coding-agent/agent.toml", names)
                 resident = json.load(package.extractfile("omegon.composition-lock.json"))

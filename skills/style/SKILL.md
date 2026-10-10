@@ -13,6 +13,11 @@ project_signals = ["drawings/**/*.excalidraw", "diagrams/**/*.d2", "*.board"]
 
 Canonical design system for all visual output. Every diagram, theme, and generated image should derive from these tokens. When in doubt, reference this — not ad-hoc hex values.
 
+## Links in delivered output
+
+For operator-facing output, format URLs intended to be opened as explicit
+Markdown links, including local viewer URLs. Use the actual returned URL.
+
 ## Design Philosophy
 
 **Alpharius** — dark, cold, precise. Deep void backgrounds with iridescent ceramite teal, silver-chrome highlights, and muted brass-gold signal warmth. The aesthetic is disciplined, mercurial, and high-contrast: every surface should feel like polished metal under starlight.

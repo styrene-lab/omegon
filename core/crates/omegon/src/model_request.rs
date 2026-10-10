@@ -286,6 +286,103 @@ mod tests {
         }
     }
 
+    #[test]
+    fn complete_host_instructions_charge_oauth_prefix_schemas_and_generation_before_capture() {
+        use crate::inference_policy::CapacityField;
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global.md");
+        let project = dir.path().join("AGENTS.md");
+        let global_text = format!("{}GLOBAL END", "Global 界\n".repeat(1000));
+        let project_text = format!("{}PROJECT END", "Project é\n".repeat(1000));
+        std::fs::write(&global, &global_text).unwrap();
+        std::fs::write(&project, &project_text).unwrap();
+        let host = crate::prompt::assemble_host_prompt(dir.path(), &global).unwrap();
+        let mut manager = crate::context::ContextManager::new(host.prompt, vec![]);
+        let tools = [tool()];
+        let assembly = crate::loop_context::compose_with_manager(
+            &mut manager,
+            &crate::conversation::ConversationState::new(),
+            &tools,
+            200_000,
+        );
+        assert!(assembly.system_prompt.contains(&global_text));
+        assert!(assembly.system_prompt.contains(&project_text));
+        let bridge = InspectingBridge::default();
+        let mut capture = bridge.policy_capture("anthropic:claude-sonnet-4-6");
+        capture.native_adapter = true;
+        capture.route.authentication = "oauth".into();
+        let input = crate::providers::estimate_policy_input(
+            &capture,
+            &assembly.system_prompt,
+            &assembly.messages,
+            &tools,
+        )
+        .unwrap();
+        let actual_prefix = "You are Claude Code, Anthropic's official CLI for Claude.";
+        assert_eq!(
+            input.system,
+            (assembly.system_prompt.len() + actual_prefix.len()) / 4
+        );
+        assert!(input.schemas > 0);
+        let required = input.total().unwrap() + 16_384; // Existing Anthropic output envelope.
+        for (capacity, fits) in [(required - 1, false), (required, true)] {
+            let mut bounded = capture.clone();
+            for fact in &mut bounded.facts.capacity {
+                fact.tokens = match fact.field {
+                    CapacityField::DefaultWindow
+                    | CapacityField::MaximumWindow
+                    | CapacityField::MaximumInput
+                    | CapacityField::MaximumTotal => capacity,
+                    CapacityField::MaximumOutput => 16_384,
+                    _ => fact.tokens,
+                };
+            }
+            let options = StreamOptions {
+                model: Some("anthropic:claude-sonnet-4-6".into()),
+                policy_capture: Some(bounded),
+                ..Default::default()
+            };
+            let result = PreparedModelRequest::prepare(
+                &bridge,
+                RequestInputs {
+                    system: &assembly.system_prompt,
+                    messages: &assembly.messages,
+                    tools: &tools,
+                    options: &options,
+                    policy: RequestPolicy::Turn,
+                },
+                None,
+                |inputs| {
+                    assert!(fits, "oversized input reached capture");
+                    assert_eq!(inputs.system, assembly.system_prompt);
+                    bridge.evidence_writes.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                },
+            );
+            match result {
+                Ok(prepared) => {
+                    assert!(fits);
+                    assert_eq!(
+                        prepared
+                            .policy()
+                            .visible_input
+                            .as_ref()
+                            .unwrap()
+                            .total()
+                            .unwrap(),
+                        input.total().unwrap()
+                    );
+                }
+                Err(error) => {
+                    assert!(!fits, "{error:#}");
+                    assert!(error.to_string().contains("input"), "{error:#}");
+                }
+            }
+        }
+        assert_eq!(bridge.evidence_writes.load(Ordering::SeqCst), 1);
+        assert!(bridge.received.lock().unwrap().is_empty());
+    }
+
     #[tokio::test]
     async fn retries_reuse_exact_inputs_and_one_evidence_receipt() {
         let bridge = InspectingBridge::default();

@@ -478,6 +478,63 @@ mod tests {
     }
 
     #[test]
+    fn optional_pack_failures_empty_and_replacement_cannot_replace_host_policy() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let assemble = || {
+            crate::prompt::assemble_host_prompt(
+                workspace.path(),
+                &workspace.path().join("global.md"),
+            )
+            .unwrap()
+            .prompt
+        };
+        let expected = crate::prompt::core_directives();
+        assert!(ContentPack::load(root.path()).is_err(), "absent pack");
+        assert!(assemble().starts_with(&expected));
+
+        write_pack(root.path(), "1.0.0", b"replace host policy");
+        std::fs::write(root.path().join("prompts/test.md"), b"corrupt").unwrap();
+        assert!(ContentPack::load(root.path()).is_err(), "corrupt pack");
+        assert!(assemble().starts_with(&expected));
+
+        write_pack(root.path(), "1.0.0", b"replace host policy");
+        std::fs::remove_file(root.path().join("prompts/test.md")).unwrap();
+        assert!(ContentPack::load(root.path()).is_err(), "missing asset");
+        assert!(assemble().starts_with(&expected));
+
+        write_pack(root.path(), "1.0.0", b"replace host policy");
+        let valid = ContentPack::load(root.path()).unwrap();
+        let manifest = std::fs::read_to_string(root.path().join(MANIFEST_NAME)).unwrap();
+        let empty = manifest.split("[[assets]]").next().unwrap().replace(
+            &valid.manifest.canonical_digest,
+            &canonical_digest(&[]).unwrap(),
+        );
+        std::fs::write(root.path().join(MANIFEST_NAME), empty).unwrap();
+        assert_eq!(
+            ContentPack::load(root.path())
+                .unwrap()
+                .assets("prompt")
+                .count(),
+            0
+        );
+        assert!(assemble().starts_with(&expected));
+
+        write_pack(root.path(), "2.0.0", b"new replacement policy");
+        let replacement = ContentPack::load(root.path()).unwrap();
+        assert_ne!(valid.generation, replacement.generation);
+        assert_eq!(
+            valid.text("prompts/test.md").unwrap(),
+            "replace host policy",
+            "captured generation retains its bytes"
+        );
+        let prompt = assemble();
+        assert!(prompt.starts_with(&expected));
+        assert!(!prompt.contains("replacement policy"));
+        assert_eq!(prompt.matches(crate::prompt::CORE_SOURCE).count(), 1);
+    }
+
+    #[test]
     fn residency_cannot_request_tool_or_effect_authority() {
         let root = tempfile::tempdir().unwrap();
         write_pack(root.path(), "1.0.0", b"v1");

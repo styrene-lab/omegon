@@ -1647,7 +1647,7 @@ impl Feature for DelegateFeature {
             ToolDefinition {
                 name: crate::tool_registry::delegate::DELEGATE.to_string(),
                 label: "Delegate Subagent Task".to_string(),
-                description: "Spawn a subagent/delegate to handle a specific task. Omit `model` for the safest same-provider default; only set `model` to route to a known-good local or cheaper model after reliability is established. Worker profiles: scout (read/search only), patch (small scoped edits), verify (run tests/checks).".to_string(),
+                description: "Delegate a bounded side quest; use admitted, authorized cleave for multi-scope work. Supply a self-contained task, file scope, facts and expected outcome. Retrieve and reconcile results before completion; do not dispatch duplicates. Omit `model` for the safest same-provider default; local/cheaper models require proven reliability. Profiles: scout (read/search only), patch (small scoped edits), verify (tests/checks, no edits).".to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -3129,6 +3129,79 @@ mod tests {
         let verify = DelegateWorkerProfile::Verify.runtime_profile(None, None, None);
         assert_eq!(verify.enabled_tools, vec!["read", "bash"]);
         assert_eq!(DelegateWorkerProfile::Verify.max_turns(), 4);
+    }
+
+    #[test]
+    fn child_role_prose_and_actual_admitted_schemas_remain_distinct() {
+        let dir = TempDir::new().unwrap();
+        for (profile, obligation) in [
+            (DelegateWorkerProfile::Scout, "do not mutate files"),
+            (
+                DelegateWorkerProfile::Patch,
+                "smallest justified scoped edit",
+            ),
+            (DelegateWorkerProfile::Verify, "do not edit files"),
+        ] {
+            let runtime = profile.runtime_profile(None, None, None);
+            let mut bus = crate::bus::EventBus::new();
+            bus.register(Box::new(crate::features::adapter::ToolAdapter::new(
+                "core",
+                Box::new(crate::tools::CoreTools::new(dir.path().to_path_buf())),
+            )));
+            bus.register(Box::new(DelegateFeature::new(dir.path(), vec![], false)));
+            bus.register(Box::new(crate::features::cleave::CleaveFeature::new(
+                dir.path(),
+                vec![],
+                false,
+            )));
+            bus.finalize();
+            let admission = Arc::new(Mutex::new(
+                crate::features::manage_tools::ToolAdmissionPolicy::default(),
+            ));
+            bus.set_tool_admission_policy(admission.clone());
+            bus.apply_operator_tool_profile(runtime.slim, &[], &[]);
+            // Same enable-then-deny child projection used by setup.
+            for name in &runtime.enabled_tools {
+                admission.lock().unwrap().remove(name);
+            }
+            for name in &runtime.disabled_tools {
+                admission.lock().unwrap().insert(name.clone());
+            }
+            let tools = bus.tool_definitions_lean(1, &Default::default());
+            assert!(
+                tools.iter().any(|tool| tool.name == "bash"),
+                "role prose is not an OS sandbox"
+            );
+            assert!(tools.iter().any(|tool| tool.name == "read"));
+            assert!(
+                tools
+                    .iter()
+                    .all(|tool| !runtime.disabled_tools.contains(&tool.name))
+            );
+            let core =
+                crate::prompt::assemble_host_prompt(dir.path(), &dir.path().join("global.md"))
+                    .unwrap();
+            let mut manager = crate::context::ContextManager::new(core.prompt, vec![]);
+            let mut conversation = crate::conversation::ConversationState::new();
+            conversation.push_user(profile.prompt_preamble().into());
+            let captured = crate::loop_context::compose_with_manager(
+                &mut manager,
+                &conversation,
+                &tools,
+                32_000,
+            );
+            assert!(
+                captured
+                    .system_prompt
+                    .contains(&crate::prompt::core_directives())
+            );
+            assert!(!captured.system_prompt.contains("## Subagent operations"));
+            assert!(
+                serde_json::to_string(&captured.messages)
+                    .unwrap()
+                    .contains(obligation)
+            );
+        }
     }
 
     #[test]

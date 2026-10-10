@@ -2,9 +2,9 @@
 //!
 //! This is the runtime counterpart to the armory manifest parser.
 //! It handles persona activation/deactivation, tone switching,
-//! memory layer isolation, and system prompt assembly.
+//! memory layer isolation, and augmentation assembly.
 //!
-//! Invariant: the Lex Imperialis is always present and always first.
+//! Host policy is owned by prompt.rs, never supplied by this registry.
 
 use serde::{Deserialize, Serialize};
 
@@ -134,13 +134,9 @@ pub struct DeactivateResult {
     pub facts_removed: usize,
 }
 
-/// The augment registry — manages active persona, tone, skills, memory, and system prompt assembly.
-///
-/// Invariant: `lex_imperialis` is always injected first in the system prompt.
-/// No operation can remove or reorder it.
+/// Owns optional augmentation only, ordered skills → tone → persona.
 pub struct AugmentRegistry {
     pub(crate) loading_health: crate::contribution_health::ContributionHealth,
-    lex_imperialis: String,
     active_persona: Option<LoadedPersona>,
     active_tone: Option<LoadedTone>,
     memory: MemoryLayers,
@@ -219,12 +215,17 @@ fn prompt_skill_conflicts(left: &PromptSkillCandidate, right: &PromptSkillCandid
     trigger_overlap || alias_overlap || activation_overlap
 }
 
+impl Default for AugmentRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AugmentRegistry {
-    /// Create a new registry. The Lex Imperialis content is required and immutable.
-    pub fn new(lex_imperialis: String) -> Self {
+    /// Create an augmentation registry. Complete policy comes from the host builder.
+    pub fn new() -> Self {
         Self {
             loading_health: Default::default(),
-            lex_imperialis,
             active_persona: None,
             active_tone: None,
             memory: MemoryLayers::default(),
@@ -748,26 +749,26 @@ impl AugmentRegistry {
             .collect()
     }
 
-    /// Assemble the system prompt from all active layers.
-    /// Order: Lex Imperialis → Skills → Tone → Persona.
+    /// Assemble augmentation, not a complete system prompt.
+    /// Order: Skills → Tone → Persona. Host policy is supplied by prompt.rs.
     ///
     /// Every loaded skill contributes its full body. Prefer
-    /// [`Self::build_system_prompt_disclosed`] on the interactive path, which
+    /// [`Self::build_augmentation_disclosed`] on the interactive path, which
     /// withholds bodies that the workspace and prompt provide no evidence for.
-    pub fn build_system_prompt(&self) -> String {
-        let mut layers = vec![self.lex_imperialis.as_str()];
+    pub fn build_augmentation(&self) -> String {
+        let mut layers = Vec::new();
 
         for skill in &self.loaded_skills {
             layers.push(skill.as_str());
         }
 
-        self.finish_system_prompt(layers)
+        self.finish_augmentation(layers)
     }
 
-    /// Assemble the system prompt with progressive skill disclosure applied.
+    /// Assemble augmentation with progressive skill disclosure applied.
     ///
     /// Admitted skills contribute their full body exactly as
-    /// [`Self::build_system_prompt`] would. Unadmitted skills collapse to a
+    /// [`Self::build_augmentation`] would. Unadmitted skills collapse to a
     /// single `name — description` line under a shared index header, so the
     /// model can still discover them and pull the body with `skills_get`.
     ///
@@ -775,18 +776,18 @@ impl AugmentRegistry {
     /// under `root` and the current operator `prompt`. A skill whose manifest
     /// cannot be re-parsed is admitted rather than dropped: losing a capability
     /// silently is worse than spending its tokens.
-    pub fn build_system_prompt_disclosed(
+    pub fn build_augmentation_disclosed(
         &self,
         root: &std::path::Path,
         prompt: Option<&str>,
     ) -> String {
-        let mut layers = vec![self.lex_imperialis.as_str()];
+        let mut layers = Vec::new();
         let mut withheld: Vec<String> = Vec::new();
 
         // An explicit skill subset is the operator's decision about what this
         // agent needs. Disclosure must not second-guess it.
         if self.explicit_skill_subset {
-            return self.build_system_prompt();
+            return self.build_augmentation();
         }
 
         for skill in &self.loaded_skills {
@@ -816,12 +817,12 @@ impl AugmentRegistry {
             layers.push(index.as_str());
         }
 
-        self.finish_system_prompt(layers)
+        self.finish_augmentation(layers)
     }
 
     /// Append the tone and persona layers and join. Shared by both assemblers so
     /// disclosure can never reorder or drop a non-skill layer.
-    fn finish_system_prompt<'a>(&'a self, mut layers: Vec<&'a str>) -> String {
+    fn finish_augmentation<'a>(&'a self, mut layers: Vec<&'a str>) -> String {
         if let Some(ref tone) = self.active_tone {
             layers.push(&tone.directive);
         }
@@ -857,8 +858,6 @@ impl AugmentRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const LEX: &str = include_str!("../../../../../data/lex-imperialis.md");
 
     fn tutor_persona() -> LoadedPersona {
         LoadedPersona {
@@ -953,17 +952,17 @@ mod tests {
 
     #[test]
     fn activate_persona_loads_directive_into_prompt() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.activate_persona(tutor_persona());
 
-        let prompt = reg.build_system_prompt();
+        let prompt = reg.build_augmentation();
         assert!(prompt.contains("Socratic Tutor"));
-        assert!(prompt.contains("Lex Imperialis"));
+        assert!(!prompt.contains(crate::prompt::CORE_SOURCE));
     }
 
     #[test]
     fn activate_persona_loads_mind_facts() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.activate_persona(tutor_persona());
 
         assert_eq!(reg.memory().persona.len(), 2);
@@ -976,19 +975,19 @@ mod tests {
     }
 
     #[test]
-    fn lex_always_first_in_prompt() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+    fn host_policy_precedes_standalone_augmentation() {
+        let mut reg = AugmentRegistry::new();
         reg.activate_persona(tutor_persona());
 
-        let prompt = reg.build_system_prompt();
-        let lex_pos = prompt.find("Lex Imperialis").unwrap();
+        let prompt = host_prompt(&reg);
+        let lex_pos = prompt.find(crate::prompt::CORE_SOURCE).unwrap();
         let persona_pos = prompt.find("Socratic Tutor").unwrap();
         assert!(lex_pos < persona_pos);
     }
 
     #[test]
     fn first_activation_returns_no_previous() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         let result = reg.activate_persona(tutor_persona());
         assert!(result.previous_id.is_none());
     }
@@ -997,18 +996,18 @@ mod tests {
 
     #[test]
     fn deactivate_removes_directive_from_prompt() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.activate_persona(tutor_persona());
         reg.deactivate_persona();
 
-        let prompt = reg.build_system_prompt();
+        let prompt = reg.build_augmentation();
         assert!(!prompt.contains("Socratic Tutor"));
-        assert!(prompt.contains("Lex Imperialis"));
+        assert!(prompt.is_empty());
     }
 
     #[test]
     fn deactivate_clears_persona_memory() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.activate_persona(tutor_persona());
         assert!(!reg.memory().persona.is_empty());
 
@@ -1018,7 +1017,7 @@ mod tests {
 
     #[test]
     fn deactivate_preserves_project_memory() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.activate_persona(tutor_persona());
         reg.store_project_fact(MindFact {
             section: "Architecture".into(),
@@ -1035,7 +1034,7 @@ mod tests {
 
     #[test]
     fn deactivate_returns_removed_info() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.activate_persona(tutor_persona());
         let result = reg.deactivate_persona();
 
@@ -1045,7 +1044,7 @@ mod tests {
 
     #[test]
     fn deactivate_noop_when_none_active() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         let result = reg.deactivate_persona();
         assert!(result.removed_id.is_none());
         assert_eq!(result.facts_removed, 0);
@@ -1055,18 +1054,18 @@ mod tests {
 
     #[test]
     fn switch_replaces_directive() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.activate_persona(tutor_persona());
         reg.activate_persona(engineer_persona());
 
-        let prompt = reg.build_system_prompt();
+        let prompt = reg.build_augmentation();
         assert!(!prompt.contains("Socratic Tutor"));
         assert!(prompt.contains("Systems Engineer"));
     }
 
     #[test]
     fn switch_replaces_mind_facts() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.activate_persona(tutor_persona());
         assert!(
             reg.memory()
@@ -1092,7 +1091,7 @@ mod tests {
 
     #[test]
     fn switch_returns_previous_id() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.activate_persona(tutor_persona());
         let result = reg.activate_persona(engineer_persona());
         assert!(result.previous_id.as_deref().unwrap().contains("tutor"));
@@ -1100,7 +1099,7 @@ mod tests {
 
     #[test]
     fn switch_preserves_project_memory() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.activate_persona(tutor_persona());
         reg.store_project_fact(MindFact {
             section: "Decisions".into(),
@@ -1117,7 +1116,7 @@ mod tests {
 
     #[test]
     fn switch_drops_accumulated_persona_facts() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.activate_persona(tutor_persona());
         reg.store_persona_fact(MindFact {
             section: "Domain".into(),
@@ -1152,13 +1151,13 @@ mod tests {
     // ── Tone activation ──────────────────────────────────────
 
     #[test]
-    fn tone_between_lex_and_persona() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+    fn tone_between_host_and_persona() {
+        let mut reg = AugmentRegistry::new();
         reg.activate_persona(tutor_persona());
         reg.activate_tone(watts_tone());
 
-        let prompt = reg.build_system_prompt();
-        let lex_pos = prompt.find("Lex Imperialis").unwrap();
+        let prompt = host_prompt(&reg);
+        let lex_pos = prompt.find(crate::prompt::CORE_SOURCE).unwrap();
         let tone_pos = prompt.find("Alan Watts").unwrap();
         let persona_pos = prompt.find("Socratic Tutor").unwrap();
         assert!(lex_pos < tone_pos, "lex before tone");
@@ -1167,38 +1166,38 @@ mod tests {
 
     #[test]
     fn tone_works_without_persona() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.activate_tone(watts_tone());
 
-        let prompt = reg.build_system_prompt();
+        let prompt = reg.build_augmentation();
         assert!(prompt.contains("Alan Watts"));
-        assert!(prompt.contains("Lex Imperialis"));
+        assert!(!prompt.contains(crate::prompt::CORE_SOURCE));
     }
 
     #[test]
     fn tone_switch_replaces() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.activate_tone(watts_tone());
         reg.activate_tone(concise_tone());
 
-        let prompt = reg.build_system_prompt();
+        let prompt = reg.build_augmentation();
         assert!(!prompt.contains("Alan Watts"));
         assert!(prompt.contains("Concise"));
     }
 
     #[test]
     fn tone_deactivate_removes() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.activate_tone(watts_tone());
         reg.deactivate_tone();
-        assert!(!reg.build_system_prompt().contains("Alan Watts"));
+        assert!(!reg.build_augmentation().contains("Alan Watts"));
     }
 
     // ── Memory layer isolation ───────────────────────────────
 
     #[test]
     fn query_all_merges_in_priority_order() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.activate_persona(tutor_persona());
         reg.store_project_fact(MindFact {
             section: "Architecture".into(),
@@ -1226,7 +1225,7 @@ mod tests {
 
     #[test]
     fn persona_facts_dont_leak_to_project() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.activate_persona(tutor_persona());
 
         assert!(!reg.memory().persona.is_empty());
@@ -1235,7 +1234,7 @@ mod tests {
 
     #[test]
     fn store_persona_fact_fails_without_active_persona() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         let result = reg.store_persona_fact(MindFact {
             section: "Domain".into(),
             content: "orphan fact".into(),
@@ -1246,49 +1245,84 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ── Lex Imperialis invariants ────────────────────────────
-
-    #[test]
-    fn lex_present_with_nothing_active() {
-        let reg = AugmentRegistry::new(LEX.into());
-        let prompt = reg.build_system_prompt();
-        assert!(prompt.contains("Lex Imperialis"));
-        assert!(prompt.contains("Anti-Sycophancy"));
+    // Standalone consumers explicitly compose with the complete host builder.
+    fn host_prompt(reg: &AugmentRegistry) -> String {
+        let dir = tempfile::tempdir().unwrap();
+        let base =
+            crate::prompt::assemble_host_prompt(dir.path(), &dir.path().join("missing-global.md"))
+                .unwrap();
+        format!("{}{}", base.prompt, reg.build_augmentation())
     }
 
     #[test]
-    fn lex_survives_all_transitions() {
-        let mut reg = AugmentRegistry::new(LEX.into());
+    fn empty_registry_contributes_no_host_policy() {
+        let reg = AugmentRegistry::new();
+        assert!(reg.build_augmentation().is_empty());
+        assert_eq!(
+            host_prompt(&reg)
+                .matches(crate::prompt::CORE_SOURCE)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn host_policy_survives_all_transitions_exactly_once() {
+        let mut reg = AugmentRegistry::new();
 
         reg.activate_persona(tutor_persona());
         reg.activate_tone(watts_tone());
-        assert!(reg.build_system_prompt().contains("Lex Imperialis"));
+        assert_eq!(
+            host_prompt(&reg)
+                .matches(crate::prompt::CORE_SOURCE)
+                .count(),
+            1
+        );
 
         reg.activate_persona(engineer_persona());
-        assert!(reg.build_system_prompt().contains("Lex Imperialis"));
+        assert_eq!(
+            host_prompt(&reg)
+                .matches(crate::prompt::CORE_SOURCE)
+                .count(),
+            1
+        );
 
         reg.activate_tone(concise_tone());
-        assert!(reg.build_system_prompt().contains("Lex Imperialis"));
+        assert_eq!(
+            host_prompt(&reg)
+                .matches(crate::prompt::CORE_SOURCE)
+                .count(),
+            1
+        );
 
         reg.deactivate_persona();
         reg.deactivate_tone();
-        assert!(reg.build_system_prompt().contains("Lex Imperialis"));
+        assert_eq!(
+            host_prompt(&reg)
+                .matches(crate::prompt::CORE_SOURCE)
+                .count(),
+            1
+        );
     }
 
     #[test]
-    fn lex_contains_all_six_directives() {
-        let reg = AugmentRegistry::new(LEX.into());
-        let prompt = reg.build_system_prompt();
-        for directive in [
-            "Anti-Sycophancy",
-            "Evidence-Based Epistemology",
-            "Perfection Is the Enemy of Good",
-            "Systems Engineering Harness",
-            "Cognitive Honesty",
-            "Operator Agency",
-        ] {
-            assert!(prompt.contains(directive), "missing directive: {directive}");
-        }
+    fn augmentation_does_not_text_deduplicate_quoted_policy() {
+        let mut reg = AugmentRegistry::new();
+        let mut persona = tutor_persona();
+        persona.directive = format!("Quoted policy:\n{}", crate::prompt::CORE_POLICY);
+        reg.activate_persona(persona);
+        assert_eq!(
+            host_prompt(&reg)
+                .matches(crate::prompt::CORE_POLICY)
+                .count(),
+            2
+        );
+        assert_eq!(
+            host_prompt(&reg)
+                .matches(crate::prompt::CORE_SOURCE)
+                .count(),
+            1
+        );
     }
 
     /// Write `skills/<name>/SKILL.md` under `dir`, creating parents.
@@ -1323,7 +1357,7 @@ mod tests {
         );
 
         let registry = load_guarded_registry(project.path(), home.path());
-        let prompt = registry.build_system_prompt();
+        let prompt = registry.build_augmentation();
         assert!(prompt.contains("USER_SKILL_MARKER"));
         assert!(prompt.contains("ALLOWED_PROJECT_MARKER"));
         assert!(!prompt.contains("DENIED_PROJECT_MARKER"));
@@ -1377,7 +1411,7 @@ mod tests {
         state.sync_all().unwrap();
 
         let mut registry = load_guarded_registry(project.path(), home.path());
-        let prompt = registry.build_system_prompt();
+        let prompt = registry.build_augmentation();
         assert!(prompt.contains("USER_SCOPE_MARKER"));
         assert!(!prompt.contains("PROJECT_SCOPE_MARKER"));
         let health = registry.loading_health.snapshot();
@@ -1407,7 +1441,7 @@ mod tests {
         );
         assert!(
             registry
-                .build_system_prompt()
+                .build_augmentation()
                 .contains("PROJECT_SCOPE_MARKER")
         );
     }
@@ -1497,7 +1531,7 @@ mod tests {
         }
 
         let registry = load_guarded_registry(project.path(), home.path());
-        let prompt = registry.build_system_prompt();
+        let prompt = registry.build_augmentation();
         assert_eq!(
             registry
                 .loaded_skill_snapshots
@@ -1512,7 +1546,7 @@ mod tests {
 
     #[cfg(unix)]
     fn load_guarded_registry(project: &std::path::Path, home: &std::path::Path) -> AugmentRegistry {
-        let mut registry = AugmentRegistry::new(LEX.into());
+        let mut registry = AugmentRegistry::new();
         registry.load_skills_subset_with_home(project, home, &[]);
         registry
     }
@@ -1644,12 +1678,12 @@ mod tests {
         std::fs::create_dir_all(&workspace).unwrap();
         std::fs::write(workspace.join("Cargo.toml"), "[package]\n").unwrap();
 
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.load_skills_from_explicit(&[skills]);
         assert_eq!(reg.skill_count(), 3);
 
-        let full = reg.build_system_prompt();
-        let disclosed = reg.build_system_prompt_disclosed(&workspace, None);
+        let full = reg.build_augmentation();
+        let disclosed = reg.build_augmentation_disclosed(&workspace, None);
 
         // Every body is present without disclosure.
         for marker in ["TS BODY MARKER", "RUST BODY MARKER", "SECURITY BODY MARKER"] {
@@ -1699,15 +1733,15 @@ mod tests {
         let workspace = tmp.path().join("ws");
         std::fs::create_dir_all(&workspace).unwrap();
 
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.load_skills_from_explicit(&[skills]);
 
         // No evidence, no trigger: withheld.
-        let quiet = reg.build_system_prompt_disclosed(&workspace, None);
+        let quiet = reg.build_augmentation_disclosed(&workspace, None);
         assert!(!quiet.contains("STYLE BODY MARKER"));
 
         // The operator names the trigger: admitted on this turn.
-        let asked = reg.build_system_prompt_disclosed(&workspace, Some("draw me a diagram"));
+        let asked = reg.build_augmentation_disclosed(&workspace, Some("draw me a diagram"));
         assert!(
             asked.contains("STYLE BODY MARKER"),
             "prompt trigger must admit the body:\n{asked}"
@@ -1738,9 +1772,9 @@ mod tests {
         let workspace = tmp.path().join("ws");
         std::fs::create_dir_all(&workspace).unwrap();
 
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.load_skills_from_explicit(std::slice::from_ref(&skills_dir));
-        let disclosed = reg.build_system_prompt_disclosed(&workspace, None);
+        let disclosed = reg.build_augmentation_disclosed(&workspace, None);
 
         // The body is withheld.
         assert!(!disclosed.contains("TS BODY MARKER"));
@@ -1785,10 +1819,10 @@ mod tests {
         let workspace = tmp.path().join("ws");
         std::fs::create_dir_all(&workspace).unwrap();
 
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.load_skills_from_explicit(&[skills]);
 
-        let disclosed = reg.build_system_prompt_disclosed(&workspace, None);
+        let disclosed = reg.build_augmentation_disclosed(&workspace, None);
         assert!(
             disclosed.contains("ORPHAN BODY MARKER"),
             "an unjudgeable skill must be admitted, not silently dropped:\n{disclosed}"
@@ -1802,26 +1836,26 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), "# My Skill\nDo the thing.").unwrap();
 
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.load_skills_from_explicit(&[tmp.path().join("skills")]);
 
         assert_eq!(reg.skill_count(), 1);
-        assert!(reg.build_system_prompt().contains("Do the thing."));
+        assert!(reg.build_augmentation().contains("Do the thing."));
     }
 
     #[test]
-    fn skills_appear_between_lex_and_persona() {
+    fn skills_appear_between_host_and_persona() {
         let tmp = tempfile::tempdir().unwrap();
         let skill_dir = tmp.path().join("skills").join("test-skill");
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), "SKILL_MARKER").unwrap();
 
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.load_skills_from_explicit(&[tmp.path().join("skills")]);
         reg.activate_persona(engineer_persona());
 
-        let prompt = reg.build_system_prompt();
-        let lex_pos = prompt.find("Lex Imperialis").unwrap();
+        let prompt = host_prompt(&reg);
+        let lex_pos = prompt.find(crate::prompt::CORE_SOURCE).unwrap();
         let skill_pos = prompt.find("SKILL_MARKER").unwrap();
         let persona_pos = prompt
             .find("You are a systems engineering harness.")
@@ -1866,10 +1900,10 @@ RECRO_RUST_MARKER
         )
         .unwrap();
 
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.load_skills_from_explicit(&[tmp.path().join("bundled"), tmp.path().join("extension")]);
 
-        let prompt = reg.build_system_prompt();
+        let prompt = reg.build_augmentation();
         assert_eq!(reg.skill_count(), 1);
         assert!(prompt.contains("RECRO_RUST_MARKER"));
         assert!(!prompt.contains("BUNDLED_RUST_MARKER"));
@@ -1909,11 +1943,11 @@ SECOND_MARKER
         )
         .unwrap();
 
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.set_skill_conflict_resolution(SkillConflictResolution::Error);
         reg.load_skills_from_explicit(&[tmp.path().join("first"), tmp.path().join("second")]);
 
-        let prompt = reg.build_system_prompt();
+        let prompt = reg.build_augmentation();
         assert_eq!(reg.skill_count(), 0);
         assert!(!prompt.contains("FIRST_MARKER"));
         assert!(!prompt.contains("SECOND_MARKER"));
@@ -1929,10 +1963,10 @@ SECOND_MARKER
         std::fs::create_dir_all(&project_dir).unwrap();
         std::fs::write(project_dir.join("SKILL.md"), "PROJECT_SHARED_MARKER").unwrap();
 
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.load_skills_from_explicit(&[tmp.path().join("user"), tmp.path().join("project")]);
 
-        let prompt = reg.build_system_prompt();
+        let prompt = reg.build_augmentation();
         assert_eq!(reg.skill_count(), 1);
         assert!(prompt.contains("PROJECT_SHARED_MARKER"));
         assert!(!prompt.contains("USER_SHARED_MARKER"));
@@ -1945,7 +1979,7 @@ SECOND_MARKER
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), "   \n   ").unwrap();
 
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.load_skills_from_explicit(&[tmp.path().join("skills")]);
         assert_eq!(reg.skill_count(), 0);
     }
@@ -1960,13 +1994,13 @@ SECOND_MARKER
         std::fs::create_dir_all(&security_dir).unwrap();
         std::fs::write(security_dir.join("SKILL.md"), "# Security\nValidate input.").unwrap();
 
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         reg.load_skills_subset_from_explicit(
             &[tmp.path().join("skills")],
             &["security".to_string()],
         );
 
-        let prompt = reg.build_system_prompt();
+        let prompt = reg.build_augmentation();
         assert!(prompt.contains("Validate input."));
         assert!(!prompt.contains("Use cargo test."));
     }
@@ -1974,7 +2008,7 @@ SECOND_MARKER
     #[test]
     fn missing_skills_dir_is_silent() {
         let tmp = tempfile::tempdir().unwrap();
-        let mut reg = AugmentRegistry::new(LEX.into());
+        let mut reg = AugmentRegistry::new();
         // Pass a nonexistent dir — should load nothing, not panic
         reg.load_skills_from_explicit(&[tmp.path().join("nonexistent").join("skills")]);
         assert_eq!(reg.skill_count(), 0);

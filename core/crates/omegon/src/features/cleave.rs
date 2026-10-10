@@ -2252,7 +2252,7 @@ impl Feature for CleaveFeature {
             ToolDefinition {
                 name: crate::tool_registry::cleave::CLEAVE_ASSESS.into(),
                 label: "cleave_assess".into(),
-                description: "Assess the complexity of a task directive to determine if it should be decomposed. Returns complexity score, matched pattern, and decision (execute/cleave).".into(),
+                description: "Assess coordinated multi-scope decomposition; return complexity score, matched pattern, and execute/cleave decision. Prefer one admitted, authorized delegate for a bounded side quest. Scores do not authorize dispatch.".into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -2272,7 +2272,7 @@ impl Feature for CleaveFeature {
             ToolDefinition {
                 name: crate::tool_registry::cleave::CLEAVE_RUN.into(),
                 label: "cleave_run".into(),
-                description: "Execute a cleave decomposition plan. Creates git worktrees for each child, dispatches child processes, harvests results, and merges branches back.".into(),
+                description: "Run authorized multi-scope work: create child git worktrees, dispatch, harvest committed results, merge branches. Children need self-contained descriptions, file scopes, dependencies and expected outcomes. Reconcile child results before completion; do not dispatch duplicate work. Adopted OpenSpec: reconcile tasks.md and register lifecycle progress. Runtime owns approvals and child/parallel limits.".into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {

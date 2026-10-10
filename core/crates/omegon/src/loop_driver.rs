@@ -1657,6 +1657,7 @@ impl<'a> LoopDriverTurn<'a> {
             dyn crate::provider_route_service::ProviderRouteServiceContract,
         >,
     ) -> Self {
+        context.bind_subagent_settings(config.settings.clone());
         let semantic_facts = crate::loop_session::LoopSemanticFactAdapter::new(
             &config.compatibility.invocation_scope,
         );
@@ -2056,6 +2057,168 @@ mod tests {
             })
             .is_empty()
         );
+    }
+
+    #[test]
+    fn request_policy_facts_follow_production_lean_lazy_and_admission_snapshots() {
+        use crate::bridge::{LlmBridge, LlmEvent, LlmMessage, StreamOptions};
+        use crate::model_request::{PreparedModelRequest, RequestInputs, RequestPolicy};
+        struct NoDispatch;
+        #[async_trait::async_trait]
+        impl LlmBridge for NoDispatch {
+            async fn stream(
+                &self,
+                _: &str,
+                _: &[LlmMessage],
+                _: &[omegon_traits::ToolDefinition],
+                _: &StreamOptions,
+            ) -> anyhow::Result<tokio::sync::mpsc::Receiver<LlmEvent>> {
+                panic!("preservation fixture must not dispatch")
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut bus = invocation_port_with_surface_tools();
+        bus.register(Box::new(crate::features::delegate::DelegateFeature::new(
+            dir.path(),
+            vec![],
+            false,
+        )));
+        bus.register(Box::new(crate::features::cleave::CleaveFeature::new(
+            dir.path(),
+            vec![],
+            false,
+        )));
+        bus.finalize();
+        let admission = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::features::manage_tools::ToolAdmissionPolicy::default(),
+        ));
+        bus.set_tool_admission_policy(admission.clone());
+        let base =
+            crate::prompt::assemble_host_prompt(dir.path(), &dir.path().join("global.md")).unwrap();
+        assert!(!base.prompt.contains("Available tools"));
+        assert!(!base.prompt.contains("Subagent operations"));
+        let mut manager = crate::context::ContextManager::new(base.prompt, vec![]);
+        let settings =
+            std::sync::Arc::new(std::sync::Mutex::new(crate::settings::Settings::default()));
+        manager.bind_subagent_settings(Some(settings.clone()));
+        let mut conversation = ConversationState::new();
+        let names = ["delegate", "cleave_assess", "cleave_run"];
+        // mask = used logical tools; disabled mask exercises later admission changes.
+        for (turn, lean, used_mask, disabled_mask, final_turn, expected_mask) in [
+            (1, true, 0, 0, false, 0),
+            (1, false, 0, 0, false, 7),
+            (2, false, 0, 0, false, 0),
+            (3, false, 1, 0, false, 1),
+            (4, false, 7, 1, false, 6),
+            (5, false, 7, 7, false, 0),
+            (6, false, 7, 0, false, 7),
+            (7, false, 7, 0, true, 0),
+            (50, false, 7, 0, false, 7),
+        ] {
+            conversation.intent.stats.turns = turn;
+            let level = if turn == 6 {
+                crate::settings::AutomationLevel::Autonomous
+            } else {
+                crate::settings::AutomationLevel::default()
+            };
+            settings.lock().unwrap().automation_level = level;
+            let mut used = std::collections::HashSet::new();
+            for (index, name) in names.iter().enumerate() {
+                if used_mask & (1 << index) != 0 {
+                    used.insert((*name).to_owned());
+                }
+                if disabled_mask & (1 << index) != 0 {
+                    admission.lock().unwrap().insert((*name).to_owned());
+                } else {
+                    admission.lock().unwrap().remove(name);
+                }
+            }
+            let tools =
+                LoopInvocationPort::new(&mut bus).tool_definitions(LoopToolSurfaceRequest {
+                    turn,
+                    used_tools: &used,
+                    final_response_turn: final_turn,
+                    constrained: lean,
+                });
+            let assembly = crate::loop_context::compose_with_manager(
+                &mut manager,
+                &conversation,
+                &tools,
+                200_000,
+            );
+            for (index, name) in names.iter().enumerate() {
+                let exposed = expected_mask & (1 << index) != 0;
+                assert_eq!(tools.iter().any(|tool| tool.name == *name), exposed);
+                assert_eq!(
+                    assembly.system_prompt.contains(&format!("`{name}`")),
+                    exposed,
+                    "turn {turn}: stale facts for {name}"
+                );
+            }
+            let expected_list = tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            assert!(assembly.system_prompt.contains(&format!(
+                "Available tools for this request: {expected_list}\n"
+            )));
+            assert_eq!(
+                assembly
+                    .system_prompt
+                    .matches(crate::prompt::CORE_SOURCE)
+                    .count(),
+                1
+            );
+            assert!(
+                assembly
+                    .system_prompt
+                    .contains(&crate::prompt::core_directives())
+            );
+            if turn == 6 {
+                assert!(
+                    assembly
+                        .system_prompt
+                        .contains("max_children=8, max_parallel=4")
+                );
+            }
+            let options = StreamOptions {
+                model: Some("openai:gpt-6-astra".into()),
+                ..Default::default()
+            };
+            let prepared = PreparedModelRequest::prepare(
+                &NoDispatch,
+                RequestInputs {
+                    system: &assembly.system_prompt,
+                    messages: &assembly.messages,
+                    tools: &tools,
+                    options: &options,
+                    policy: RequestPolicy::Turn,
+                },
+                None,
+                |inputs| {
+                    Ok((
+                        inputs.system.to_owned(),
+                        serde_json::to_value(inputs.tools)?,
+                    ))
+                },
+            )
+            .unwrap();
+            assert_eq!(prepared.evidence().0, assembly.system_prompt);
+            assert_eq!(prepared.evidence().1, serde_json::to_value(&tools).unwrap());
+            assert_eq!(
+                prepared.policy().visible_input.as_ref().unwrap().system,
+                assembly.system_prompt.len() / 4
+            );
+            assert!(
+                manager.last_prompt_telemetry().external_injection_chars
+                    >= crate::prompt::request_tool_context(
+                        &tools,
+                        &crate::autonomy::subagent_policy_for_automation(level)
+                    )
+                    .len()
+            );
+        }
     }
 
     #[test]

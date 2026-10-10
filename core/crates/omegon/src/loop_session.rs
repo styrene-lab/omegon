@@ -2997,6 +2997,71 @@ mod tests {
     }
 
     #[test]
+    fn captured_host_policy_replays_after_instruction_sources_change_and_disappear() {
+        let workspace = tempfile::tempdir().unwrap();
+        let global = workspace.path().join("global.md");
+        let project = workspace.path().join("AGENTS.md");
+        std::fs::write(&global, "ORIGINAL OPERATOR 界").unwrap();
+        std::fs::write(&project, "ORIGINAL PROJECT POLICY").unwrap();
+        let assembled = crate::prompt::assemble_host_prompt(workspace.path(), &global).unwrap();
+        let (directory, authority, scope) = authority_scope();
+        let mut adapter = LoopSemanticFactAdapter::new(&scope);
+        let messages = vec![crate::bridge::LlmMessage::User {
+            content: "capture".into(),
+            images: vec![],
+        }];
+        let request = capture_request(&mut adapter, &assembled.prompt, &messages, &[]);
+        let preparation = authority.state().model_requests[&request.request_id]
+            .preparation()
+            .clone();
+        let source = &preparation.context_items[0];
+        assert!(source.provenance.source_event_id.is_some());
+        for remove in [false, true] {
+            if remove {
+                std::fs::remove_file(&global).unwrap();
+                std::fs::remove_file(&project).unwrap();
+            } else {
+                std::fs::write(&global, "REPLACED OPERATOR").unwrap();
+                std::fs::write(&project, "REPLACED PROJECT").unwrap();
+            }
+            let current = crate::prompt::assemble_host_prompt(workspace.path(), &global).unwrap();
+            assert!(
+                current
+                    .prompt
+                    .starts_with(&crate::prompt::core_directives())
+            );
+            assert_ne!(current.prompt, assembled.prompt);
+            assert_current_context_matches_capture(&directory, &authority, &request);
+            assert_eq!(
+                authority
+                    .read_content(
+                        &source.content_ref,
+                        crate::session_authority::ProjectionClass::Default
+                    )
+                    .unwrap(),
+                assembled.prompt.as_bytes()
+            );
+        }
+        // A captured historical family is evidence, not a template to migrate.
+        let (history_dir, history_authority, history_scope) = authority_scope();
+        let mut history_adapter = LoopSemanticFactAdapter::new(&history_scope);
+        let historical = "Historical Full/Slim system bytes — Commit when done";
+        let history_request = capture_request(&mut history_adapter, historical, &messages, &[]);
+        assert_current_context_matches_capture(&history_dir, &history_authority, &history_request);
+        let stored = history_authority.state().model_requests[&history_request.request_id]
+            .preparation()
+            .context_items[0]
+            .content_ref
+            .clone();
+        assert_eq!(
+            history_authority
+                .read_content(&stored, crate::session_authority::ProjectionClass::Default)
+                .unwrap(),
+            historical.as_bytes()
+        );
+    }
+
+    #[test]
     fn full_spine_capture_rejects_unattributed_legacy_transcript_content() {
         let (_directory, authority, scope) = authority_scope();
         let mut adapter = LoopSemanticFactAdapter::new(&scope);

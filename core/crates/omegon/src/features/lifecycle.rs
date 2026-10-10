@@ -2258,7 +2258,7 @@ impl Feature for LifecycleFeature {
             ToolDefinition {
                 name: crate::tool_registry::lifecycle::DESIGN_TREE_UPDATE.into(),
                 label: "design_tree_update".into(),
-                description: "Mutate the design tree: create nodes, change status, archive stale nodes, add questions/research/decisions, branch, set focus, implement.".into(),
+                description: "Mutate an adopted design workflow; archive stale nodes, branch from questions, focus to include the selected node's context. Tag unverified assumptions as [assumption] questions; resolve open questions before deciding.".into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -2317,7 +2317,7 @@ impl Feature for LifecycleFeature {
             ToolDefinition {
                 name: crate::tool_registry::lifecycle::OPENSPEC_MANAGE.into(),
                 label: "openspec_manage".into(),
-                description: "Manage OpenSpec changes: list status, get details, propose changes, add specs, register tasks/test files, set task checkbox status, archive.".into(),
+                description: "Manage adopted OpenSpec. Define scenarios before implementation. register_tasks reads tasks.md: reconcile edits and completed child work before registering progress. Register test files before implementation. Verify scenarios and reconcile design binding/tasks before archive; artifact edits alone do not advance lifecycle state.".into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {

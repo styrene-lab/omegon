@@ -95,6 +95,6 @@ composition = "boot-only content pack"
 maintenance_packages = ["omegon-skills"]
 kernel_tokens = ["content_pack", "omegon_skills", "ContentPack"]
 architecture = { path = "docs/binary-composition-and-kernel-admission.md", marker = "Shipped content-pack boundary" }
-absence = { path = "core/crates/omegon/src/prompt.rs", test = "absent_pack_retains_only_constitutional_lex" }
+absence = { path = "core/crates/omegon/src/prompt.rs", test = "absent_pack_retains_host_policy" }
 degradation = { path = "core/crates/omegon/src/content_pack.rs", test = "corruption_and_incompatibility_are_pack_local_failures" }
-public = { status = "documented", path = "site/src/pages/docs/plugins.astro", marker = "retains its six constitutional host axioms" }
+public = { status = "documented", path = "site/src/pages/docs/plugins.astro", marker = "retains its host-owned common policy" }

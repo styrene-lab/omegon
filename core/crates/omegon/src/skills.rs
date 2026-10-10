@@ -78,10 +78,19 @@ struct ShippedSkill {
 fn shipped_skills() -> anyhow::Result<Vec<ShippedSkill>> {
     let pack = crate::content_pack::boot_pack()
         .ok_or_else(|| anyhow::anyhow!("shipped content pack is unavailable"))?;
+    shipped_skills_from_pack(&pack)
+}
+
+fn shipped_skills_from_pack(
+    pack: &crate::content_pack::ContentPack,
+) -> anyhow::Result<Vec<ShippedSkill>> {
     let mut skills = Vec::new();
     for asset in pack.assets("skill") {
         let path = std::path::Path::new(&asset.manifest.path);
-        if path.file_name().and_then(|name| name.to_str()) != Some("SKILL.md") {
+        if path.components().count() != 3
+            || !path.starts_with("skills")
+            || path.file_name().and_then(|name| name.to_str()) != Some("SKILL.md")
+        {
             continue;
         }
         let name = path
@@ -553,60 +562,87 @@ fn is_legacy_bundled_vault_skill(content: &str) -> bool {
     manifest.name == "vault" && manifest.id.as_deref() == Some(LEGACY_VAULT_SKILL_ID)
 }
 
-fn remove_legacy_bundled_vault_skill(skills_dir: &std::path::Path) -> anyhow::Result<bool> {
-    let legacy_dir = skills_dir.join("vault");
-    let legacy_file = legacy_dir.join("SKILL.md");
-    let Ok(content) = std::fs::read_to_string(&legacy_file) else {
+fn remove_legacy_bundled_vault_skill(
+    directory: &crate::contribution_loading::GuardedContributionMutationDirectory,
+) -> anyhow::Result<bool> {
+    let Some(legacy) = directory.open_directory(b"vault")? else {
         return Ok(false);
     };
-    if !is_legacy_bundled_vault_skill(&content) {
+    let Some(content) =
+        crate::contribution_loading::read_file_at(&legacy, b"SKILL.md", 4 * 1024 * 1024)?
+    else {
         return Ok(false);
+    };
+    let Ok(content) = std::str::from_utf8(&content) else {
+        return Ok(false);
+    };
+    if !is_legacy_bundled_vault_skill(content)
+        || crate::contribution_loading::read_directory_names(&legacy, 10_000)?
+            .iter()
+            .any(|name| name != b"SKILL.md")
+    {
+        return Ok(false); // Do not delete operator-owned supporting files.
     }
-    std::fs::remove_dir_all(&legacy_dir)?;
-    Ok(true)
+    directory.remove_directory(b"vault")
 }
 
 /// Install all bundled skills to ~/.omegon/skills/.
 /// Existing files are overwritten. Project-local skills are never touched.
 pub fn install_bundled_skills() -> anyhow::Result<SkillInstallSummary> {
-    let skills_dir =
-        skills_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+    let home = crate::paths::omegon_home()?;
+    let pack = crate::content_pack::boot_pack()
+        .ok_or_else(|| anyhow::anyhow!("shipped content pack is unavailable"))?;
+    install_bundled_skills_at(&home, &pack)
+}
 
-    std::fs::create_dir_all(&skills_dir)?;
-
+/// Explicit destination and admitted pack inputs also serve isolated installation tests.
+pub(crate) fn install_bundled_skills_at(
+    home: &std::path::Path,
+    pack: &crate::content_pack::ContentPack,
+) -> anyhow::Result<SkillInstallSummary> {
+    let mut plans = Vec::new();
+    for shipped in shipped_skills_from_pack(pack)? {
+        let name = shipped.name;
+        anyhow::ensure!(
+            validate_skill_name(&name)? == name,
+            "invalid bundled skill directory: {name}"
+        );
+        let prefix = format!("skills/{name}/");
+        let files = pack
+            .assets("skill")
+            .filter_map(|asset| {
+                asset
+                    .manifest
+                    .path
+                    .strip_prefix(&prefix)
+                    .map(|relative| (std::path::Path::new(relative), asset.bytes.as_ref()))
+            })
+            .collect::<Vec<_>>();
+        plans.push((name, files));
+    }
+    let directory =
+        crate::contribution_loading::GuardedContributionMutationDirectory::open_or_create(
+            home,
+            &[b"skills"],
+            home,
+            omegon_maintenance_contracts::ContributionKind::Skill,
+            "user",
+        )?;
     let mut installed = 0;
     let mut updated = 0;
-
-    let removed_legacy = remove_legacy_bundled_vault_skill(&skills_dir)?;
-
-    for shipped in shipped_skills()? {
-        let name = shipped.name;
-        let content = shipped.content;
-        let skill_dir = skills_dir.join(&name);
-        let skill_file = skill_dir.join("SKILL.md");
-
-        std::fs::create_dir_all(&skill_dir)?;
-
-        let already_exists = skill_file.exists();
-        let existing_content = if already_exists {
-            std::fs::read_to_string(&skill_file).ok()
-        } else {
-            None
-        };
-
-        let changed = existing_content.as_deref() != Some(content.as_str());
-
-        std::fs::write(&skill_file, content)?;
-
+    for (name, files) in plans {
+        let (already_exists, changed) =
+            directory.merge_manifest_files(name.as_bytes(), &files, b"SKILL.md")?;
         if !already_exists {
             installed += 1;
         } else if changed {
             updated += 1;
         }
     }
+    let removed_legacy = remove_legacy_bundled_vault_skill(&directory)?;
 
     Ok(SkillInstallSummary {
-        destination: skills_dir,
+        destination: home.join("skills"),
         installed,
         updated,
         removed_legacy,
@@ -1134,6 +1170,214 @@ fn extract_description(content: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn bundled_install_uses_admitted_bytes_not_uninventoried_or_changed_source_files() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let source = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let bundled = crate::content_pack::boot_pack().unwrap();
+        for kind in ["skill", "prompt", "persona", "tone", "workflow", "catalog"] {
+            for asset in bundled.assets(kind) {
+                let path = source.path().join(&asset.manifest.path);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, &asset.bytes).unwrap();
+            }
+        }
+        std::fs::copy(
+            bundled.root.join("content-pack.toml"),
+            source.path().join("content-pack.toml"),
+        )
+        .unwrap();
+        std::fs::write(
+            source.path().join("skills/scry/credentials.json"),
+            "UNINVENTORIED SECRET",
+        )
+        .unwrap();
+        std::fs::create_dir_all(source.path().join("skills/uninventoried-neighbor")).unwrap();
+        std::fs::write(
+            source.path().join("skills/uninventoried-neighbor/SKILL.md"),
+            "not admitted",
+        )
+        .unwrap();
+        let admitted = crate::content_pack::ContentPack::load(source.path()).unwrap();
+        let reference = "skills/scry/references/usage.md";
+        std::fs::write(outside.path().join("secret"), "OUTSIDE SECRET").unwrap();
+        std::fs::remove_file(source.path().join(reference)).unwrap();
+        symlink(outside.path().join("secret"), source.path().join(reference)).unwrap();
+        assert!(
+            crate::content_pack::ContentPack::load(source.path()).is_err(),
+            "a new generation must reject the escaping source"
+        );
+        install_bundled_skills_at(home.path(), &admitted).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(home.path().join(reference)).unwrap(),
+            admitted.text(reference).unwrap()
+        );
+        assert!(!home.path().join("skills/scry/credentials.json").exists());
+        assert!(!home.path().join("skills/uninventoried-neighbor").exists());
+        assert_eq!(
+            std::fs::read_to_string(outside.path().join("secret")).unwrap(),
+            "OUTSIDE SECRET"
+        );
+        let script = home
+            .path()
+            .join("skills/ratatui-tui/scripts/resolve_stack.py");
+        assert_eq!(
+            std::fs::read(&script).unwrap(),
+            admitted
+                .text("skills/ratatui-tui/scripts/resolve_stack.py")
+                .unwrap()
+                .as_bytes()
+        );
+        assert_eq!(
+            std::fs::metadata(script).unwrap().permissions().mode() & 0o111,
+            0,
+            "installation grants no execution mode"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bundled_install_rejects_destination_symlinks_without_publishing_incomplete_entry() {
+        use std::os::unix::fs::symlink;
+        let pack = crate::content_pack::boot_pack().unwrap();
+        for relative in [
+            "",
+            "skills",
+            "skills/scry",
+            "skills/scry/references",
+            "skills/scry/references/usage.md",
+        ] {
+            let fixture = tempfile::tempdir().unwrap();
+            let outside = tempfile::tempdir().unwrap();
+            let home = fixture.path().join("home");
+            let link = if relative.is_empty() {
+                home.clone()
+            } else {
+                home.join(relative)
+            };
+            std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+            std::fs::write(outside.path().join("sentinel"), "UNCHANGED").unwrap();
+            let target = if relative.ends_with("usage.md") {
+                outside.path().join("sentinel")
+            } else {
+                outside.path().to_path_buf()
+            };
+            symlink(target, &link).unwrap();
+            assert!(
+                install_bundled_skills_at(&home, &pack).is_err(),
+                "accepted linked destination {relative}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(outside.path().join("sentinel")).unwrap(),
+                "UNCHANGED"
+            );
+            assert!(
+                !home.join("skills/scry/SKILL.md").exists(),
+                "failed reference plan published an entry"
+            );
+            assert!(!outside.path().join("SKILL.md").exists());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bundled_install_manifest_merge_is_bounded_confined_and_preserves_unmanaged_files() {
+        let home = tempfile::tempdir().unwrap();
+        let directory =
+            crate::contribution_loading::GuardedContributionMutationDirectory::open_or_create(
+                home.path(),
+                &[b"skills"],
+                home.path(),
+                omegon_maintenance_contracts::ContributionKind::Skill,
+                "user",
+            )
+            .unwrap();
+        let entry = (std::path::Path::new("SKILL.md"), b"entry".as_slice());
+        for path in ["../escape", "/absolute", "nested/../../escape"] {
+            assert!(
+                directory
+                    .merge_manifest_files(
+                        b"test",
+                        &[entry, (std::path::Path::new(path), b"bad")],
+                        b"SKILL.md"
+                    )
+                    .is_err()
+            );
+        }
+        let deep = format!("{}file", "nested/".repeat(33));
+        assert!(
+            directory
+                .merge_manifest_files(
+                    b"test",
+                    &[entry, (std::path::Path::new(&deep), b"bad")],
+                    b"SKILL.md"
+                )
+                .is_err()
+        );
+        assert!(
+            directory
+                .merge_manifest_files(b"test", &vec![entry; 10_001], b"SKILL.md")
+                .is_err()
+        );
+        assert!(
+            directory
+                .merge_manifest_files(b"test", &[entry, entry], b"SKILL.md")
+                .is_err()
+        );
+        assert!(
+            directory
+                .merge_manifest_files(b"../escape", &[entry], b"SKILL.md")
+                .is_err()
+        );
+        assert!(
+            directory
+                .merge_manifest_files(
+                    b"test",
+                    &[
+                        entry,
+                        (std::path::Path::new("refs"), b"file"),
+                        (std::path::Path::new("refs/child"), b"nested")
+                    ],
+                    b"SKILL.md"
+                )
+                .is_err()
+        );
+        assert!(!home.path().join("skills/test").exists());
+        std::fs::create_dir_all(home.path().join("skills/test")).unwrap();
+        std::fs::write(home.path().join("skills/test/operator.txt"), "KEEP").unwrap();
+        let files = [
+            entry,
+            (
+                std::path::Path::new("references/nested/guide.md"),
+                b"guide".as_slice(),
+            ),
+        ];
+        assert_eq!(
+            directory
+                .merge_manifest_files(b"test", &files, b"SKILL.md")
+                .unwrap(),
+            (false, true)
+        );
+        assert_eq!(
+            directory
+                .merge_manifest_files(b"test", &files, b"SKILL.md")
+                .unwrap(),
+            (true, false)
+        );
+        assert_eq!(
+            std::fs::read_to_string(home.path().join("skills/test/operator.txt")).unwrap(),
+            "KEEP"
+        );
+        assert_eq!(
+            std::fs::read_to_string(home.path().join("skills/test/references/nested/guide.md"))
+                .unwrap(),
+            "guide"
+        );
+    }
 
     #[test]
     fn skill_doctor_surfaces_retrieval_key_findings() {

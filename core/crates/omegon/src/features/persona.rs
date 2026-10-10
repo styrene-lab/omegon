@@ -359,15 +359,14 @@ impl Feature for PersonaFeature {
         let prompt = self
             .registry
             .lock()
-            .build_system_prompt_disclosed(&self.workspace_root, Some(signals.user_prompt));
-        if prompt.is_empty() {
-            return None;
-        }
+            .build_augmentation_disclosed(&self.workspace_root, Some(signals.user_prompt));
+        // Keep the existing replacement key, including an empty replacement when
+        // cleared. Returning None would retain the old combined layer indefinitely.
 
         Some(omegon_traits::ContextInjection {
             source: "persona".into(),
             content: prompt,
-            priority: 85,        // Just below Lex Imperialis (embedded at compile time)
+            priority: 85, // Optional augmentation; host policy is mandatory base input
             ttl_turns: u32::MAX, // Never expires — always active while persona is on
         })
     }
@@ -405,7 +404,7 @@ mod tests {
     use super::*;
 
     fn test_registry() -> AugmentRegistry {
-        AugmentRegistry::new("Test Lex Imperialis.".into())
+        AugmentRegistry::new()
     }
 
     /// Build signals carrying an operator prompt; other fields are inert here.
@@ -459,7 +458,7 @@ mod tests {
 
         let mut registry = test_registry();
         registry.load_skills_from_dirs_for_test(&[skills_dir]);
-        let unfiltered = registry.build_system_prompt();
+        let unfiltered = registry.build_augmentation();
         let feature = PersonaFeature::with_workspace_root(
             SharedAugmentRegistry::new(registry),
             workspace.clone(),
@@ -577,11 +576,11 @@ mod tests {
             turn_number: 1,
             context_budget_tokens: 10000,
         };
-        // Lex Imperialis is always present, so context should be non-empty
-        let ctx = feature.provide_context(&signals);
+        let ctx = feature.provide_context(&signals).unwrap();
+        assert_eq!(ctx.source, "persona");
         assert!(
-            ctx.is_some(),
-            "should inject Lex Imperialis even with no persona"
+            ctx.content.is_empty(),
+            "clear any previous combined injection"
         );
     }
 
@@ -613,11 +612,71 @@ mod tests {
             ctx.content
         );
         assert!(
-            ctx.content.contains("Lex Imperialis"),
-            "should still include Lex: {}",
+            !ctx.content.contains(crate::prompt::CORE_SOURCE),
+            "augmentation must not contain host policy: {}",
             ctx.content
         );
         assert_eq!(ctx.priority, 85);
+    }
+
+    #[test]
+    fn switch_and_clear_replace_legacy_combined_layer_without_expiring_the_host() {
+        use crate::plugins::registry::{LoadedPersona, LoadedTone, ToneIntensity};
+        let dir = tempfile::tempdir().unwrap();
+        let registry = SharedAugmentRegistry::new(test_registry());
+        let feature =
+            PersonaFeature::with_workspace_root(registry.clone(), dir.path().to_path_buf());
+        let base =
+            crate::prompt::assemble_host_prompt(dir.path(), &dir.path().join("global.md")).unwrap();
+        let mut context = crate::context::ContextManager::new(base.prompt, vec![]);
+        context.inject_external(vec![omegon_traits::ContextInjection {
+            source: "persona".into(),
+            content: "STALE COMBINED LEX".into(),
+            priority: 85,
+            ttl_turns: u32::MAX,
+        }]);
+        let conversation = crate::conversation::ConversationState::new();
+        let signals = signals_with_prompt("continue");
+        registry.lock().activate_tone(LoadedTone {
+            id: "tone".into(),
+            name: "Tone".into(),
+            directive: "TONE MARKER".into(),
+            exemplars: vec![],
+            intensity: ToneIntensity::default(),
+        });
+        for name in ["FIRST PERSONA", "SECOND PERSONA"] {
+            registry.lock().activate_persona(LoadedPersona {
+                id: name.into(),
+                name: name.into(),
+                directive: name.into(),
+                mind_facts: vec![],
+                activated_skills: vec![],
+                disabled_tools: vec![],
+                badge: None,
+            });
+            context.inject_external(vec![feature.provide_context(&signals).unwrap()]);
+            let prompt = context.build_system_prompt("continue", &conversation);
+            assert!(!prompt.contains("STALE COMBINED LEX"));
+            assert!(prompt.contains(name));
+            if name == "SECOND PERSONA" {
+                assert!(!prompt.contains("FIRST PERSONA"));
+            }
+            assert!(prompt.find("TONE MARKER").unwrap() < prompt.find(name).unwrap());
+            assert_eq!(prompt.matches(crate::prompt::CORE_SOURCE).count(), 1);
+        }
+        registry.lock().deactivate_persona();
+        registry.lock().deactivate_tone();
+        context.inject_external(vec![feature.provide_context(&signals).unwrap()]);
+        let prompt = context.build_system_prompt("continue", &conversation);
+        for stale in [
+            "STALE COMBINED LEX",
+            "FIRST PERSONA",
+            "SECOND PERSONA",
+            "TONE MARKER",
+        ] {
+            assert!(!prompt.contains(stale));
+        }
+        assert_eq!(prompt.matches(crate::prompt::CORE_SOURCE).count(), 1);
     }
 
     #[test]

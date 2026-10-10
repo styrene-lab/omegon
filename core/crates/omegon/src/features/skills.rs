@@ -179,10 +179,19 @@ impl Feature for SkillsFeature {
                     .find(|skill| skill.name == name)
                     .ok_or_else(|| anyhow::anyhow!("active skill '{name}' not found"))?;
                 let (manifest, body) = omegon_skills::parse_skill_file(&snapshot.content);
+                // Bundled snapshots name SKILL.md; guarded user/project snapshots
+                // name its directory. Keep historical path metadata and expose an
+                // unambiguous model-visible base for supporting references.
+                let base = if snapshot.source == "bundled" {
+                    snapshot.path.parent().unwrap_or(&snapshot.path)
+                } else {
+                    &snapshot.path
+                };
                 let mut out = format!(
-                    "# Skill: {}\n\nPath: {}\n\nDescription: {}\n",
+                    "# Skill: {}\n\nPath: {}\n\nBase directory: {}\n\nDescription: {}\n",
                     manifest.name,
                     snapshot.path.display(),
+                    base.display(),
                     manifest.description
                 );
                 out.push_str(&format!("Source: {}\n", snapshot.source));
@@ -449,9 +458,7 @@ mod tests {
 
     fn feature() -> SkillsFeature {
         SkillsFeature::new(
-            SharedAugmentRegistry::new(crate::plugins::registry::AugmentRegistry::new(
-                "Test Lex Imperialis.".into(),
-            )),
+            SharedAugmentRegistry::new(crate::plugins::registry::AugmentRegistry::new()),
             std::env::current_dir().unwrap(),
             crate::paths::omegon_home().unwrap(),
             Vec::new(),
@@ -489,9 +496,7 @@ mod tests {
             )
             .unwrap();
         }
-        let registry = SharedAugmentRegistry::new(crate::plugins::registry::AugmentRegistry::new(
-            "Test Lex Imperialis.".into(),
-        ));
+        let registry = SharedAugmentRegistry::new(crate::plugins::registry::AugmentRegistry::new());
         let feature = SkillsFeature::new(
             registry.clone(),
             project.path().to_path_buf(),
@@ -503,8 +508,8 @@ mod tests {
 
         {
             let registry = registry.lock();
-            let prompt = registry.build_system_prompt();
-            let disclosed = registry.build_system_prompt_disclosed(project.path(), None);
+            let prompt = registry.build_augmentation();
+            let disclosed = registry.build_augmentation_disclosed(project.path(), None);
             assert_eq!(registry.skill_count(), 1);
             assert!(prompt.contains("ALLOWED_MARKER"));
             assert!(!prompt.contains("EXCLUDED_MARKER"));
@@ -531,6 +536,224 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(listed.details.as_array().unwrap().len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn scoped_extension_skills_are_discoverable_retrievable_and_triggered_without_granting_tools()
+     {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        // Filename signals alone must not adopt extension authoring.
+        std::fs::write(project.path().join("manifest.toml"), "[extension]").unwrap();
+        let registry = SharedAugmentRegistry::new(crate::plugins::registry::AugmentRegistry::new());
+        let feature = SkillsFeature::new(
+            registry.clone(),
+            project.path().to_path_buf(),
+            home.path().to_path_buf(),
+            vec![],
+        );
+        feature.reload_skills();
+        let listed = feature
+            .execute(
+                "skills_list",
+                "inventory",
+                json!({}),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        for existing in ["likec4", "code-act"] {
+            assert!(
+                listed
+                    .details
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|entry| entry["name"] == existing),
+                "new extension guidance must not displace {existing}"
+            );
+        }
+        for (name, trigger, marker, reference) in [
+            (
+                "scry",
+                "Generate an image with Scry",
+                "Do not guess",
+                "references/usage.md",
+            ),
+            (
+                "extension-authoring",
+                "Debug the Omegon extension SDK",
+                "Do not recreate",
+                "references/authoring.md",
+            ),
+        ] {
+            assert!(
+                listed
+                    .details
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|entry| entry["name"] == name && entry["source"] == "bundled")
+            );
+            let quiet = registry
+                .lock()
+                .build_augmentation_disclosed(project.path(), Some("make a small text edit"));
+            assert!(
+                quiet.contains(&format!("- {name} —")),
+                "deferred skill must remain discoverable"
+            );
+            assert!(!quiet.contains(marker));
+            let triggered = registry
+                .lock()
+                .build_augmentation_disclosed(project.path(), Some(trigger));
+            assert!(triggered.contains(marker));
+            let retrieved = feature
+                .execute(
+                    "skills_get",
+                    "retrieve",
+                    json!({"name":name}),
+                    tokio_util::sync::CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            let text = retrieved
+                .content
+                .iter()
+                .filter_map(|block| block.as_text())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains(marker));
+            assert_eq!(retrieved.details["source"], "bundled");
+            let path = std::path::Path::new(retrieved.details["path"].as_str().unwrap());
+            assert!(text.contains(&format!(
+                "Base directory: {}",
+                path.parent().unwrap().display()
+            )));
+            let body = std::fs::read_to_string(path.parent().unwrap().join(reference)).unwrap();
+            if name == "scry" {
+                for essential in [
+                    "list_models",
+                    "Do not guess model names",
+                    "LoRAs are applied in order",
+                    "Report the output path",
+                ] {
+                    assert!(body.contains(essential));
+                }
+                assert!(text.contains("actual Scry"));
+                assert!(text.contains("does not grant tools"));
+            } else {
+                assert!(body.contains("execute_tool"));
+                assert!(body.contains("not sandboxed"));
+            }
+        }
+        assert!(
+            feature
+                .tools()
+                .iter()
+                .all(|tool| tool.name != "generate" && tool.name != "vox_reply")
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn bundled_install_repairs_supporting_assets_with_unchanged_entries_and_user_precedence()
+    {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let pack = crate::content_pack::boot_pack().unwrap();
+        let note = home.path().join("skills/scry/operator-notes.txt");
+        std::fs::create_dir_all(note.parent().unwrap()).unwrap();
+        std::fs::write(&note, "USER WORK").unwrap();
+        let fresh = crate::skills::install_bundled_skills_at(home.path(), &pack).unwrap();
+        assert!(fresh.installed >= 2);
+        assert_eq!(fresh.updated, 0);
+        for asset in pack.assets("skill").filter(|asset| {
+            std::path::Path::new(&asset.manifest.path)
+                .components()
+                .count()
+                >= 3
+        }) {
+            assert_eq!(
+                std::fs::read(home.path().join(&asset.manifest.path)).unwrap(),
+                asset.bytes.as_ref()
+            );
+        }
+        let registry = SharedAugmentRegistry::new(crate::plugins::registry::AugmentRegistry::new());
+        let feature = SkillsFeature::new(
+            registry,
+            project.path().to_path_buf(),
+            home.path().to_path_buf(),
+            vec!["scry".into(), "extension-authoring".into()],
+        );
+        for repair in [false, true] {
+            if repair {
+                std::fs::remove_file(home.path().join("skills/scry/references/usage.md")).unwrap();
+                std::fs::write(
+                    home.path()
+                        .join("skills/extension-authoring/references/authoring.md"),
+                    "STALE REFERENCE",
+                )
+                .unwrap();
+                // Entries already match; supporting assets must still be compared.
+                for name in ["scry", "extension-authoring"] {
+                    let relative = format!("skills/{name}/SKILL.md");
+                    assert_eq!(
+                        std::fs::read_to_string(home.path().join(&relative)).unwrap(),
+                        pack.text(&relative).unwrap()
+                    );
+                }
+                let summary = crate::skills::install_bundled_skills_at(home.path(), &pack).unwrap();
+                assert_eq!(summary.installed, 0);
+                assert_eq!(
+                    summary.updated, 2,
+                    "support-only repairs count as updated skills"
+                );
+            }
+            feature.reload_skills();
+            for (name, reference) in [
+                ("scry", "usage.md"),
+                ("extension-authoring", "authoring.md"),
+            ] {
+                let result = feature
+                    .execute(
+                        "skills_get",
+                        "installed-reference",
+                        json!({"name":name}),
+                        tokio_util::sync::CancellationToken::new(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    result.details["source"], "user",
+                    "installed scope must actually override bundled"
+                );
+                let path = std::path::Path::new(result.details["path"].as_str().unwrap());
+                assert!(path.starts_with(home.path()));
+                let text = result
+                    .content
+                    .iter()
+                    .filter_map(|block| block.as_text())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                assert!(text.contains(&format!("Path: {}", path.display())));
+                assert!(text.contains(&format!("references/{reference}")));
+                let base = std::path::Path::new(
+                    text.lines()
+                        .find_map(|line| line.strip_prefix("Base directory: "))
+                        .expect("model-visible reference base"),
+                );
+                assert_eq!(base, home.path().join("skills").join(name));
+                assert_eq!(
+                    std::fs::read_to_string(base.join("references").join(reference)).unwrap(),
+                    pack.text(&format!("skills/{name}/references/{reference}"))
+                        .unwrap()
+                );
+            }
+        }
+        let unchanged = crate::skills::install_bundled_skills_at(home.path(), &pack).unwrap();
+        assert_eq!((unchanged.installed, unchanged.updated), (0, 0));
+        assert_eq!(std::fs::read_to_string(&note).unwrap(), "USER WORK");
     }
 
     #[cfg(unix)]

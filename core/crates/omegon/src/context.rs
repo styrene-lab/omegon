@@ -32,6 +32,8 @@ pub struct ContextManager {
     embed_service: Option<std::sync::Arc<dyn omegon_memory::EmbeddingService>>,
     /// Cached query embedding from the last prepare_embeddings() call.
     query_embedding: Option<Vec<f32>>,
+    subagent_policy: crate::autonomy::SubagentPolicy,
+    subagent_settings: Option<crate::settings::SharedSettings>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -69,6 +71,8 @@ impl ContextManager {
             last_prompt_telemetry: PromptTelemetry::default(),
             embed_service: None,
             query_embedding: None,
+            subagent_policy: crate::autonomy::active_subagent_policy(),
+            subagent_settings: None,
         }
     }
 
@@ -133,6 +137,38 @@ impl ContextManager {
         let mut policy = self.shadow.selector_policy();
         policy.model_window = tokens;
         self.shadow.set_selector_policy(policy);
+    }
+
+    pub(crate) fn set_subagent_policy(&mut self, policy: crate::autonomy::SubagentPolicy) {
+        self.subagent_policy = policy;
+    }
+
+    pub(crate) fn bind_subagent_settings(
+        &mut self,
+        settings: Option<crate::settings::SharedSettings>,
+    ) {
+        self.subagent_settings = settings;
+    }
+
+    /// Replace request-local capability facts from the exact exposed schema set.
+    /// Mandatory input participates in selection, accounting and capture. This
+    /// snapshot is replaced on every composition, not aged as advisory context.
+    pub(crate) fn set_request_tools(&mut self, tools: &[omegon_traits::ToolDefinition]) {
+        let policy = self
+            .subagent_settings
+            .as_ref()
+            .and_then(|settings| {
+                settings.lock().ok().map(|settings| {
+                    crate::autonomy::subagent_policy_for_automation(settings.automation_level)
+                })
+            })
+            .unwrap_or_else(|| self.subagent_policy.clone());
+        self.inject_external(vec![ContextInjection {
+            source: "request-tool-surface".into(),
+            content: crate::prompt::request_tool_context(tools, &policy),
+            priority: 200,
+            ttl_turns: u32::MAX,
+        }]);
     }
 
     /// Update the full selector policy for turn assembly.
@@ -209,10 +245,6 @@ impl ContextManager {
             .filter_map(|provider| provider.provide_context(&signals))
             .collect();
         self.inject_external(injections);
-
-        // Inject tool-group and file-type guidance based on recent activity
-        self.inject_tool_group_context();
-        self.inject_file_type_context();
 
         // Inject session HUD (high priority, always present, refreshed each turn)
         let hud = self.build_session_hud(conversation);
@@ -354,141 +386,6 @@ impl ContextManager {
                     ttl_turns: 1,
                 },
             });
-        }
-    }
-
-    /// Inject tool-group guidelines based on which tools were recently called.
-    /// Only injects once per group — removed after TTL expires.
-    fn inject_tool_group_context(&mut self) {
-        let already_injected: std::collections::HashSet<String> = self
-            .active_injections
-            .iter()
-            .filter(|a| a.injection.source.starts_with("tool-group:"))
-            .map(|a| a.injection.source.clone())
-            .collect();
-
-        for tool in self.recent_tools.iter() {
-            let (group, guidance) = match tool.as_str() {
-                // Memory tools — inject memory best practices
-                "memory_store" | "memory_recall" | "memory_query" | "memory_supersede"
-                | "memory_archive" | "memory_focus" | "memory_episodes" | "memory_connect" => (
-                    "memory",
-                    "Memory guidelines:\n\
-                     - Use memory_recall(query) for targeted retrieval when available.\n\
-                     - Use broad memory inventory tools only when they are exposed and the task needs them.\n\
-                     - Store conclusions, not investigation steps. Current state, not transitions.\n\
-                     - Before storing, check if an existing fact covers it — use memory_supersede when available.\n\
-                     - Prefer pointer facts ('X does Y. See path/to/file') over inlining details",
-                ),
-
-                // Design tree — inject lifecycle guidance
-                "design_tree" | "design_tree_update" => (
-                    "design",
-                    "Design tree guidelines:\n\
-                     - Use 'node' to read full content. Use 'frontier' to find open questions.\n\
-                     - Use 'branch' to spawn child nodes from open questions.\n\
-                     - Transition: seed → exploring → resolved → decided → implementing.\n\
-                     - Use 'focus' to inject a node's context into the conversation.",
-                ),
-
-                // Cleave — inject decomposition guidance
-                "cleave_assess" | "cleave_run" => (
-                    "cleave",
-                    "Cleave guidelines:\n\
-                     - cleave_assess determines complexity. Score ≥ 2.0 suggests decomposition.\n\
-                     - When using OpenSpec, pass the current OpenSpec change path only if the cleave API exposes that parameter.\n\
-                     - After cleave_run, reconcile tasks.md and register task progress when OpenSpec lifecycle tools are available.",
-                ),
-
-                // OpenSpec — inject lifecycle guidance
-                "openspec_manage" => (
-                    "openspec",
-                    "OpenSpec guidelines:\n\
-                     - The lifecycle is propose → add_spec → write tasks.md → register_tasks → register_test_file → cleave or implement → assess spec → archive.\n\
-                     - Specs define what must be true BEFORE code is written.\n\
-                     - Editing tasks.md alone does not advance lifecycle state; call register_tasks after task changes when the lifecycle tool is available.\n\
-                     - Register test files before implementation so the FSM can enter implementing.\n\
-                     - For tracked changes, bind to a decided design node when design-tree tools are available.",
-                ),
-
-                // Local inference — inject model guidance
-                "ask_local_model" | "list_local_models" | "manage_ollama" => (
-                    "local-inference",
-                    "Local inference guidelines:\n\
-                     - Include ALL necessary context in prompts — local models can't see our conversation.\n\
-                     - Use manage_ollama(start) if Ollama isn't running.\n\
-                     - Use for boilerplate, summaries, transforms — not accuracy-critical work.",
-                ),
-
-                _ => continue,
-            };
-
-            let source_key = format!("tool-group:{group}");
-            if already_injected.contains(&source_key) {
-                continue;
-            }
-
-            self.active_injections.push(ActiveInjection {
-                remaining_turns: 20,
-                injection: ContextInjection {
-                    source: source_key,
-                    content: format!("[{guidance}]"),
-                    priority: 80, // Between file-type (50) and HUD (200)
-                    ttl_turns: 20,
-                },
-            });
-        }
-    }
-
-    /// Inject language-specific guidance based on recently-touched file types.
-    /// Only injects once per file type per session (avoids repetition).
-    fn inject_file_type_context(&mut self) {
-        // Check if we already have a file-type injection active
-        let already_injected: std::collections::HashSet<String> = self
-            .active_injections
-            .iter()
-            .filter(|a| a.injection.source.starts_with("file-type:"))
-            .map(|a| a.injection.source.clone())
-            .collect();
-
-        for file in self.recent_files.iter().rev().take(5) {
-            let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("");
-            let source_key = format!("file-type:{ext}");
-
-            if already_injected.contains(&source_key) {
-                continue;
-            }
-
-            let guidance = match ext {
-                "rs" => Some(
-                    "Rust: use `cargo check` for type checking, `cargo clippy` for lints. Prefer `impl` blocks over free functions. Use `?` for error propagation. Tests go in `#[cfg(test)] mod tests` at the bottom of the file.",
-                ),
-                "ts" | "tsx" => Some(
-                    "TypeScript: use `npx tsc --noEmit` for type checking. Prefer strict types over `any`. Use `node:test` for testing. ESM imports.",
-                ),
-                "py" => Some(
-                    "Python: use `ruff check` for linting, `mypy` for type checking, `pytest` for tests. Prefer type hints. Use `pathlib` over `os.path`.",
-                ),
-                "go" => Some(
-                    "Go: use `go vet` for checking, `go test ./...` for tests. Exported names start with uppercase. Error handling via returned `error` values.",
-                ),
-                "toml" if file.file_name().is_some_and(|n| n == "Cargo.toml") => Some(
-                    "Cargo.toml: Rust workspace/package manifest. After dependency changes, run `cargo check`.",
-                ),
-                _ => None,
-            };
-
-            if let Some(text) = guidance {
-                self.active_injections.push(ActiveInjection {
-                    remaining_turns: 16, // Persist for 16 turns — static hints don't change
-                    injection: ContextInjection {
-                        source: source_key,
-                        content: format!("[Language context: {text}]"),
-                        priority: 50, // Lower than HUD/intent
-                        ttl_turns: 16,
-                    },
-                });
-            }
         }
     }
 
@@ -788,9 +685,8 @@ mod tests {
     }
 
     #[test]
-    fn tool_group_injection_on_memory_use() {
+    fn tool_use_does_not_adopt_workflows_or_inject_procedure_bundles() {
         let mut cm = ContextManager::new("base".into(), vec![]);
-        // Before calling memory tool — no memory guidelines
         let conv = ConversationState::new();
         let prompt = cm.build_system_prompt("test", &conv);
         assert!(
@@ -798,21 +694,27 @@ mod tests {
             "should not inject before tool use"
         );
 
-        // Record a memory tool call
-        cm.record_tool_call("memory_store");
+        for tool in [
+            "memory_store",
+            "design_tree",
+            "openspec_manage",
+            "cleave_run",
+            "ask_local_model",
+        ] {
+            cm.record_tool_call(tool);
+        }
         let prompt = cm.build_system_prompt("test", &conv);
+        assert!(!prompt.contains("guidelines:"));
+        assert!(prompt.contains("[Session:"));
         assert!(
-            prompt.contains("Memory guidelines"),
-            "should inject after memory tool use"
-        );
-        assert!(
-            prompt.contains("memory_recall"),
-            "should include recall guidance"
+            cm.active_injections
+                .iter()
+                .all(|active| !active.injection.source.starts_with("tool-group:"))
         );
     }
 
     #[test]
-    fn tool_group_injection_deduplicates() {
+    fn repeated_tool_use_keeps_signals_without_recreating_removed_context() {
         let mut cm = ContextManager::new("base".into(), vec![]);
         let conv = ConversationState::new();
 
@@ -823,50 +725,80 @@ mod tests {
         cm.record_tool_call("memory_query");
         let prompt = cm.build_system_prompt("test", &conv);
 
-        // Should only appear once despite 3 memory tool calls
+        assert_eq!(cm.recent_tools.len(), 3);
         assert_eq!(
             prompt.matches("Memory guidelines").count(),
-            1,
-            "memory guidelines should appear exactly once"
+            0,
+            "tool contracts own guidance, not activity-triggered bundles"
         );
+        assert_eq!(cm.last_prompt_telemetry().tool_guidance_chars, 0);
     }
 
     #[test]
-    fn tool_group_injection_expires() {
+    fn explicitly_admitted_workflow_guidance_retains_ttl_and_telemetry() {
         let mut cm = ContextManager::new("base".into(), vec![]);
         let mut conv = ConversationState::new();
 
-        cm.record_tool_call("memory_store");
+        cm.inject_external(vec![ContextInjection {
+            source: "tool-group:adopted-workflow".into(),
+            content: "Adopted workflow marker".into(),
+            priority: 190,
+            ttl_turns: 2,
+        }]);
         let prompt = cm.build_system_prompt("test", &conv);
-        assert!(prompt.contains("Memory guidelines"));
+        assert!(prompt.contains("Adopted workflow marker"));
+        assert_eq!(
+            cm.last_prompt_telemetry().tool_guidance_chars,
+            "Adopted workflow marker".len()
+        );
 
-        // Clear recent tools — simulates the agent not calling memory tools anymore
-        cm.recent_tools.clear();
-
-        // Advance 11 turns (TTL is 10) — each build_system_prompt decrements remaining_turns
-        for i in 1..=11 {
+        for i in 1..=3 {
             conv.intent.stats.turns = i;
             let _ = cm.build_system_prompt("test", &conv);
         }
 
         let prompt = cm.build_system_prompt("test", &conv);
         assert!(
-            !prompt.contains("Memory guidelines"),
+            !prompt.contains("Adopted workflow marker"),
             "should expire after TTL"
         );
     }
 
     #[test]
-    fn file_type_injection_on_rust_file() {
-        let mut cm = ContextManager::new("base".into(), vec![]);
+    fn file_extensions_do_not_override_project_language_and_test_policy() {
+        let mut cm = ContextManager::new(
+            "Project: use the repository's custom test runner.".into(),
+            vec![],
+        );
         let conv = ConversationState::new();
 
-        cm.record_file_access(PathBuf::from("src/main.rs"));
+        for file in [
+            "main.rs",
+            "main.ts",
+            "view.tsx",
+            "main.py",
+            "main.go",
+            "Cargo.toml",
+        ] {
+            cm.record_file_access(PathBuf::from(file));
+        }
         let prompt = cm.build_system_prompt("test", &conv);
         assert!(
-            prompt.contains("cargo check"),
-            "should inject Rust guidance for .rs files"
+            prompt.contains("repository's custom test runner"),
+            "project policy must remain intact"
         );
+        for instruction in [
+            "cargo check",
+            "node:test",
+            "npx tsc",
+            "pytest",
+            "go vet",
+            "Language context:",
+        ] {
+            assert!(!prompt.contains(instruction));
+        }
+        assert_eq!(cm.recent_files.len(), 6);
+        assert_eq!(cm.last_prompt_telemetry().file_guidance_chars, 0);
     }
 
     #[test]

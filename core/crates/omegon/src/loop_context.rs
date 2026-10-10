@@ -301,6 +301,7 @@ pub(crate) fn compose_with_manager(
     tools: &[omegon_traits::ToolDefinition],
     context_window: usize,
 ) -> LoopContextAssembly {
+    manager.set_request_tools(tools);
     let system_prompt = manager.build_system_prompt(conversation.last_user_prompt(), conversation);
     let messages = conversation.build_llm_view();
     let telemetry = manager.last_prompt_telemetry();
