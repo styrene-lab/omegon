@@ -70,8 +70,10 @@ test('public docs explain content-pack packaging, trust, and boot generation', (
   assert.match(skills, /Project content overrides user content/);
   assert.match(plugins, /pins one content generation at boot/);
   assert.match(plugins, /never grants prompt, tool, effect, executable, or path authority/);
-  assert.match(plugins, /retains its six constitutional host axioms/);
-  assert.match(plugins, /disables model-driven session compaction locally/);
+  assert.match(plugins, /retains its host-owned common policy/);
+  assert.match(plugins, /separate host-owned common policy/);
+  assert.match(plugins, /inventoried supporting references/);
+  assert.match(plugins, /model-driven session compaction is\s+disabled locally/);
 });
 
 test('public optional-domain docs state local absence behavior', () => {

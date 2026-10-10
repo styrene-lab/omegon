@@ -50,7 +50,7 @@ import Docs from "../../layouts/Docs.astro";
   </p>
   <ul>
     <li>Loading and validating persona definitions</li>
-    <li>Merging persona system prompts with the base Lex Imperialis (core system prompt)</li>
+    <li>Composing skill, tone, and persona augmentation after the separate host-owned common policy</li>
     <li>Routing memory operations to the correct namespace</li>
     <li>Showing persona/tone state changes as toast notifications</li>
   </ul>
@@ -75,8 +75,10 @@ import Docs from "../../layouts/Docs.astro";
     The process pins one content generation at boot. Replacing the pack changes new processes
     without rebuilding Omegon and cannot alter active sessions. Pack residency never activates
     a persona or tone and never grants prompt, tool, effect, executable, or path authority.
-    If the pack is unavailable, Omegon retains its six constitutional host axioms, omits optional
-    extension and tool guidance, and disables model-driven session compaction locally.
+    If the pack is unavailable, Omegon retains its host-owned common policy and admitted tool
+    contracts. Optional skill guidance is unavailable, and model-driven session compaction is
+    disabled locally. Bundled skill installation includes its inventoried supporting references;
+    installation does not grant execution or trust.
   </p>
   <pre><code>{`{
   "permissions": {

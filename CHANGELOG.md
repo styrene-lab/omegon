@@ -18,6 +18,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Following approval of the unified-system-prompt proposal, common agent assembly uses one versioned host core across model grades and resource postures. Global instructions load completely with source labels and actionable read errors; persona augmentation no longer duplicates host policy and clears stale content on deactivation. Tool and subagent facts follow each request's exposed schemas. Procedures now live in scoped tool contracts, skills, and Vox ingress rather than automatic workflow/language bundles.
+
+- The unified-system-prompt preservation ledger and compatibility decisions record the accepted implementation and bounded behavioral evidence. Native lifecycle closure remains separate.
+
 - The CI Rust build job has a 60-minute budget for cold debug/feature checks and the separate task-capsule release build. The locked toolchain and strict checks are unchanged.
 
 - Bundled LikeC4 skill metadata now declares intent-based activation and architecture-modeling triggers, keeping the shipped content pack valid.
